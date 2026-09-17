@@ -72,6 +72,15 @@ bash scripts/termux-setup.sh
 也可：`bash termux-install.sh`  
 完整已装时脚本只问一次：`1` 重装环境 / `2` 重装框架。不要用 GitCode `raw` 的 `curl | bash`。
 
+若提示 `Unable to read current working directory`（在仓内删掉自己导致），先离开目录再装：
+
+```bash
+cd ~
+rm -rf ~/Fengyun-Nexus
+git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
+bash ~/Fengyun-Nexus/scripts/termux-setup.sh
+```
+
 浏览器打开：**http://127.0.0.1:8787/**  
 初始账号：`console` / `console`（首次登录后请改成自己的账号密码）
 
