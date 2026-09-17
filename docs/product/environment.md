@@ -102,7 +102,7 @@ pnpm dev
 
 | 变量 | 是否必须 | 说明 |
 |------|----------|------|
-| `NEXUS_ENV` | 否 | `mobile` / `desktop` / `server`，默认 `desktop` |
+| `NEXUS_ENV` | 否 | `mobile` / `desktop` / `server` / `termux`，默认电脑为 `desktop`；Termux 自动 `termux` |
 | `NEXUS_ADMIN_PASSWORD` | 否 | 覆盖管理密码（调试用；正常请在控制台改） |
 | `NEXUS_REGISTRY_TOKEN` | 否 | 远程插件仓通行证 |
 | `NEXUS_LLM_API_KEY` | 否 | 模型密钥；不配则本地回声回复 |
@@ -138,10 +138,12 @@ python --version    # 可选，建议 3.10+
 
 | 项目 | 建议 |
 |------|------|
-| 操作系统 | Windows 10/11、macOS、常见 Linux 均可 |
+| 操作系统 | Windows 10/11、macOS、常见 Linux、**Android Termux** |
 | 磁盘 | 预留约 500MB+（依赖与构建产物） |
-| 端口 | 本机 `8787`（网关）、`5173`（Web 开发服）勿被占用 |
+| 端口 | 本机 `8787`（网关/内置控制台）、可选 `5173`（电脑完整 Web） |
 | 出网 | 首次 `pnpm install` 需访问 npm 源；接模型/远程插件时需对应网络 |
+
+Termux 专用步骤见 [各平台启动](start.md)。
 
 ---
 

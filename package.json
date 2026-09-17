@@ -7,6 +7,8 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "boot": "node scripts/boot.mjs",
+    "boot:lite": "node scripts/boot.mjs lite",
+    "boot:full": "node scripts/boot.mjs full",
     "dev": "pnpm --filter @fengyun/nexus-gateway dev",
     "dev:web": "pnpm --filter @fengyun/nexus-web dev",
     "dev:all": "pnpm -r --parallel --filter @fengyun/nexus-gateway --filter @fengyun/nexus-web dev",

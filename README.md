@@ -26,14 +26,16 @@
 **Fengyun Nexus（风云枢纽）** 把「框架内对话、消息通道、工作流、插件生态」收进同一套独立产品：手机端、电脑端、服务器三环境可用，管理端有独立密码，示例 / 基础 / 标准插件走开源平台远程仓安装与更新。
 
 > 运作说明（主中文）：[docs/product/how-it-works.md](docs/product/how-it-works.md) · [English](docs/product/how-it-works.en.md)  
-> 环境安装（主中文）：[docs/product/environment.md](docs/product/environment.md) · [English](docs/product/environment.en.md)
+> 环境安装（主中文）：[docs/product/environment.md](docs/product/environment.md) · [English](docs/product/environment.en.md)  
+> 各平台启动（主中文）：[docs/product/start.md](docs/product/start.md) · [English](docs/product/start.en.md)
 
 ## 环境要求（摘要）
 
 **必备：** Node.js ≥ 20、pnpm ≥ 9、Git、现代浏览器。  
-**可选：** Go（并发 worker）、Python 3.10+（UIA）、模型密钥、远程插件 Token。  
+**平台：** Windows / Linux / macOS / **手机 Termux**。  
+**可选：** Go、Python 3.10+、模型密钥、远程插件 Token。  
 
-完整清单、安装命令与验证步骤见 [环境要求与安装说明](docs/product/environment.md)。
+完整清单见 [环境要求](docs/product/environment.md)；启动见 [各平台启动](docs/product/start.md)。
 
 ## 你能做什么
 
@@ -46,30 +48,29 @@
 
 ## 启动方法（越简单越好）
 
-**方式 A（推荐，Windows）**  
-双击仓库根目录的 `启动.bat`。
+| 平台 | 做法 |
+|------|------|
+| Windows | 双击 `启动.bat` 或 `pnpm boot` |
+| Linux / macOS | `./boot.sh` 或 `pnpm boot` |
+| 手机 Termux | `./boot.sh`（自动精简） |
 
-**方式 B（一条命令）**
+详细对照与配置指令：[docs/product/start.md](docs/product/start.md)
 
-```bash
-cd Fengyun-Nexus
-pnpm boot
-```
-
-首次会自动 `install` + 编译内部包，然后同时拉起网关和控制台。  
-浏览器打开：**http://127.0.0.1:5173**
-
-管理端初始：`console` / `console`（首次登录后必须改用户名密码并重新登录）。  
-刷新页面登录态会失效；会话 12 小时；改密后全部会话失效。
-
-> 你的本地配置（密码、Token、`.env`、`*.local.json`）**不会上传到 GitCode**，已写入 `.gitignore`。
-
-切换姿态（可选）：
+**配置也用指令（不用手改文件）：**
 
 ```bash
-set NEXUS_ENV=mobile
-pnpm boot
+pnpm nexus setup
+pnpm nexus env termux
+pnpm nexus set llm-key sk-xxx
+pnpm nexus boot
 ```
+
+浏览器打开：**http://127.0.0.1:8787/**（内置控制台）。电脑完整模式另有 :5173。
+
+管理端初始：`console` / `console`（请尽快 `pnpm nexus setup`）。  
+刷新掉登录态；会话 12 小时；改密踢全部会话。
+
+> 本地配置**不会上传**到 GitCode。
 
 ## 远程插件源
 

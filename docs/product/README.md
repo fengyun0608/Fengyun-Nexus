@@ -1,5 +1,6 @@
 # 产品文档
 
+- [各平台启动](start.md) · [Start (English)](start.en.md)
 - [环境要求与安装](environment.md) · [Environment (English)](environment.en.md)
 - [如何运作（中文）](how-it-works.md) · [How it works (English)](how-it-works.en.md)
 - [规划总图](planning.md)

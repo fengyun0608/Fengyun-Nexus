@@ -1,4 +1,4 @@
-export type NexusEnvId = "mobile" | "desktop" | "server";
+export type NexusEnvId = "mobile" | "desktop" | "server" | "termux";
 
 export type MessageType = "text" | "image" | "event" | "tool";
 

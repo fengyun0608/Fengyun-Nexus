@@ -27,6 +27,48 @@ import { WorkflowRunner } from "@fengyun/nexus-workflow";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../../..");
 const ADMIN_LOCAL = join(ROOT, "configs/admin.local.json");
+const RUNTIME_LOCAL = join(ROOT, "configs/runtime.local.json");
+const PUBLIC_DIR = join(__dirname, "../public");
+
+function loadDotEnv(): void {
+  for (const name of [".env", ".env.local"]) {
+    const p = join(ROOT, name);
+    if (!existsSync(p)) continue;
+    for (const line of readFileSync(p, "utf8").split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t || t.startsWith("#")) continue;
+      const i = t.indexOf("=");
+      if (i <= 0) continue;
+      const key = t.slice(0, i).trim();
+      let val = t.slice(i + 1).trim();
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      if (process.env[key] === undefined) process.env[key] = val;
+    }
+  }
+}
+
+function isTermuxHost(): boolean {
+  return Boolean(
+    process.env.TERMUX_VERSION ||
+      process.env.PREFIX?.includes("com.termux") ||
+      process.env.NEXUS_FORCE_TERMUX === "1",
+  );
+}
+
+function loadRuntimeEnvHint(): string | undefined {
+  if (!existsSync(RUNTIME_LOCAL)) return undefined;
+  try {
+    const j = JSON.parse(readFileSync(RUNTIME_LOCAL, "utf8")) as { env?: string };
+    return j.env;
+  } catch {
+    return undefined;
+  }
+}
 
 function loadJson<T>(rel: string): T {
   const p = join(ROOT, rel);
@@ -34,8 +76,8 @@ function loadJson<T>(rel: string): T {
 }
 
 function resolveEnvId(): NexusEnvId {
-  const raw = (process.env.NEXUS_ENV ?? "desktop").toLowerCase();
-  if (raw === "mobile" || raw === "desktop" || raw === "server") return raw;
+  const raw = (process.env.NEXUS_ENV || loadRuntimeEnvHint() || (isTermuxHost() ? "termux" : "desktop")).toLowerCase();
+  if (raw === "mobile" || raw === "desktop" || raw === "server" || raw === "termux") return raw;
   return "desktop";
 }
 
@@ -84,6 +126,8 @@ function safeEqual(a: string, b: string): boolean {
   if (ba.length !== bb.length) return false;
   return timingSafeEqual(ba, bb);
 }
+
+loadDotEnv();
 
 const envId = resolveEnvId();
 const profile = loadEnvProfile(envId);
@@ -502,6 +546,13 @@ app.get("/v1/registry", (_req, res) => {
   });
 });
 
+if (existsSync(PUBLIC_DIR)) {
+  app.use(express.static(PUBLIC_DIR));
+  app.get(["/", "/console"], (_req, res) => {
+    res.sendFile(join(PUBLIC_DIR, "index.html"));
+  });
+}
+
 const port = Number(process.env.PORT ?? profile.gateway.port);
 const host = process.env.HOST ?? profile.gateway.host;
 
@@ -511,4 +562,5 @@ app.listen(port, host, () => {
     `[Nexus] admin user=${adminCfg.username} setupCompleted=${adminCfg.setupCompleted} sessionHours=${adminCfg.sessionHours}`,
   );
   console.log(`[Nexus] registry=${registry.baseUrl}`);
+  console.log(`[Nexus] 控制台(内置) http://127.0.0.1:${port}/`);
 });
