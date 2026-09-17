@@ -333,6 +333,10 @@ export default function App() {
     if (typeof window === "undefined") return true;
     return window.matchMedia("(min-width: 821px)").matches;
   });
+  const [narrowUi, setNarrowUi] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(max-width: 820px)").matches;
+  });
   const [rawPage, setRawPage] = useState(false);
   const [logsTab, setLogsTab] = useState<"gateway" | "messages">("gateway");
   const [pwConfirmStep, setPwConfirmStep] = useState(false);
@@ -561,6 +565,19 @@ export default function App() {
   useEffect(() => {
     if (panel !== "dashboard" && panel !== "database") setRawPage(false);
   }, [panel]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 820px)");
+    const apply = () => {
+      const narrow = mq.matches;
+      setNarrowUi(narrow);
+      // 切到窄屏时默认收起侧栏，避免遮罩挡住对话输入
+      if (narrow) setSidebarOpen(false);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
 
   useEffect(() => {
     if (!token || (panel !== "env-setup" && panel !== "env-tasks")) return;
@@ -1507,14 +1524,14 @@ export default function App() {
           {tr("menu")}
         </button>
       )}
-      {sidebarOpen && (
+      {narrowUi && sidebarOpen ? (
         <button
           type="button"
           className="sidebar-backdrop"
           aria-label={tr("collapse")}
           onClick={() => setSidebarOpen(false)}
         />
-      )}
+      ) : null}
 
       <main className="workspace">
         <div className="workspace-topbar">
@@ -1540,8 +1557,10 @@ export default function App() {
               <textarea
                 value={input}
                 placeholder={tr("typeMessage")}
-                disabled={false}
                 autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                rows={2}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.nativeEvent.isComposing || e.keyCode === 229) return;
@@ -1551,7 +1570,12 @@ export default function App() {
                   }
                 }}
               />
-              <button className="btn" disabled={busy || !input.trim()} onClick={() => void send()}>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy || !input.trim()}
+                onClick={() => void send()}
+              >
                 {busy ? tr("sending") : tr("send")}
               </button>
             </div>

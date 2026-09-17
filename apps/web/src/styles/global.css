@@ -154,9 +154,10 @@ code { color: var(--amber); font-size: 0.92em; }
   cursor: pointer;
 }
 
-/* 仅手机端侧栏打开时显示遮罩；桌面隐藏，避免挡住工作区 */
+/* 仅手机端侧栏打开时显示遮罩；桌面永不挡输入 */
 .sidebar-backdrop {
-  display: none;
+  display: none !important;
+  pointer-events: none;
 }
 
 .workspace {
@@ -168,6 +169,8 @@ code { color: var(--amber); font-size: 0.92em; }
   display: flex;
   flex-direction: column;
   gap: 10px;
+  position: relative;
+  z-index: 1;
 }
 .workspace-topbar {
   display: flex;
@@ -342,6 +345,8 @@ code { color: var(--amber); font-size: 0.92em; }
   border-top: 1px solid var(--line);
   flex-shrink: 0;
   background: rgba(18, 20, 16, 0.96);
+  position: relative;
+  z-index: 5;
 }
 .composer textarea, .form input, .form select, .form textarea {
   border-radius: 10px;
@@ -355,6 +360,9 @@ code { color: var(--amber); font-size: 0.92em; }
 .composer textarea {
   width: 100%;
   pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-user-select: text;
+  user-select: text;
 }
 .form select { min-height: auto; }
 
@@ -572,7 +580,8 @@ code { color: var(--amber); font-size: 0.92em; }
     display: none;
   }
   .sidebar-backdrop {
-    display: block;
+    display: block !important;
+    pointer-events: auto;
     position: fixed;
     inset: 0;
     z-index: 35;

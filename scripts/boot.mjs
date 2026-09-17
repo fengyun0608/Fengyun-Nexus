@@ -2,7 +2,7 @@
 /**
  * Fengyun Nexus boot — detect deps, build packages + Vite console, start gateway.
  */
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, cpSync, rmSync, statSync } from "node:fs";
 import { spawn, execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -182,13 +182,31 @@ async function ensureBuild() {
     bootLog("OK", ANSI.green, "packages ready");
   }
 
-  const webDist = join(root, "apps/web/dist/index.html");
-  if (!existsSync(webDist)) {
+  const webDistHtml = join(root, "apps/web/dist/index.html");
+  const webSrc = join(root, "apps/web/src/App.tsx");
+  let needWeb = !existsSync(webDistHtml);
+  if (!needWeb && existsSync(webSrc)) {
+    try {
+      needWeb = statSync(webSrc).mtimeMs > statSync(webDistHtml).mtimeMs;
+    } catch {
+      needWeb = true;
+    }
+  }
+  if (needWeb || process.env.NEXUS_FORCE_WEB_BUILD === "1") {
     bootLog("INFO", ANSI.cyan, "building Vite console…");
     await run(["--filter", "@fengyun/nexus-web", "build"]);
     bootLog("OK", ANSI.green, "console built → apps/web/dist");
   } else {
     bootLog("OK", ANSI.green, "Vite console dist ready");
+  }
+
+  // 同步到 gateway/public，避免启动时 dist 缺失仍用旧 public
+  const distDir = join(root, "apps/web/dist");
+  const pubDir = join(root, "apps/gateway/public");
+  if (existsSync(join(distDir, "index.html"))) {
+    rmSync(pubDir, { recursive: true, force: true });
+    cpSync(distDir, pubDir, { recursive: true });
+    bootLog("OK", ANSI.green, "console synced → apps/gateway/public");
   }
 }
 
