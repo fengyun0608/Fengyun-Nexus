@@ -50,7 +50,7 @@
 
 | 平台 | 做法 |
 |------|------|
-| Windows | 双击 `启动.bat` 或 `pnpm boot` |
+| Windows | 双击 `start.bat`（推荐）或 `启动.bat`，或 `pnpm boot` |
 | Linux / macOS | `./boot.sh` 或 `pnpm boot` |
 | 手机 Termux | `./boot.sh`（自动精简） |
 

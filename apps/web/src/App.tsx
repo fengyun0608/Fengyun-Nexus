@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-type Tab = "chat" | "admin" | "ecosystem";
+type Panel = "chat" | "adapters" | "config" | "admin" | "ecosystem" | "status";
 
 type Meta = {
   env: { id: string; label: string; features: Record<string, boolean>; web: { maxWidth: number } };
@@ -22,15 +22,64 @@ async function api<T>(path: string, init?: RequestInit & { token?: string }): Pr
   return data as T;
 }
 
+function TreeGroup({
+  title,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`tree-group ${open ? "open" : ""}`}>
+      <button type="button" className="tree-group-btn" onClick={onToggle}>
+        <span className="caret">{open ? "▾" : "▸"}</span>
+        <span>{title}</span>
+      </button>
+      {open && <div className="tree-children">{children}</div>}
+    </div>
+  );
+}
+
+function TreeItem({
+  label,
+  active,
+  onClick,
+  badge,
+}: {
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+  badge?: string;
+}) {
+  return (
+    <button type="button" className={`tree-item ${active ? "active" : ""}`} onClick={onClick}>
+      <span>{label}</span>
+      {badge ? <em>{badge}</em> : null}
+    </button>
+  );
+}
+
 export default function App() {
-  const [tab, setTab] = useState<Tab>("chat");
+  const [panel, setPanel] = useState<Panel>("chat");
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    workspace: true,
+    channels: true,
+    system: true,
+  });
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [channels, setChannels] = useState<string[]>([]);
+  const [plugins, setPlugins] = useState<Array<{ id: string; name: string }>>([]);
+  const [health, setHealth] = useState<Record<string, unknown> | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([
-    { role: "assistant", content: "欢迎来到 Fengyun Nexus（风云枢纽）。在这里对话、管理插件与通道。" },
+    { role: "assistant", content: "欢迎来到 Fengyun Nexus。左侧可展开目录：对话、适配器、配置、状态。" },
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  // Memory-only: page refresh clears login immediately.
   const [token, setToken] = useState("");
   const [mustReconfigure, setMustReconfigure] = useState(false);
   const [user, setUser] = useState("console");
@@ -45,22 +94,39 @@ export default function App() {
   const [newPass, setNewPass] = useState("");
   const [newPass2, setNewPass2] = useState("");
   const [info, setInfo] = useState("");
+  const [envPick, setEnvPick] = useState("desktop");
+
+  const toggleGroup = (key: string) =>
+    setOpenGroups((g) => ({ ...g, [key]: !g[key] }));
+
+  const refreshSide = async () => {
+    try {
+      const [m, ch, pl, h] = await Promise.all([
+        api<Meta>("/v1/meta"),
+        api<{ items: string[] }>("/v1/channels"),
+        api<{ items: Array<{ id: string; name: string }> }>("/v1/plugins"),
+        api<Record<string, unknown>>("/health"),
+      ]);
+      setMeta(m);
+      setChannels(ch.items ?? []);
+      setPlugins(pl.items ?? []);
+      setHealth(h);
+      setEnvPick(m.env.id);
+      document.body.classList.remove("env-mobile", "env-desktop", "env-server", "env-termux");
+      document.body.classList.add(`env-${m.env.id}`);
+    } catch {
+      /* ignore */
+    }
+  };
 
   useEffect(() => {
-    // Explicitly drop any legacy persisted token from older builds.
     try {
       localStorage.removeItem("nexus_admin_token");
       sessionStorage.removeItem("nexus_admin_token");
     } catch {
       /* ignore */
     }
-    api<Meta>("/v1/meta")
-      .then((m) => {
-        setMeta(m);
-        document.body.classList.remove("env-mobile", "env-desktop", "env-server");
-        document.body.classList.add(`env-${m.env.id}`);
-      })
-      .catch(() => undefined);
+    void refreshSide();
   }, []);
 
   useEffect(() => {
@@ -78,6 +144,7 @@ export default function App() {
 
   const envLabel = meta?.env.label ?? "…";
   const sessionHours = meta?.admin?.sessionHours ?? 12;
+  const cats = useMemo(() => Object.entries(meta?.registry.categories ?? {}), [meta]);
 
   const send = async () => {
     const content = input.trim();
@@ -112,20 +179,19 @@ export default function App() {
     setLoginErr("");
     setInfo("");
     try {
-      const res = await api<{
-        token: string;
-        mustReconfigure?: boolean;
-        message?: string;
-      }>("/v1/admin/login", {
-        method: "POST",
-        body: JSON.stringify({ username: user, password: pass }),
-      });
+      const res = await api<{ token: string; mustReconfigure?: boolean; message?: string }>(
+        "/v1/admin/login",
+        {
+          method: "POST",
+          body: JSON.stringify({ username: user, password: pass }),
+        },
+      );
       setPass("");
       setToken(res.token);
       setMustReconfigure(Boolean(res.mustReconfigure));
       if (res.mustReconfigure) {
-        setInfo(res.message || "请重新配置用户名与密码，完成后需再次登录。");
-        setTab("admin");
+        setInfo(res.message || "请重新配置用户名与密码。");
+        setPanel("admin");
       }
     } catch (e) {
       setLoginErr(e instanceof Error ? e.message : String(e));
@@ -148,7 +214,7 @@ export default function App() {
       setSetupUser("");
       setSetupPass("");
       setSetupPass2("");
-      clearSession(res.message || "配置完成，请使用新凭据重新登录。");
+      clearSession(res.message || "配置完成，请重新登录。");
       setUser("");
     } catch (e) {
       setLoginErr(e instanceof Error ? e.message : String(e));
@@ -179,34 +245,65 @@ export default function App() {
     }
   };
 
-  const cats = useMemo(() => Object.entries(meta?.registry.categories ?? {}), [meta]);
-
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand">
+    <div className={`shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
+      <aside className="sidebar">
+        <div className="sidebar-brand">
           <strong>Fengyun Nexus</strong>
-          <span>风云枢纽 · {envLabel}</span>
+          <span>{envLabel}</span>
         </div>
-        <nav className="nav">
-          <button className={tab === "chat" ? "active" : ""} onClick={() => setTab("chat")}>
-            对话
-          </button>
-          <button className={tab === "admin" ? "active" : ""} onClick={() => setTab("admin")}>
-            管理
-          </button>
-          <button className={tab === "ecosystem" ? "active" : ""} onClick={() => setTab("ecosystem")}>
-            生态
-          </button>
-        </nav>
-      </header>
 
-      <main className="main">
-        {tab === "chat" && (
+        <TreeGroup title="工作区" open={openGroups.workspace} onToggle={() => toggleGroup("workspace")}>
+          <TreeItem label="对话" active={panel === "chat"} onClick={() => setPanel("chat")} />
+          <TreeItem label="运行状态" active={panel === "status"} onClick={() => setPanel("status")} badge={health?.ok ? "OK" : "…"} />
+          <TreeItem label="配置" active={panel === "config"} onClick={() => setPanel("config")} />
+        </TreeGroup>
+
+        <TreeGroup title="适配器 / 通道" open={openGroups.channels} onToggle={() => toggleGroup("channels")}>
+          <TreeItem
+            label="全部适配器"
+            active={panel === "adapters"}
+            onClick={() => setPanel("adapters")}
+            badge={String(channels.length || 0)}
+          />
+          {channels.map((id) => (
+            <TreeItem
+              key={id}
+              label={id}
+              active={panel === "adapters"}
+              onClick={() => setPanel("adapters")}
+              badge="on"
+            />
+          ))}
+        </TreeGroup>
+
+        <TreeGroup title="系统" open={openGroups.system} onToggle={() => toggleGroup("system")}>
+          <TreeItem label="管理登录" active={panel === "admin"} onClick={() => setPanel("admin")} />
+          <TreeItem label="插件生态" active={panel === "ecosystem"} onClick={() => setPanel("ecosystem")} />
+        </TreeGroup>
+
+        <div className="sidebar-foot">
+          <button type="button" className="btn ghost mini" onClick={() => void refreshSide()}>
+            刷新状态
+          </button>
+          <button type="button" className="btn ghost mini" onClick={() => setSidebarOpen(false)}>
+            收起
+          </button>
+        </div>
+      </aside>
+
+      {!sidebarOpen && (
+        <button type="button" className="sidebar-reopen" onClick={() => setSidebarOpen(true)}>
+          目录
+        </button>
+      )}
+
+      <main className="workspace">
+        {panel === "chat" && (
           <section className="panel chat">
             <div className="hero">
-              <h1>框架内对话</h1>
-              <p>同一套会话与插件大脑，服务手机端、电脑端与服务器环境。试试发送消息，或使用 /echo 你好。</p>
+              <h1>对话</h1>
+              <p>框架内聊天。可用 /echo 你好 测试插件。</p>
             </div>
             <div className="chat-log">
               {msgs.map((m, i) => (
@@ -234,129 +331,177 @@ export default function App() {
           </section>
         )}
 
-        {tab === "admin" && (
-          <section className="grid-2">
-            <div className="panel">
-              <div className="hero">
-                <h1>管理端</h1>
-                <p>
-                  初始账号 console / console。首次登录后必须重配用户名与密码。登录态仅内存保存：刷新页面立即失效；有效期{" "}
-                  {sessionHours} 小时；改密后全部会话立即失效。
-                </p>
-              </div>
-
-              {!token ? (
-                <div className="form">
-                  {info && <p className="muted">{info}</p>}
-                  <label>
-                    用户名
-                    <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="console" />
-                  </label>
-                  <label>
-                    管理密码
-                    <input
-                      type="password"
-                      value={pass}
-                      onChange={(e) => setPass(e.target.value)}
-                      placeholder="初始为 console"
-                    />
-                  </label>
-                  {loginErr && <div className="error">{loginErr}</div>}
-                  <button className="btn" onClick={() => void login()}>
-                    登录
-                  </button>
-                </div>
-              ) : mustReconfigure ? (
-                <div className="form">
-                  <p className="muted">首次配置：请设置新的管理用户名与密码，完成后需重新登录。</p>
-                  <label>
-                    新用户名
-                    <input value={setupUser} onChange={(e) => setSetupUser(e.target.value)} />
-                  </label>
-                  <label>
-                    新密码（至少 8 位）
-                    <input type="password" value={setupPass} onChange={(e) => setSetupPass(e.target.value)} />
-                  </label>
-                  <label>
-                    确认新密码
-                    <input type="password" value={setupPass2} onChange={(e) => setSetupPass2(e.target.value)} />
-                  </label>
-                  {loginErr && <div className="error">{loginErr}</div>}
-                  <button className="btn" onClick={() => void submitSetup()}>
-                    保存并重新登录
-                  </button>
-                </div>
-              ) : (
-                <div className="form">
-                  <p className="muted">已登录（内存会话，刷新即失效）。</p>
-                  <button className="btn ghost" onClick={() => clearSession()}>
-                    退出
-                  </button>
-                  <label>
-                    当前密码
-                    <input type="password" value={curPass} onChange={(e) => setCurPass(e.target.value)} />
-                  </label>
-                  <label>
-                    新用户名（可留空表示不改）
-                    <input value={newUser} onChange={(e) => setNewUser(e.target.value)} />
-                  </label>
-                  <label>
-                    新密码（可留空表示不改，至少 8 位）
-                    <input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} />
-                  </label>
-                  <label>
-                    确认新密码
-                    <input type="password" value={newPass2} onChange={(e) => setNewPass2(e.target.value)} />
-                  </label>
-                  {loginErr && <div className="error">{loginErr}</div>}
-                  <button className="btn" onClick={() => void updateCredentials()}>
-                    更新凭据（将踢出所有登录）
-                  </button>
-                </div>
-              )}
+        {panel === "adapters" && (
+          <section className="panel">
+            <div className="hero">
+              <h1>适配器</h1>
+              <p>当前已注册的消息通道。后续可在此查看连接状态。</p>
             </div>
-            <div className="panel">
-              <div className="hero">
-                <h1>运行概览</h1>
-                <p>三环境：手机端 / 电脑端 / 服务器（NEXUS_ENV）。</p>
-              </div>
-              {overview ? (
-                <>
-                  <div className="chips">
-                    <div className="chip">
-                      环境 <strong>{String((overview.env as { id?: string })?.id ?? "")}</strong>
-                    </div>
-                    <div className="chip">
-                      插件 <strong>{Array.isArray(overview.plugins) ? overview.plugins.length : 0}</strong>
-                    </div>
-                    <div className="chip">
-                      通道 <strong>{Array.isArray(overview.channels) ? overview.channels.length : 0}</strong>
-                    </div>
-                    <div className="chip">
-                      会话 <strong>{String(overview.sessions ?? 0)}</strong>
-                    </div>
+            <div className="list">
+              {channels.length === 0 && <p className="muted pad">暂无通道</p>}
+              {channels.map((id) => (
+                <div className="list-row" key={id}>
+                  <div>
+                    <strong>{id}</strong>
+                    <div className="muted">通道适配器</div>
                   </div>
-                  <pre style={{ margin: 0, padding: 16, overflow: "auto", fontSize: 12, color: "var(--muted)" }}>
-                    {JSON.stringify(overview, null, 2)}
-                  </pre>
-                </>
-              ) : (
-                <p className="muted" style={{ padding: 18 }}>
-                  {mustReconfigure ? "完成首次凭据配置并重新登录后显示概览。" : "登录后显示概览。"}
-                </p>
-              )}
+                  <span className="badge ok">运行中</span>
+                </div>
+              ))}
+            </div>
+            <div className="hero sub">
+              <h1>已加载插件</h1>
+            </div>
+            <div className="list">
+              {plugins.map((p) => (
+                <div className="list-row" key={p.id}>
+                  <div>
+                    <strong>{p.name}</strong>
+                    <div className="muted">{p.id}</div>
+                  </div>
+                  <span className="badge ok">已加载</span>
+                </div>
+              ))}
             </div>
           </section>
         )}
 
-        {tab === "ecosystem" && (
+        {panel === "status" && (
+          <section className="panel">
+            <div className="hero">
+              <h1>运行状态</h1>
+              <p>网关健康检查与环境信息。</p>
+            </div>
+            <div className="chips">
+              <div className="chip">
+                健康 <strong>{health?.ok ? "正常" : "未知"}</strong>
+              </div>
+              <div className="chip">
+                环境 <strong>{meta?.env.id ?? "…"}</strong>
+              </div>
+              <div className="chip">
+                通道 <strong>{channels.length}</strong>
+              </div>
+              <div className="chip">
+                插件 <strong>{plugins.length}</strong>
+              </div>
+            </div>
+            <pre className="code-block">{JSON.stringify({ health, meta }, null, 2)}</pre>
+          </section>
+        )}
+
+        {panel === "config" && (
+          <section className="panel">
+            <div className="hero">
+              <h1>配置</h1>
+              <p>
+                不想改文件可用指令：<code>pnpm nexus setup</code> / <code>pnpm nexus env …</code> /
+                <code>pnpm nexus set …</code>。本地配置不会上传。
+              </p>
+            </div>
+            <div className="form">
+              <label>
+                当前运行姿态（只读展示；切换请用指令 nexus env）
+                <select value={envPick} disabled>
+                  <option value="desktop">desktop 电脑</option>
+                  <option value="mobile">mobile 手机</option>
+                  <option value="server">server 服务器</option>
+                  <option value="termux">termux 手机 Termux</option>
+                </select>
+              </label>
+              <p className="muted">
+                会话策略：刷新立即失效 · 有效期 {sessionHours} 小时 · 改密踢全部会话
+              </p>
+              <p className="muted">远程源：{meta?.registry.baseUrl ?? "…"}</p>
+              <p className="muted">
+                Registry Token：{meta?.registry.tokenConfigured ? "已配置" : "未配置（pnpm nexus set registry-token）"}
+              </p>
+              <button type="button" className="btn ghost" onClick={() => setPanel("admin")}>
+                去管理端改账号密码
+              </button>
+            </div>
+          </section>
+        )}
+
+        {panel === "admin" && (
+          <section className="panel">
+            <div className="hero">
+              <h1>管理</h1>
+              <p>初始 console / console。首次登录后必须重配。</p>
+            </div>
+            {!token ? (
+              <div className="form">
+                {info && <p className="muted">{info}</p>}
+                <label>
+                  用户名
+                  <input value={user} onChange={(e) => setUser(e.target.value)} />
+                </label>
+                <label>
+                  密码
+                  <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
+                </label>
+                {loginErr && <div className="error">{loginErr}</div>}
+                <button className="btn" onClick={() => void login()}>
+                  登录
+                </button>
+              </div>
+            ) : mustReconfigure ? (
+              <div className="form">
+                <p className="muted">首次配置新用户名与密码</p>
+                <label>
+                  新用户名
+                  <input value={setupUser} onChange={(e) => setSetupUser(e.target.value)} />
+                </label>
+                <label>
+                  新密码
+                  <input type="password" value={setupPass} onChange={(e) => setSetupPass(e.target.value)} />
+                </label>
+                <label>
+                  确认密码
+                  <input value={setupPass2} type="password" onChange={(e) => setSetupPass2(e.target.value)} />
+                </label>
+                {loginErr && <div className="error">{loginErr}</div>}
+                <button className="btn" onClick={() => void submitSetup()}>
+                  保存并重新登录
+                </button>
+              </div>
+            ) : (
+              <div className="form">
+                <p className="muted">已登录（内存会话）。</p>
+                <button className="btn ghost" onClick={() => clearSession()}>
+                  退出
+                </button>
+                <label>
+                  当前密码
+                  <input type="password" value={curPass} onChange={(e) => setCurPass(e.target.value)} />
+                </label>
+                <label>
+                  新用户名（可空）
+                  <input value={newUser} onChange={(e) => setNewUser(e.target.value)} />
+                </label>
+                <label>
+                  新密码（可空）
+                  <input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} />
+                </label>
+                <label>
+                  确认新密码
+                  <input type="password" value={newPass2} onChange={(e) => setNewPass2(e.target.value)} />
+                </label>
+                {loginErr && <div className="error">{loginErr}</div>}
+                <button className="btn" onClick={() => void updateCredentials()}>
+                  更新凭据
+                </button>
+                {overview && <pre className="code-block">{JSON.stringify(overview, null, 2)}</pre>}
+              </div>
+            )}
+          </section>
+        )}
+
+        {panel === "ecosystem" && (
           <section className="panel">
             <div className="hero">
               <h1>插件生态</h1>
-              <p>
-                示例、基础、标准插件挂载于开源平台远程仓。当前源：
-                {meta?.registry.baseUrl ?? "…"}
-              </p>
+              <p>远程源：{meta?.registry.baseUrl ?? "…"}</p>
             </div>
             <div className="chips">
               {cats.map(([k, v]) => (
@@ -364,13 +509,8 @@ export default function App() {
                   {k} · <strong>{v.label}</strong>
                 </div>
               ))}
-              <div className="chip">
-                Token <strong>{meta?.registry.tokenConfigured ? "已配置" : "待配置"}</strong>
-              </div>
             </div>
-            <p className="muted" style={{ padding: "0 18px 18px" }}>
-              将通行证写入环境变量 NEXUS_REGISTRY_TOKEN（或 configs/registry.local.json）后，即可远程安装与更新。
-            </p>
+            <p className="muted pad">用指令配置 Token：pnpm nexus set registry-token …</p>
           </section>
         )}
       </main>

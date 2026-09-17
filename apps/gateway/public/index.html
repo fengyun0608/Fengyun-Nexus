@@ -7,67 +7,111 @@
   <title>Fengyun Nexus</title>
   <style>
     :root {
-      --bg0: #121410; --bg1: #1a1f18; --ink: #f2efe6; --muted: #a7b0a0;
-      --line: rgba(232,165,75,.22); --amber: #e8a54b; --amber2: #c4842f; --sage: #8fad7a; --danger: #d4644a;
-      --font: system-ui, "Segoe UI", sans-serif;
+      --bg0:#121410; --bg1:#1a1f18; --ink:#f2efe6; --muted:#a7b0a0;
+      --line:rgba(232,165,75,.22); --amber:#e8a54b; --amber2:#c4842f; --sage:#8fad7a; --danger:#d4644a;
+      --side:240px;
     }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: var(--font); color: var(--ink); background: linear-gradient(165deg,#121410,#1a1f18); min-height: 100vh; }
-    header { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid var(--line); position:sticky; top:0; background:rgba(18,20,16,.9); }
-    header strong { color: var(--amber); }
-    nav button { background:transparent; border:1px solid transparent; color:var(--muted); border-radius:999px; padding:8px 12px; }
-    nav button.on { border-color:var(--line); color:var(--ink); background:rgba(232,165,75,.08); }
-    main { max-width: 520px; margin: 0 auto; padding: 14px; }
-    .panel { background:rgba(26,31,24,.92); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
-    .hero { padding:16px; border-bottom:1px solid var(--line); }
-    .hero h1 { margin:0 0 6px; font-size:1.25rem; }
-    .hero p { margin:0; color:var(--muted); font-size:.9rem; line-height:1.45; }
-    .log { min-height: 42vh; max-height: 55vh; overflow:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
-    .b { max-width:92%; padding:10px 12px; border-radius:14px; white-space:pre-wrap; line-height:1.45; }
-    .u { align-self:flex-end; background:rgba(232,165,75,.18); border:1px solid rgba(232,165,75,.35); }
-    .a { align-self:flex-start; background:rgba(143,173,122,.12); border:1px solid rgba(143,173,122,.28); }
-    .composer { display:grid; gap:8px; padding:12px; border-top:1px solid var(--line); }
-    textarea, input { width:100%; border-radius:10px; border:1px solid var(--line); background:#121410; color:var(--ink); padding:10px; font:inherit; }
-    textarea { min-height:64px; resize:vertical; }
-    .btn { border:0; border-radius:12px; padding:12px; background:linear-gradient(180deg,var(--amber),var(--amber2)); color:#1a1208; font-weight:700; }
-    .btn.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
-    .form { display:grid; gap:10px; padding:14px; }
-    .err { color: var(--danger); }
-    .muted { color: var(--muted); font-size:.88rem; }
-    .hide { display:none !important; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,sans-serif;color:var(--ink);background:linear-gradient(165deg,#121410,#1a1f18);height:100vh;display:grid;grid-template-columns:var(--side) 1fr}
+    body.collapsed{grid-template-columns:0 1fr}
+    aside{border-right:1px solid var(--line);background:rgba(18,20,16,.95);overflow:auto;display:flex;flex-direction:column}
+    .brand{padding:14px;border-bottom:1px solid var(--line)}
+    .brand strong{color:var(--amber)}
+    .brand span{display:block;color:var(--muted);font-size:.78rem;margin-top:2px}
+    .g-btn{width:100%;text-align:left;background:0;border:0;color:var(--ink);padding:10px 12px;font-weight:700;cursor:pointer}
+    .g-btn:hover{background:rgba(232,165,75,.06)}
+    .items{padding:0 8px 8px 16px;display:none}
+    .open .items{display:grid;gap:2px}
+    .item{background:0;border:0;color:var(--muted);text-align:left;padding:8px 10px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between}
+    .item.on,.item:hover{background:rgba(232,165,75,.12);color:var(--ink)}
+    .item em{font-style:normal;font-size:.7rem;color:var(--sage);border:1px solid rgba(143,173,122,.35);border-radius:999px;padding:1px 6px}
+    main{min-width:0;overflow:auto;padding:12px}
+    .panel{background:rgba(26,31,24,.9);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-height:calc(100vh - 24px);display:flex;flex-direction:column}
+    .hero{padding:14px;border-bottom:1px solid var(--line)}
+    .hero h1{margin:0 0 4px;font-size:1.2rem}
+    .hero p{margin:0;color:var(--muted);font-size:.9rem}
+    .log{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px;min-height:40vh}
+    .b{max-width:92%;padding:10px 12px;border-radius:12px;white-space:pre-wrap;line-height:1.45}
+    .u{align-self:flex-end;background:rgba(232,165,75,.18);border:1px solid rgba(232,165,75,.35)}
+    .a{align-self:flex-start;background:rgba(143,173,122,.12);border:1px solid rgba(143,173,122,.28)}
+    .composer,.form{display:grid;gap:8px;padding:12px;border-top:1px solid var(--line)}
+    .form{border-top:0}
+    textarea,input{width:100%;border-radius:10px;border:1px solid var(--line);background:#121410;color:var(--ink);padding:10px;font:inherit}
+    textarea{min-height:64px}
+    .btn{border:0;border-radius:10px;padding:11px;background:linear-gradient(180deg,var(--amber),var(--amber2));color:#1a1208;font-weight:700;cursor:pointer}
+    .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+    .err{color:var(--danger)}.muted{color:var(--muted);font-size:.88rem}
+    .hide{display:none!important}
+    .row{display:flex;justify-content:space-between;align-items:center;padding:10px;border:1px solid var(--line);border-radius:10px;margin:8px 12px}
+    .foot{margin-top:auto;padding:10px;border-top:1px solid var(--line)}
+    .reopen{display:none;position:fixed;left:8px;top:8px;z-index:5;border:1px solid var(--line);background:#1a1f18;color:var(--ink);border-radius:8px;padding:8px 10px}
+    body.collapsed .reopen{display:block}
+    body.collapsed aside{display:none}
+    @media(max-width:720px){
+      body{grid-template-columns:1fr}
+      aside{position:fixed;inset:0 auto 0 0;width:min(86vw,280px);z-index:20}
+      body.collapsed aside{display:none}
+    }
   </style>
 </head>
 <body>
-  <header>
-    <div><strong>Fengyun Nexus</strong><div class="muted" id="envLabel">…</div></div>
-    <nav>
-      <button class="on" id="tabChat" type="button">对话</button>
-      <button id="tabAdmin" type="button">管理</button>
-    </nav>
-  </header>
+  <button class="reopen" id="reopen" type="button">目录</button>
+  <aside id="aside">
+    <div class="brand"><strong>Fengyun Nexus</strong><span id="envLabel">…</span></div>
+    <div class="group open" data-g="ws">
+      <button class="g-btn" type="button" data-toggle="ws">▾ 工作区</button>
+      <div class="items">
+        <button class="item on" data-panel="chat" type="button">对话</button>
+        <button class="item" data-panel="status" type="button">运行状态 <em id="hBadge">…</em></button>
+        <button class="item" data-panel="config" type="button">配置</button>
+      </div>
+    </div>
+    <div class="group open" data-g="ch">
+      <button class="g-btn" type="button" data-toggle="ch">▾ 适配器</button>
+      <div class="items" id="chItems">
+        <button class="item" data-panel="adapters" type="button">全部适配器</button>
+      </div>
+    </div>
+    <div class="group open" data-g="sys">
+      <button class="g-btn" type="button" data-toggle="sys">▾ 系统</button>
+      <div class="items">
+        <button class="item" data-panel="admin" type="button">管理登录</button>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn ghost" id="collapse" type="button">收起目录</button>
+    </div>
+  </aside>
   <main>
     <section class="panel" id="viewChat">
-      <div class="hero"><h1>框架内对话</h1><p>手机 / Termux / 电脑 / 服务器同一套网关。可直接聊；管理请切到「管理」。</p></div>
+      <div class="hero"><h1>对话</h1><p>左侧目录可展开。内置控制台适合 Termux / 服务器。</p></div>
       <div class="log" id="log"></div>
       <div class="composer">
         <textarea id="input" placeholder="输入消息…"></textarea>
         <button class="btn" id="send" type="button">发送</button>
       </div>
     </section>
+    <section class="panel hide" id="viewAdapters">
+      <div class="hero"><h1>适配器</h1><p>已注册通道与状态。</p></div>
+      <div id="adapterList"></div>
+    </section>
+    <section class="panel hide" id="viewStatus">
+      <div class="hero"><h1>运行状态</h1><p>健康检查。</p></div>
+      <pre class="muted" id="statusPre" style="padding:12px;overflow:auto"></pre>
+    </section>
+    <section class="panel hide" id="viewConfig">
+      <div class="hero"><h1>配置</h1><p>用指令配置，不必改文件：nexus setup / nexus env / nexus set</p></div>
+      <p class="muted" style="padding:12px" id="configText"></p>
+    </section>
     <section class="panel hide" id="viewAdmin">
-      <div class="hero"><h1>管理端</h1><p>初始 console / console。首次登录后用指令或本页重配账号。刷新会掉登录态。</p></div>
+      <div class="hero"><h1>管理</h1><p>初始 console / console</p></div>
       <div class="form" id="loginBox">
-        <input id="user" value="console" placeholder="用户名" />
-        <input id="pass" type="password" placeholder="密码" />
+        <input id="user" value="console" /><input id="pass" type="password" placeholder="密码" />
         <div class="err" id="loginErr"></div>
         <button class="btn" id="loginBtn" type="button">登录</button>
-        <p class="muted">不想改文件？电脑/服务器/Termux 可用：nexus setup / nexus env termux</p>
       </div>
       <div class="form hide" id="setupBox">
-        <p class="muted">首次配置新用户名与密码（完成后请重新登录）</p>
-        <input id="su" placeholder="新用户名" />
-        <input id="sp" type="password" placeholder="新密码 ≥8 位" />
-        <input id="sp2" type="password" placeholder="确认密码" />
+        <input id="su" placeholder="新用户名" /><input id="sp" type="password" placeholder="新密码" /><input id="sp2" type="password" placeholder="确认密码" />
         <div class="err" id="setupErr"></div>
         <button class="btn" id="setupBtn" type="button">保存并重新登录</button>
       </div>
@@ -79,119 +123,86 @@
     </section>
   </main>
   <script>
-    let token = "";
-    let mustReconfigure = false;
-    const log = document.getElementById("log");
-    function bubble(role, text) {
-      const d = document.createElement("div");
-      d.className = "b " + (role === "user" ? "u" : "a");
-      d.textContent = text;
-      log.appendChild(d);
-      log.scrollTop = log.scrollHeight;
+    let token="", mustReconfigure=false, panel="chat";
+    const log=document.getElementById("log");
+    function bubble(role,text){const d=document.createElement("div");d.className="b "+(role==="user"?"u":"a");d.textContent=text;log.appendChild(d);log.scrollTop=log.scrollHeight}
+    bubble("assistant","欢迎使用 Fengyun Nexus。");
+    async function api(path,opts={}){
+      const headers={"content-type":"application/json",...(opts.headers||{})};
+      if(opts.token) headers.authorization="Bearer "+opts.token;
+      const res=await fetch(path,{...opts,headers}); const data=await res.json();
+      if(!res.ok) throw new Error(data.error||data.message||res.statusText); return data;
     }
-    bubble("assistant", "欢迎使用 Fengyun Nexus。");
-
-    async function api(path, opts = {}) {
-      const headers = { "content-type": "application/json", ...(opts.headers || {}) };
-      if (opts.token) headers.authorization = "Bearer " + opts.token;
-      const res = await fetch(path, { ...opts, headers });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      return data;
+    function showPanel(id){
+      panel=id;
+      ["Chat","Adapters","Status","Config","Admin"].forEach(n=>{
+        document.getElementById("view"+n).classList.toggle("hide", id!==n.toLowerCase() && !(id==="adapters"&&n==="Adapters") && !(id==="status"&&n==="Status") && !(id==="config"&&n==="Config") && !(id==="admin"&&n==="Admin") && !(id==="chat"&&n==="Chat"));
+      });
+      // simpler:
+      document.getElementById("viewChat").classList.toggle("hide", id!=="chat");
+      document.getElementById("viewAdapters").classList.toggle("hide", id!=="adapters");
+      document.getElementById("viewStatus").classList.toggle("hide", id!=="status");
+      document.getElementById("viewConfig").classList.toggle("hide", id!=="config");
+      document.getElementById("viewAdmin").classList.toggle("hide", id!=="admin");
+      document.querySelectorAll(".item").forEach(el=>el.classList.toggle("on", el.dataset.panel===id));
     }
-
-    api("/v1/meta").then((m) => {
-      document.getElementById("envLabel").textContent = (m.env && m.env.label) || m.env?.id || "";
-    }).catch(() => {});
-
-    document.getElementById("tabChat").onclick = () => {
-      document.getElementById("tabChat").classList.add("on");
-      document.getElementById("tabAdmin").classList.remove("on");
-      document.getElementById("viewChat").classList.remove("hide");
-      document.getElementById("viewAdmin").classList.add("hide");
-    };
-    document.getElementById("tabAdmin").onclick = () => {
-      document.getElementById("tabAdmin").classList.add("on");
-      document.getElementById("tabChat").classList.remove("on");
-      document.getElementById("viewAdmin").classList.remove("hide");
-      document.getElementById("viewChat").classList.add("hide");
-    };
-
-    async function send() {
-      const el = document.getElementById("input");
-      const content = el.value.trim();
-      if (!content) return;
-      el.value = "";
-      bubble("user", content);
-      try {
-        const r = await api("/v1/chat", { method: "POST", body: JSON.stringify({ content, chatId: "lite", userId: "lite-user" }) });
-        bubble("assistant", r.assistant);
-      } catch (e) {
-        bubble("assistant", "失败：" + e.message);
-      }
-    }
-    document.getElementById("send").onclick = send;
-    document.getElementById("input").addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    document.querySelectorAll("[data-toggle]").forEach(btn=>{
+      btn.onclick=()=>{
+        const g=btn.closest(".group");
+        g.classList.toggle("open");
+        btn.textContent=(g.classList.contains("open")?"▾ ":"▸ ")+btn.textContent.replace(/^[▾▸]\s*/,"");
+      };
     });
+    document.querySelectorAll(".item").forEach(el=>el.onclick=()=>showPanel(el.dataset.panel));
+    document.getElementById("collapse").onclick=()=>document.body.classList.add("collapsed");
+    document.getElementById("reopen").onclick=()=>document.body.classList.remove("collapsed");
 
-    function showAdmin() {
-      document.getElementById("loginBox").classList.toggle("hide", !!token);
-      document.getElementById("setupBox").classList.toggle("hide", !(token && mustReconfigure));
-      document.getElementById("okBox").classList.toggle("hide", !(token && !mustReconfigure));
+    async function refresh(){
+      try{
+        const [m,ch,h]=await Promise.all([api("/v1/meta"),api("/v1/channels"),api("/health")]);
+        document.getElementById("envLabel").textContent=m.env?.label||m.env?.id||"";
+        document.getElementById("hBadge").textContent=h.ok?"OK":"?";
+        document.getElementById("statusPre").textContent=JSON.stringify({health:h,meta:m},null,2);
+        document.getElementById("configText").textContent="姿态 "+(m.env?.id||"")+" · 远程 "+(m.registry?.baseUrl||"")+" · Token "+(m.registry?.tokenConfigured?"已配置":"未配置");
+        const box=document.getElementById("adapterList"); box.innerHTML="";
+        const items=document.getElementById("chItems");
+        items.querySelectorAll("[data-ch]").forEach(n=>n.remove());
+        (ch.items||[]).forEach(id=>{
+          const row=document.createElement("div"); row.className="row"; row.innerHTML="<div><strong>"+id+"</strong><div class='muted'>通道</div></div><em style='color:var(--sage)'>运行中</em>"; box.appendChild(row);
+          const b=document.createElement("button"); b.className="item"; b.dataset.panel="adapters"; b.dataset.ch="1"; b.type="button"; b.innerHTML=id+' <em>on</em>'; b.onclick=()=>showPanel("adapters"); items.appendChild(b);
+        });
+      }catch(e){}
     }
+    refresh();
 
-    document.getElementById("loginBtn").onclick = async () => {
-      document.getElementById("loginErr").textContent = "";
-      try {
-        const r = await api("/v1/admin/login", {
-          method: "POST",
-          body: JSON.stringify({
-            username: document.getElementById("user").value,
-            password: document.getElementById("pass").value,
-          }),
-        });
-        token = r.token;
-        mustReconfigure = !!r.mustReconfigure;
-        document.getElementById("pass").value = "";
-        showAdmin();
-        if (!mustReconfigure) {
-          const ov = await api("/v1/admin/overview", { token });
-          document.getElementById("overview").textContent = JSON.stringify(ov, null, 2);
-          document.getElementById("okMsg").textContent = "已登录（内存会话，刷新即失效）";
-        }
-      } catch (e) {
-        document.getElementById("loginErr").textContent = e.message;
-      }
-    };
+    async function send(){
+      const el=document.getElementById("input"); const content=el.value.trim(); if(!content) return; el.value=""; bubble("user",content);
+      try{const r=await api("/v1/chat",{method:"POST",body:JSON.stringify({content,chatId:"lite",userId:"lite-user"})}); bubble("assistant",r.assistant);}
+      catch(e){bubble("assistant","失败："+e.message)}
+    }
+    document.getElementById("send").onclick=send;
+    document.getElementById("input").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
 
-    document.getElementById("setupBtn").onclick = async () => {
-      document.getElementById("setupErr").textContent = "";
-      try {
-        await api("/v1/admin/setup-credentials", {
-          method: "POST",
-          token,
-          body: JSON.stringify({
-            username: document.getElementById("su").value,
-            password: document.getElementById("sp").value,
-            confirmPassword: document.getElementById("sp2").value,
-          }),
-        });
-        token = "";
-        mustReconfigure = false;
-        showAdmin();
-        document.getElementById("loginErr").textContent = "";
-        alert("已保存，请用新账号重新登录");
-      } catch (e) {
-        document.getElementById("setupErr").textContent = e.message;
-      }
+    function showAdmin(){
+      document.getElementById("loginBox").classList.toggle("hide",!!token);
+      document.getElementById("setupBox").classList.toggle("hide",!(token&&mustReconfigure));
+      document.getElementById("okBox").classList.toggle("hide",!(token&&!mustReconfigure));
+    }
+    document.getElementById("loginBtn").onclick=async()=>{
+      document.getElementById("loginErr").textContent="";
+      try{
+        const r=await api("/v1/admin/login",{method:"POST",body:JSON.stringify({username:document.getElementById("user").value,password:document.getElementById("pass").value})});
+        token=r.token; mustReconfigure=!!r.mustReconfigure; document.getElementById("pass").value=""; showAdmin();
+        if(!mustReconfigure){const ov=await api("/v1/admin/overview",{token}); document.getElementById("overview").textContent=JSON.stringify(ov,null,2)}
+      }catch(e){document.getElementById("loginErr").textContent=e.message}
     };
-
-    document.getElementById("logoutBtn").onclick = () => {
-      token = "";
-      mustReconfigure = false;
-      showAdmin();
+    document.getElementById("setupBtn").onclick=async()=>{
+      try{
+        await api("/v1/admin/setup-credentials",{method:"POST",token,body:JSON.stringify({username:document.getElementById("su").value,password:document.getElementById("sp").value,confirmPassword:document.getElementById("sp2").value})});
+        token=""; mustReconfigure=false; showAdmin(); alert("已保存，请重新登录");
+      }catch(e){document.getElementById("setupErr").textContent=e.message}
     };
+    document.getElementById("logoutBtn").onclick=()=>{token="";mustReconfigure=false;showAdmin()};
   </script>
 </body>
 </html>

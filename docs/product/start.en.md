@@ -6,7 +6,7 @@ Local secrets stay in `.env` / `configs/*.local.json` and are **never uploaded**
 
 | Platform | Start |
 |----------|-------|
-| **Windows** | Double-click `启动.bat` or `pnpm boot` |
+| Windows | Double-click `start.bat` (recommended) or `pnpm boot` |
 | **Linux / macOS** | `./boot.sh` or `pnpm boot` |
 | **Termux** | `./boot.sh` (auto lite mode) |
 
