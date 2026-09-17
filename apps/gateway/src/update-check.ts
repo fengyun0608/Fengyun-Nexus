@@ -14,6 +14,24 @@ export type UpdateCheckResult = {
   error?: string;
 };
 
+export type UpdateApplyResult = {
+  ok: boolean;
+  message: string;
+  version?: string;
+  error?: string;
+  shouldExit?: boolean;
+  updated?: boolean;
+  beforeCommit?: string;
+  afterCommit?: string;
+  commits?: string[];
+  files?: string[];
+  overwritten?: boolean;
+  /** 纯文本整段（控制台 / 终端） */
+  reportText?: string;
+  /** 合并转发各节点正文（QQ 匿名用户风格） */
+  forwardNodes?: string[];
+};
+
 function readLocalVersion(root: string): string {
   try {
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
@@ -34,6 +52,16 @@ function git(root: string, args: string[]): string {
   }).trim();
 }
 
+function gitLines(root: string, args: string[]): string[] {
+  try {
+    const out = git(root, args);
+    if (!out) return [];
+    return out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 function parseVersionFromPackageJson(raw: string): string | undefined {
   try {
     const pkg = JSON.parse(raw) as { version?: string };
@@ -41,6 +69,52 @@ function parseVersionFromPackageJson(raw: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function short(sha: string): string {
+  return sha.slice(0, 7);
+}
+
+/** 组装「已更新什么 / 覆盖了什么 / 正在重启」报告（师父手感） */
+export function buildUpdateReport(opts: {
+  version: string;
+  updated: boolean;
+  before: string;
+  after: string;
+  commits: string[];
+  files: string[];
+  overwritten: boolean;
+}): { reportText: string; forwardNodes: string[]; message: string } {
+  const { version, updated, before, after, commits, files, overwritten } = opts;
+  const head = updated
+    ? `已更新到 ${version}\n提交 ${short(before)} → ${short(after)}`
+    : `已是最新 ${version}\n提交 ${short(after)}`;
+
+  const commitBlock = updated
+    ? commits.length
+      ? `更新内容\n${commits.map((c) => `· ${c}`).join("\n")}`
+      : "更新内容\n· （无提交摘要）"
+    : "更新内容\n· 无新提交";
+
+  const fileBlock = updated
+    ? files.length
+      ? `覆盖文件 ${files.length} 个\n${files.map((f) => `· ${f}`).join("\n")}`
+      : "覆盖文件\n· （无文件列表）"
+    : "覆盖文件\n· 无";
+
+  const overwriteNote = overwritten ? "本地改动已对齐远程" : "";
+  const restartLine = "正在重启";
+
+  const forwardNodes = [head, commitBlock, fileBlock];
+  if (overwriteNote) forwardNodes.push(overwriteNote);
+  forwardNodes.push(restartLine);
+
+  const reportText = forwardNodes.join("\n\n");
+  const message = updated
+    ? `已更新到 ${version}，正在重启`
+    : `已是最新 ${version}，正在重启`;
+
+  return { reportText, forwardNodes, message };
 }
 
 /** Compare local checkout with origin. */
@@ -111,27 +185,25 @@ export function checkRemoteUpdate(root: string): UpdateCheckResult {
 }
 
 /** Fast-forward pull; caller should exit process after responding. */
-export function applyRemoteUpdate(root: string): {
-  ok: boolean;
-  message: string;
-  version?: string;
-  error?: string;
-  shouldExit?: boolean;
-  updated?: boolean;
-} {
+export function applyRemoteUpdate(root: string): UpdateApplyResult {
   try {
     const before = git(root, ["rev-parse", "HEAD"]);
     const branch = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]) || "main";
     const pullBranch = branch === "HEAD" ? "main" : branch;
     git(root, ["fetch", "origin", "--prune"]);
+    let overwritten = false;
     try {
       git(root, ["pull", "--ff-only", "origin", pullBranch]);
     } catch (e) {
-      // 本地有未提交改动时 ff-only 易失败：对齐远程（管理端主动 #更新）
       const err = e instanceof Error ? e.message : String(e);
-      if (/divergent|not possible to fast-forward|local changes|untracked|would be overwritten/i.test(err)) {
+      if (
+        /divergent|not possible to fast-forward|local changes|untracked|would be overwritten/i.test(
+          err,
+        )
+      ) {
         git(root, ["reset", "--hard", `origin/${pullBranch}`]);
         git(root, ["clean", "-fd"]);
+        overwritten = true;
       } else {
         throw e;
       }
@@ -139,14 +211,47 @@ export function applyRemoteUpdate(root: string): {
     const after = git(root, ["rev-parse", "HEAD"]);
     const version = readLocalVersion(root);
     const updated = before !== after;
+
+    let commits: string[] = [];
+    let files: string[] = [];
+    if (updated) {
+      commits = gitLines(root, [
+        "log",
+        "--oneline",
+        "--no-decorate",
+        `${before}..${after}`,
+      ]).slice(0, 12);
+      files = gitLines(root, [
+        "diff",
+        "--name-status",
+        before,
+        after,
+      ]).slice(0, 24);
+    }
+
+    const built = buildUpdateReport({
+      version,
+      updated,
+      before,
+      after,
+      commits,
+      files,
+      overwritten,
+    });
+
     return {
       ok: true,
       version,
       updated,
+      overwritten,
+      beforeCommit: short(before),
+      afterCommit: short(after),
+      commits,
+      files,
       shouldExit: true,
-      message: updated
-        ? `已更新到 ${version}，即将重启`
-        : `已是最新 ${version}，即将重启`,
+      message: built.message,
+      reportText: built.reportText,
+      forwardNodes: built.forwardNodes,
     };
   } catch (e) {
     return {

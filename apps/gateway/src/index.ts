@@ -29,6 +29,7 @@ import { bootStep, printBootBanner, printBootSuccess } from "./boot-banner.js";
 import {
   getChannelSettings,
   isChannelMaster,
+  isGroupReplyAllowed,
   loadChannelsConfig,
   saveChannelsConfig,
   type ChannelSettings,
@@ -448,6 +449,15 @@ async function bootstrap(): Promise<void> {
       return [];
     }
 
+    // QQ 群白名单：未列入的群不回复（管理 # 指令仍可走，见下方 admin 分支）
+    if (
+      !isHash &&
+      msg.meta?.messageType === "group" &&
+      !isGroupReplyAllowed(chSettings, msg.meta?.groupId as string | undefined)
+    ) {
+      return [];
+    }
+
     // Framework admin # only — plugin # goes to PluginHost by priority
     if (isHash && isAdminHash(hashCmd)) {
       const cmd = parseHashCommand(trimmed, {
@@ -482,7 +492,7 @@ async function bootstrap(): Promise<void> {
             log.error(detail);
             replies = [detail];
           } else {
-            replies = [upd.message];
+            replies = [upd.reportText || upd.message];
             const uptime = formatUptime(Date.now() - startedAt);
             saveRestartNotify(ROOT, {
               channel: msg.channel,
@@ -493,6 +503,22 @@ async function bootstrap(): Promise<void> {
               requestedAt: nowIso(),
               previousUptime: uptime,
             });
+            // QQ：合并转发（匿名用户）+ 多群通报
+            if (msg.channel === "onebot11" && upd.forwardNodes?.length) {
+              try {
+                await onebot.sendForward(upd.forwardNodes, msg);
+                const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
+                const originGid = msg.meta?.groupId ? String(msg.meta.groupId) : "";
+                for (const gid of notifyIds) {
+                  if (originGid && gid === originGid) continue;
+                  await onebot.sendForwardToGroup(gid, upd.forwardNodes);
+                }
+              } catch (e) {
+                log.warn(
+                  `更新转发发送失败：${e instanceof Error ? e.message : String(e)}`,
+                );
+              }
+            }
           }
         }
 
@@ -523,6 +549,11 @@ async function bootstrap(): Promise<void> {
             clearRestartNotify(ROOT);
             return replies;
           }
+          // 群里已用合并转发，控制台/终端仍回完整报告；OneBot 再回简短「正在重启」避免重复刷屏
+          const out =
+            msg.channel === "onebot11"
+              ? ["正在重启"]
+              : replies;
           const r = scheduleSystemRestart(ROOT);
           if (!r.ok) {
             clearRestartNotify(ROOT);
@@ -530,8 +561,8 @@ async function bootstrap(): Promise<void> {
             return [`${last}\n重启失败：${r.message}`];
           }
           log.ok(`更新完成，同窗口重启（退出码 ${r.exitCode}）`);
-          setTimeout(() => process.exit(r.exitCode), 1200);
-          return replies;
+          setTimeout(() => process.exit(r.exitCode), 1500);
+          return out;
         }
 
         if (cmd.systemRestart) {
@@ -549,6 +580,16 @@ async function bootstrap(): Promise<void> {
     }
 
     if (!isHash && chSettings.onlyMasters && chSettings.masters.length && !isMaster) {
+      return [];
+    }
+
+    // 群白名单也约束插件 / AI（# 管理指令已在上方放行）
+    if (
+      isHash &&
+      !isAdminHash(hashCmd) &&
+      msg.meta?.messageType === "group" &&
+      !isGroupReplyAllowed(chSettings, msg.meta?.groupId as string | undefined)
+    ) {
       return [];
     }
 
@@ -628,10 +669,17 @@ async function bootstrap(): Promise<void> {
       return [];
     }
 
-    const history = session.turns.slice(-12).map((t) => ({
-      role: t.role as "user" | "assistant" | "system",
-      content: t.content,
-    }));
+    const history: Array<{ role: "user" | "assistant" | "system"; content: string }> = [];
+    const persona = String(chSettings.systemPrompt || "").trim();
+    if (persona) {
+      history.push({ role: "system", content: persona });
+    }
+    history.push(
+      ...session.turns.slice(-12).map((t) => ({
+        role: t.role as "user" | "assistant" | "system",
+        content: t.content,
+      })),
+    );
     const assistant = (
       await Promise.race([
         llm.chat(history),
@@ -1044,10 +1092,24 @@ async function bootstrap(): Promise<void> {
     } else if (Array.isArray(body.masters)) {
       masters = body.masters.map((m) => String(m).trim()).filter(Boolean);
     }
+    const parseList = (v: unknown, fallback: string[]): string[] => {
+      if (typeof v === "string") {
+        return v
+          .split(/[,，\s]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+      if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
+      return fallback;
+    };
     const next: ChannelSettings = {
       ...prev,
       ...body,
       masters,
+      replyGroupIds: parseList(body.replyGroupIds, prev.replyGroupIds),
+      notifyGroupIds: parseList(body.notifyGroupIds, prev.notifyGroupIds),
+      systemPrompt:
+        typeof body.systemPrompt === "string" ? body.systemPrompt : prev.systemPrompt,
       onlyMasters:
         typeof body.onlyMasters === "boolean" ? body.onlyMasters : prev.onlyMasters,
       note: typeof body.note === "string" ? body.note : prev.note,
@@ -1057,7 +1119,9 @@ async function bootstrap(): Promise<void> {
       channels: { ...channelCfg.channels, [id]: next },
     };
     saveChannelsConfig(ROOT, channelCfg);
-    log.ok(`通道配置已保存  ${id}  masters=${next.masters.join(",") || "—"}`);
+    log.ok(
+      `通道配置已保存  ${id}  masters=${next.masters.join(",") || "—"}  回复群=${next.replyGroupIds.join(",") || "全部"}`,
+    );
     res.json({
       ok: true,
       message: "通道配置已保存（与插件装载独立）",
@@ -1589,6 +1653,12 @@ async function bootstrap(): Promise<void> {
         if (onebot.status().connected) {
           const ok = await onebot.sendText(text, ctx);
           if (ok) {
+            const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
+            const originGid = pending.groupId ? String(pending.groupId) : "";
+            for (const gid of notifyIds) {
+              if (originGid && gid === originGid) continue;
+              await onebot.sendTextToGroup(gid, text);
+            }
             clearRestartNotify(ROOT);
             log.ok("已向原会话回复：重启成功 + 插件列表");
             return;

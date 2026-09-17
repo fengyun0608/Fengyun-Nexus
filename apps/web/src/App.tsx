@@ -98,6 +98,9 @@ type ChannelSettings = {
   label?: string;
   masters: string[];
   onlyMasters: boolean;
+  replyGroupIds?: string[];
+  notifyGroupIds?: string[];
+  systemPrompt?: string;
   note?: string;
 };
 type PluginConfigField = {
@@ -412,6 +415,9 @@ export default function App() {
   const [editProviderId, setEditProviderId] = useState("");
   const [chMasters, setChMasters] = useState("");
   const [chOnlyMasters, setChOnlyMasters] = useState(false);
+  const [chReplyGroups, setChReplyGroups] = useState("");
+  const [chNotifyGroups, setChNotifyGroups] = useState("");
+  const [chPersona, setChPersona] = useState("");
   const [chNote, setChNote] = useState("");
   const [pluginLayer, setPluginLayer] = useState<PluginLayer>({ step: "home" });
   const [updateInfo, setUpdateInfo] = useState<{
@@ -799,6 +805,9 @@ export default function App() {
     if (!token) {
       setChMasters("");
       setChOnlyMasters(false);
+      setChReplyGroups("");
+      setChNotifyGroups("");
+      setChPersona("");
       setChNote("");
       return;
     }
@@ -809,10 +818,16 @@ export default function App() {
       );
       setChMasters((res.settings.masters ?? []).join(", "));
       setChOnlyMasters(Boolean(res.settings.onlyMasters));
+      setChReplyGroups((res.settings.replyGroupIds ?? []).join(", "));
+      setChNotifyGroups((res.settings.notifyGroupIds ?? []).join(", "));
+      setChPersona(res.settings.systemPrompt ?? "");
       setChNote(res.settings.note ?? "");
     } catch {
       setChMasters("");
       setChOnlyMasters(false);
+      setChReplyGroups("");
+      setChNotifyGroups("");
+      setChPersona("");
       setChNote("");
     }
   };
@@ -832,6 +847,9 @@ export default function App() {
           body: JSON.stringify({
             masters: chMasters,
             onlyMasters: chOnlyMasters,
+            replyGroupIds: chReplyGroups,
+            notifyGroupIds: chNotifyGroups,
+            systemPrompt: chPersona,
             note: chNote,
           }),
         },
@@ -839,6 +857,9 @@ export default function App() {
       if (res.settings) {
         setChMasters((res.settings.masters ?? []).join(", "));
         setChOnlyMasters(Boolean(res.settings.onlyMasters));
+        setChReplyGroups((res.settings.replyGroupIds ?? []).join(", "));
+        setChNotifyGroups((res.settings.notifyGroupIds ?? []).join(", "));
+        setChPersona(res.settings.systemPrompt ?? "");
         setChNote(res.settings.note ?? "");
         setChannels((prev) =>
           prev.map((c) =>
@@ -2903,6 +2924,34 @@ async menu(e) {
             {tr("channelOnlyMasters")}
           </span>
         </label>
+        <label>
+          {tr("channelReplyGroups")}
+          <input
+            value={chReplyGroups}
+            onChange={(e) => setChReplyGroups(e.target.value)}
+            placeholder={tr("channelReplyGroupsPh")}
+          />
+        </label>
+        <p className="muted">{tr("channelReplyGroupsHint")}</p>
+        <label>
+          {tr("channelNotifyGroups")}
+          <input
+            value={chNotifyGroups}
+            onChange={(e) => setChNotifyGroups(e.target.value)}
+            placeholder={tr("channelNotifyGroupsPh")}
+          />
+        </label>
+        <p className="muted">{tr("channelNotifyGroupsHint")}</p>
+        <label>
+          {tr("channelPersona")}
+          <textarea
+            value={chPersona}
+            onChange={(e) => setChPersona(e.target.value)}
+            placeholder={tr("channelPersonaPh")}
+            rows={5}
+          />
+        </label>
+        <p className="muted">{tr("channelPersonaHint")}</p>
         <label>
           {tr("channelNote")}
           <input value={chNote} onChange={(e) => setChNote(e.target.value)} />

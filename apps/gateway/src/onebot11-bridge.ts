@@ -181,4 +181,86 @@ export class OneBot11Bridge {
     }
     return sent;
   }
+
+  /**
+   * 合并转发（师父手感）：多段节点，显示为「匿名用户」。
+   * NapCat / go-cqhttp：send_group_forward_msg / send_private_forward_msg
+   */
+  async sendForward(
+    nodes: string[],
+    ctx: NexusMessage,
+    opts?: { nickname?: string; userId?: string; prefer?: WebSocket },
+  ): Promise<boolean> {
+    const texts = nodes.map((n) => String(n).trim()).filter(Boolean);
+    if (!texts.length) return false;
+
+    const nickname = opts?.nickname || "匿名用户";
+    const uin = opts?.userId || "80000000";
+    const messages = texts.map((content) => ({
+      type: "node",
+      data: {
+        name: nickname,
+        uin,
+        user_id: Number(uin) || 80000000,
+        nickname,
+        content,
+      },
+    }));
+
+    const mt = (ctx.meta?.messageType as string | undefined) ?? "private";
+    const prefer = opts?.prefer;
+    const targets = prefer ? [prefer] : [...this.sockets];
+    if (!targets.some((ws) => ws.readyState === WebSocket.OPEN)) return false;
+
+    let action = "send_private_forward_msg";
+    let params: Record<string, unknown> = {
+      user_id: Number(ctx.userId),
+      messages,
+    };
+    if (mt === "group") {
+      const gid = Number(ctx.meta?.groupId ?? String(ctx.chatId).replace(/^group:/, ""));
+      action = "send_group_forward_msg";
+      params = { group_id: gid, messages };
+    }
+
+    const echo = `nx_fwd_${++this.echoSeq}`;
+    const payload = JSON.stringify({ action, params, echo });
+    let sent = false;
+    for (const ws of targets) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+        sent = true;
+      }
+    }
+    return sent;
+  }
+
+  /** 向指定群发送合并转发（更新/重启多群通报） */
+  async sendForwardToGroup(groupId: string, nodes: string[]): Promise<boolean> {
+    const ctx: NexusMessage = {
+      id: `fwd-${Date.now()}`,
+      channel: "onebot11",
+      chatId: `group:${groupId}`,
+      userId: "80000000",
+      type: "text",
+      content: "",
+      meta: { messageType: "group", groupId: String(groupId) },
+      createdAt: new Date().toISOString(),
+    };
+    return this.sendForward(nodes, ctx);
+  }
+
+  async sendTextToGroup(groupId: string, text: string): Promise<boolean> {
+    const ctx: NexusMessage = {
+      id: `txt-${Date.now()}`,
+      channel: "onebot11",
+      chatId: `group:${groupId}`,
+      userId: "0",
+      type: "text",
+      content: text,
+      meta: { messageType: "group", groupId: String(groupId) },
+      createdAt: new Date().toISOString(),
+    };
+    return this.sendText(text, ctx);
+  }
 }

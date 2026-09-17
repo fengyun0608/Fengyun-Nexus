@@ -7,6 +7,15 @@ export type ChannelSettings = {
   masters: string[];
   /** If true, only masters trigger bot replies. */
   onlyMasters: boolean;
+  /**
+   * QQ 群白名单：仅这些群会回复 AI/插件。空 = 不限制群。
+   * 仅对 messageType=group 生效。
+   */
+  replyGroupIds: string[];
+  /** #更新 / 重启成功时额外通报的群号 */
+  notifyGroupIds: string[];
+  /** 本通道 AI 人设（注入 system prompt） */
+  systemPrompt: string;
   note?: string;
   [key: string]: unknown;
 };
@@ -15,20 +24,29 @@ export type ChannelsConfigFile = {
   channels: Record<string, ChannelSettings>;
 };
 
+function parseIdList(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.map((m) => String(m).trim()).filter(Boolean);
+  }
+  if (typeof raw === "string") {
+    return raw
+      .split(/[,，\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
 function normalize(raw: Partial<ChannelSettings> | undefined): ChannelSettings {
-  const masters = Array.isArray(raw?.masters)
-    ? raw!.masters.map((m) => String(m).trim()).filter(Boolean)
-    : typeof raw?.masters === "string"
-      ? String(raw.masters)
-          .split(/[,，\s]+/)
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : [];
+  const masters = parseIdList(raw?.masters);
   return {
     ...(raw ?? {}),
     label: typeof raw?.label === "string" ? raw.label : undefined,
     masters,
     onlyMasters: Boolean(raw?.onlyMasters),
+    replyGroupIds: parseIdList(raw?.replyGroupIds),
+    notifyGroupIds: parseIdList(raw?.notifyGroupIds),
+    systemPrompt: typeof raw?.systemPrompt === "string" ? raw.systemPrompt : "",
     note: typeof raw?.note === "string" ? raw.note : "",
   };
 }
@@ -85,4 +103,14 @@ export function isChannelMaster(
 ): boolean {
   if (!settings.masters.length) return false;
   return settings.masters.includes(String(userId));
+}
+
+/** 群消息是否允许本通道回复（空白名单 = 全部群） */
+export function isGroupReplyAllowed(
+  settings: ChannelSettings,
+  groupId: string | undefined,
+): boolean {
+  if (!settings.replyGroupIds.length) return true;
+  if (!groupId) return true;
+  return settings.replyGroupIds.includes(String(groupId));
 }

@@ -4,19 +4,28 @@
       "label": "网页控制台",
       "masters": [],
       "onlyMasters": false,
+      "replyGroupIds": [],
+      "notifyGroupIds": [],
+      "systemPrompt": "",
       "note": ""
     },
     "webhook": {
       "label": "HTTP Webhook",
       "masters": [],
       "onlyMasters": false,
+      "replyGroupIds": [],
+      "notifyGroupIds": [],
+      "systemPrompt": "",
       "note": ""
     },
     "onebot11": {
       "label": "QQ（OneBot 11）",
       "masters": [],
       "onlyMasters": false,
-      "note": "主人 QQ 号，多个用逗号分隔"
+      "replyGroupIds": [],
+      "notifyGroupIds": [],
+      "systemPrompt": "",
+      "note": "主人 QQ、可回复群、更新通报群、人设均可在控制台配置"
     }
   }
 }
