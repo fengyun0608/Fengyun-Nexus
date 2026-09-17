@@ -1,5 +1,7 @@
 # 插件生态
 
+[English →](plugins.en.md)
+
 Fengyun Nexus 的示例插件、基础插件、标准插件挂载在开源平台远程仓，支持后续远程更新。
 
 - 远程仓：[https://gitcode.com/fengyunnb_admin/Fengyun-Nexus](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus)

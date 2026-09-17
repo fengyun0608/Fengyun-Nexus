@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import cors from "cors";
@@ -26,6 +26,7 @@ import { WorkflowRunner } from "@fengyun/nexus-workflow";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../../..");
+const ADMIN_LOCAL = join(ROOT, "configs/admin.local.json");
 
 function loadJson<T>(rel: string): T {
   const p = join(ROOT, rel);
@@ -43,19 +44,34 @@ function loadEnvProfile(id: NexusEnvId): EnvProfile {
 }
 
 function loadAdmin(): AdminConfig {
-  const local = join(ROOT, "configs/admin.local.json");
-  if (existsSync(local)) return JSON.parse(readFileSync(local, "utf8")) as AdminConfig;
+  if (existsSync(ADMIN_LOCAL)) {
+    const local = JSON.parse(readFileSync(ADMIN_LOCAL, "utf8")) as Partial<AdminConfig>;
+    const base = loadJson<AdminConfig>("configs/admin.default.json");
+    return {
+      ...base,
+      ...local,
+      setupCompleted: Boolean(local.setupCompleted ?? base.setupCompleted),
+      sessionHours: Number(local.sessionHours ?? base.sessionHours ?? 12),
+    };
+  }
   return loadJson<AdminConfig>("configs/admin.default.json");
+}
+
+function persistAdmin(cfg: AdminConfig): void {
+  const out = {
+    username: cfg.username,
+    passwordEnv: cfg.passwordEnv,
+    defaultPassword: cfg.defaultPassword,
+    sessionHours: cfg.sessionHours,
+    setupCompleted: cfg.setupCompleted,
+  };
+  writeFileSync(ADMIN_LOCAL, `${JSON.stringify(out, null, 2)}\n`, "utf8");
 }
 
 function loadRegistry(): RegistryConfig {
   const local = join(ROOT, "configs/registry.local.json");
   if (existsSync(local)) return JSON.parse(readFileSync(local, "utf8")) as RegistryConfig;
   return loadJson<RegistryConfig>("configs/registry.json");
-}
-
-function adminPassword(cfg: AdminConfig): string {
-  return process.env[cfg.passwordEnv] || cfg.defaultPassword;
 }
 
 function hashToken(token: string): string {
@@ -71,8 +87,13 @@ function safeEqual(a: string, b: string): boolean {
 
 const envId = resolveEnvId();
 const profile = loadEnvProfile(envId);
-const adminCfg = loadAdmin();
+let adminCfg = loadAdmin();
+adminCfg.sessionHours = adminCfg.sessionHours || 12;
 const registry = loadRegistry();
+
+function currentPassword(): string {
+  return process.env[adminCfg.passwordEnv] || adminCfg.defaultPassword;
+}
 
 const sessions = new SessionManager();
 const router = new MessageRouter();
@@ -143,9 +164,14 @@ router.use(createEchoHandler());
 
 const tokens = new Map<string, { user: string; exp: number }>();
 
+function invalidateAllSessions(): void {
+  tokens.clear();
+}
+
 function issueToken(user: string): string {
+  const hours = adminCfg.sessionHours || 12;
   const token = randomBytes(24).toString("hex");
-  const exp = Date.now() + adminCfg.sessionHours * 3600_000;
+  const exp = Date.now() + hours * 3600_000;
   tokens.set(hashToken(token), { user, exp });
   return token;
 }
@@ -163,6 +189,7 @@ function authMiddleware(
   }
   const rec = tokens.get(hashToken(token));
   if (!rec || rec.exp < Date.now()) {
+    if (rec) tokens.delete(hashToken(token));
     res.status(401).json({ error: "session expired" });
     return;
   }
@@ -234,6 +261,12 @@ app.get("/v1/meta", (_req, res) => {
     version: "0.1.0",
     env: profile,
     features: profile.features,
+    admin: {
+      setupCompleted: adminCfg.setupCompleted,
+      sessionHours: adminCfg.sessionHours || 12,
+      /** Browser refresh does not keep login; token is memory-only on client. */
+      refreshInvalidatesSession: true,
+    },
     registry: {
       baseUrl: registry.baseUrl,
       categories: registry.categories,
@@ -245,7 +278,7 @@ app.get("/v1/meta", (_req, res) => {
 app.post("/v1/admin/login", (req, res) => {
   const { username, password } = req.body ?? {};
   const expectUser = adminCfg.username;
-  const expectPass = adminPassword(adminCfg);
+  const expectPass = currentPassword();
   if (
     typeof username !== "string" ||
     typeof password !== "string" ||
@@ -256,17 +289,33 @@ app.post("/v1/admin/login", (req, res) => {
     return;
   }
   const token = issueToken(expectUser);
-  res.json({ token, username: expectUser, expiresInHours: adminCfg.sessionHours });
+  const mustReconfigure = !adminCfg.setupCompleted;
+  res.json({
+    token,
+    username: expectUser,
+    expiresInHours: adminCfg.sessionHours || 12,
+    mustReconfigure,
+    message: mustReconfigure
+      ? "首次登录：请立即在控制台重新配置用户名与密码，然后重新登录。"
+      : undefined,
+  });
 });
 
 app.get("/v1/admin/me", authMiddleware, (req, res) => {
   res.json({
     user: (req as express.Request & { adminUser?: string }).adminUser,
     env: profile.id,
+    setupCompleted: adminCfg.setupCompleted,
+    mustReconfigure: !adminCfg.setupCompleted,
+    expiresInHours: adminCfg.sessionHours || 12,
   });
 });
 
-app.get("/v1/admin/overview", authMiddleware, (_req, res) => {
+app.get("/v1/admin/overview", authMiddleware, (req, res) => {
+  if (!adminCfg.setupCompleted) {
+    res.status(403).json({ error: "setup_required", message: "请先完成用户名与密码配置。" });
+    return;
+  }
   res.json({
     env: profile,
     plugins: plugins.list(),
@@ -275,22 +324,89 @@ app.get("/v1/admin/overview", authMiddleware, (_req, res) => {
     sessions: sessions.list().length,
     mcpTools: mcp.list(),
     registry,
+    adminUser: (req as express.Request & { adminUser?: string }).adminUser,
   });
 });
 
-app.post("/v1/admin/password", authMiddleware, (req, res) => {
-  const { currentPassword, newPassword } = req.body ?? {};
-  if (typeof currentPassword !== "string" || typeof newPassword !== "string" || newPassword.length < 8) {
-    res.status(400).json({ error: "new password must be at least 8 chars" });
+/** First-time or forced console reconfiguration of username + password. */
+app.post("/v1/admin/setup-credentials", authMiddleware, (req, res) => {
+  const { username, password, confirmPassword } = req.body ?? {};
+  if (typeof username !== "string" || username.trim().length < 3) {
+    res.status(400).json({ error: "username must be at least 3 characters" });
     return;
   }
-  if (!safeEqual(currentPassword, adminPassword(adminCfg))) {
+  if (typeof password !== "string" || password.length < 8) {
+    res.status(400).json({ error: "password must be at least 8 characters" });
+    return;
+  }
+  if (password !== confirmPassword) {
+    res.status(400).json({ error: "password confirmation mismatch" });
+    return;
+  }
+  if (username.trim() === "console" && password === "console") {
+    res.status(400).json({ error: "请勿继续使用初始账号 console / console" });
+    return;
+  }
+
+  adminCfg = {
+    ...adminCfg,
+    username: username.trim(),
+    defaultPassword: password,
+    setupCompleted: true,
+    sessionHours: 12,
+  };
+  delete process.env[adminCfg.passwordEnv];
+  persistAdmin(adminCfg);
+  invalidateAllSessions();
+  res.json({
+    ok: true,
+    message: "凭据已更新，所有登录态已失效，请使用新用户名与密码重新登录。",
+  });
+});
+
+/** Update username and/or password after setup; invalidates all sessions. */
+app.post("/v1/admin/credentials", authMiddleware, (req, res) => {
+  if (!adminCfg.setupCompleted) {
+    res.status(403).json({ error: "setup_required" });
+    return;
+  }
+  const { currentPassword: cur, username, password, confirmPassword } = req.body ?? {};
+  if (typeof cur !== "string" || !safeEqual(cur, currentPassword())) {
     res.status(401).json({ error: "current password mismatch" });
     return;
   }
-  // Runtime-only until local admin file is written by operator.
-  process.env[adminCfg.passwordEnv] = newPassword;
-  res.json({ ok: true, hint: "已更新当前进程密码；持久化请写入 configs/admin.local.json 或环境变量。" });
+  const nextUser = typeof username === "string" && username.trim() ? username.trim() : adminCfg.username;
+  if (nextUser.length < 3) {
+    res.status(400).json({ error: "username must be at least 3 characters" });
+    return;
+  }
+  let nextPass = currentPassword();
+  if (typeof password === "string" && password.length > 0) {
+    if (password.length < 8) {
+      res.status(400).json({ error: "password must be at least 8 characters" });
+      return;
+    }
+    if (password !== confirmPassword) {
+      res.status(400).json({ error: "password confirmation mismatch" });
+      return;
+    }
+    nextPass = password;
+  }
+
+  adminCfg = {
+    ...adminCfg,
+    username: nextUser,
+    defaultPassword: nextPass,
+    setupCompleted: true,
+    sessionHours: 12,
+  };
+  delete process.env[adminCfg.passwordEnv];
+  persistAdmin(adminCfg);
+  invalidateAllSessions();
+  res.json({
+    ok: true,
+    message: "用户名/密码已更新，所有登录态已失效，请重新登录。",
+  });
 });
 
 app.get("/v1/plugins", (_req, res) => {
@@ -391,6 +507,8 @@ const host = process.env.HOST ?? profile.gateway.host;
 
 app.listen(port, host, () => {
   console.log(`[Nexus] env=${profile.id} http://${host}:${port}`);
-  console.log(`[Nexus] admin user=${adminCfg.username} (password via ${adminCfg.passwordEnv} or default)`);
+  console.log(
+    `[Nexus] admin user=${adminCfg.username} setupCompleted=${adminCfg.setupCompleted} sessionHours=${adminCfg.sessionHours}`,
+  );
   console.log(`[Nexus] registry=${registry.baseUrl}`);
 });

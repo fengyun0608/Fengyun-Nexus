@@ -39,7 +39,10 @@ export interface AdminConfig {
   username: string;
   passwordEnv: string;
   defaultPassword: string;
+  /** Login session lifetime in hours (default 12). */
   sessionHours: number;
+  /** False until first console reconfiguration of username/password. */
+  setupCompleted: boolean;
 }
 
 export interface RegistryConfig {

@@ -4,12 +4,11 @@ type Tab = "chat" | "admin" | "ecosystem";
 
 type Meta = {
   env: { id: string; label: string; features: Record<string, boolean>; web: { maxWidth: number } };
+  admin?: { setupCompleted: boolean; sessionHours: number; refreshInvalidatesSession: boolean };
   registry: { baseUrl: string; tokenConfigured: boolean; categories: Record<string, { label: string }> };
 };
 
 type Msg = { role: "user" | "assistant"; content: string };
-
-const TOKEN_KEY = "nexus_admin_token";
 
 async function api<T>(path: string, init?: RequestInit & { token?: string }): Promise<T> {
   const headers: Record<string, string> = {
@@ -19,7 +18,7 @@ async function api<T>(path: string, init?: RequestInit & { token?: string }): Pr
   if (init?.token) headers.authorization = `Bearer ${init.token}`;
   const res = await fetch(path, { ...init, headers });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || res.statusText);
+  if (!res.ok) throw new Error(data.error || data.message || res.statusText);
   return data as T;
 }
 
@@ -31,15 +30,30 @@ export default function App() {
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
-  const [user, setUser] = useState("");
+  // Memory-only: page refresh clears login immediately.
+  const [token, setToken] = useState("");
+  const [mustReconfigure, setMustReconfigure] = useState(false);
+  const [user, setUser] = useState("console");
   const [pass, setPass] = useState("");
   const [loginErr, setLoginErr] = useState("");
   const [overview, setOverview] = useState<Record<string, unknown> | null>(null);
-  const [newPass, setNewPass] = useState("");
+  const [setupUser, setSetupUser] = useState("");
+  const [setupPass, setSetupPass] = useState("");
+  const [setupPass2, setSetupPass2] = useState("");
   const [curPass, setCurPass] = useState("");
+  const [newUser, setNewUser] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [newPass2, setNewPass2] = useState("");
+  const [info, setInfo] = useState("");
 
   useEffect(() => {
+    // Explicitly drop any legacy persisted token from older builds.
+    try {
+      localStorage.removeItem("nexus_admin_token");
+      sessionStorage.removeItem("nexus_admin_token");
+    } catch {
+      /* ignore */
+    }
     api<Meta>("/v1/meta")
       .then((m) => {
         setMeta(m);
@@ -50,19 +64,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!token) return;
-    api<{ user: string }>("/v1/admin/me", { token })
-      .then(() => {
-        return api<Record<string, unknown>>("/v1/admin/overview", { token });
-      })
+    if (!token || mustReconfigure) {
+      setOverview(null);
+      return;
+    }
+    api<Record<string, unknown>>("/v1/admin/overview", { token })
       .then(setOverview)
       .catch(() => {
-        localStorage.removeItem(TOKEN_KEY);
         setToken("");
+        setOverview(null);
       });
-  }, [token]);
+  }, [token, mustReconfigure]);
 
   const envLabel = meta?.env.label ?? "…";
+  const sessionHours = meta?.admin?.sessionHours ?? 12;
 
   const send = async () => {
     const content = input.trim();
@@ -86,31 +101,82 @@ export default function App() {
     }
   };
 
+  const clearSession = (message?: string) => {
+    setToken("");
+    setMustReconfigure(false);
+    setOverview(null);
+    if (message) setInfo(message);
+  };
+
   const login = async () => {
     setLoginErr("");
+    setInfo("");
     try {
-      const res = await api<{ token: string }>("/v1/admin/login", {
+      const res = await api<{
+        token: string;
+        mustReconfigure?: boolean;
+        message?: string;
+      }>("/v1/admin/login", {
         method: "POST",
         body: JSON.stringify({ username: user, password: pass }),
       });
-      localStorage.setItem(TOKEN_KEY, res.token);
-      setToken(res.token);
       setPass("");
+      setToken(res.token);
+      setMustReconfigure(Boolean(res.mustReconfigure));
+      if (res.mustReconfigure) {
+        setInfo(res.message || "请重新配置用户名与密码，完成后需再次登录。");
+        setTab("admin");
+      }
     } catch (e) {
       setLoginErr(e instanceof Error ? e.message : String(e));
     }
   };
 
-  const changePassword = async () => {
+  const submitSetup = async () => {
     if (!token) return;
-    await api("/v1/admin/password", {
-      method: "POST",
-      token,
-      body: JSON.stringify({ currentPassword: curPass, newPassword: newPass }),
-    });
-    setCurPass("");
-    setNewPass("");
-    alert("管理密码已更新（当前进程）。");
+    setLoginErr("");
+    try {
+      const res = await api<{ message?: string }>("/v1/admin/setup-credentials", {
+        method: "POST",
+        token,
+        body: JSON.stringify({
+          username: setupUser,
+          password: setupPass,
+          confirmPassword: setupPass2,
+        }),
+      });
+      setSetupUser("");
+      setSetupPass("");
+      setSetupPass2("");
+      clearSession(res.message || "配置完成，请使用新凭据重新登录。");
+      setUser("");
+    } catch (e) {
+      setLoginErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const updateCredentials = async () => {
+    if (!token) return;
+    setLoginErr("");
+    try {
+      const res = await api<{ message?: string }>("/v1/admin/credentials", {
+        method: "POST",
+        token,
+        body: JSON.stringify({
+          currentPassword: curPass,
+          username: newUser || undefined,
+          password: newPass || undefined,
+          confirmPassword: newPass2 || undefined,
+        }),
+      });
+      setCurPass("");
+      setNewUser("");
+      setNewPass("");
+      setNewPass2("");
+      clearSession(res.message || "凭据已更新，请重新登录。");
+    } catch (e) {
+      setLoginErr(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const cats = useMemo(() => Object.entries(meta?.registry.categories ?? {}), [meta]);
@@ -173,13 +239,18 @@ export default function App() {
             <div className="panel">
               <div className="hero">
                 <h1>管理端</h1>
-                <p>使用管理账号登录后查看插件、通道、工作流与运行环境。</p>
+                <p>
+                  初始账号 console / console。首次登录后必须重配用户名与密码。登录态仅内存保存：刷新页面立即失效；有效期{" "}
+                  {sessionHours} 小时；改密后全部会话立即失效。
+                </p>
               </div>
+
               {!token ? (
                 <div className="form">
+                  {info && <p className="muted">{info}</p>}
                   <label>
                     用户名
-                    <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="admin" />
+                    <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="console" />
                   </label>
                   <label>
                     管理密码
@@ -187,26 +258,38 @@ export default function App() {
                       type="password"
                       value={pass}
                       onChange={(e) => setPass(e.target.value)}
-                      placeholder="默认见配置 / 环境变量"
+                      placeholder="初始为 console"
                     />
                   </label>
                   {loginErr && <div className="error">{loginErr}</div>}
                   <button className="btn" onClick={() => void login()}>
                     登录
                   </button>
-                  <p className="muted">默认用户 admin；密码优先读 NEXUS_ADMIN_PASSWORD，否则为配置默认值。</p>
+                </div>
+              ) : mustReconfigure ? (
+                <div className="form">
+                  <p className="muted">首次配置：请设置新的管理用户名与密码，完成后需重新登录。</p>
+                  <label>
+                    新用户名
+                    <input value={setupUser} onChange={(e) => setSetupUser(e.target.value)} />
+                  </label>
+                  <label>
+                    新密码（至少 8 位）
+                    <input type="password" value={setupPass} onChange={(e) => setSetupPass(e.target.value)} />
+                  </label>
+                  <label>
+                    确认新密码
+                    <input type="password" value={setupPass2} onChange={(e) => setSetupPass2(e.target.value)} />
+                  </label>
+                  {loginErr && <div className="error">{loginErr}</div>}
+                  <button className="btn" onClick={() => void submitSetup()}>
+                    保存并重新登录
+                  </button>
                 </div>
               ) : (
                 <div className="form">
-                  <p className="muted">已登录管理会话。</p>
-                  <button
-                    className="btn ghost"
-                    onClick={() => {
-                      localStorage.removeItem(TOKEN_KEY);
-                      setToken("");
-                      setOverview(null);
-                    }}
-                  >
+                  <p className="muted">已登录（内存会话，刷新即失效）。</p>
+                  <button className="btn ghost" onClick={() => clearSession()}>
                     退出
                   </button>
                   <label>
@@ -214,11 +297,20 @@ export default function App() {
                     <input type="password" value={curPass} onChange={(e) => setCurPass(e.target.value)} />
                   </label>
                   <label>
-                    新密码（至少 8 位）
+                    新用户名（可留空表示不改）
+                    <input value={newUser} onChange={(e) => setNewUser(e.target.value)} />
+                  </label>
+                  <label>
+                    新密码（可留空表示不改，至少 8 位）
                     <input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} />
                   </label>
-                  <button className="btn" onClick={() => void changePassword()}>
-                    修改管理密码
+                  <label>
+                    确认新密码
+                    <input type="password" value={newPass2} onChange={(e) => setNewPass2(e.target.value)} />
+                  </label>
+                  {loginErr && <div className="error">{loginErr}</div>}
+                  <button className="btn" onClick={() => void updateCredentials()}>
+                    更新凭据（将踢出所有登录）
                   </button>
                 </div>
               )}
@@ -250,7 +342,7 @@ export default function App() {
                 </>
               ) : (
                 <p className="muted" style={{ padding: 18 }}>
-                  登录后显示概览。
+                  {mustReconfigure ? "完成首次凭据配置并重新登录后显示概览。" : "登录后显示概览。"}
                 </p>
               )}
             </div>

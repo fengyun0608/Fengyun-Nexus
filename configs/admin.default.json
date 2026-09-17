@@ -1,6 +1,7 @@
 {
-  "username": "admin",
+  "username": "console",
   "passwordEnv": "NEXUS_ADMIN_PASSWORD",
-  "defaultPassword": "nexus-admin-change-me",
-  "sessionHours": 24
+  "defaultPassword": "console",
+  "sessionHours": 12,
+  "setupCompleted": false
 }
