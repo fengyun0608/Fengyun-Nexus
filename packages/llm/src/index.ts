@@ -39,14 +39,27 @@ export class LlmRouter {
 
     const base = (this.opts.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
     const model = this.opts.model ?? "gpt-4o-mini";
-    const res = await fetch(`${base}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.opts.apiKey}`,
-      },
-      body: JSON.stringify({ model, messages, stream: false }),
-    });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 45_000);
+    let res: Response;
+    try {
+      res = await fetch(`${base}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.opts.apiKey}`,
+        },
+        body: JSON.stringify({ model, messages, stream: false }),
+        signal: ctrl.signal,
+      });
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") {
+        throw new Error("LLM 请求超时");
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) {
       const err = await res.text();
       throw new Error(`LLM error ${res.status}: ${err}`);

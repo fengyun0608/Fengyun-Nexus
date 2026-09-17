@@ -514,11 +514,30 @@ async function bootstrap(): Promise<void> {
       createdAt: msg.createdAt,
     });
 
-    const pluginReplies = await plugins.onMessage(msg, (id) => ({
-      pluginId: id,
-      reply: async () => undefined,
-      log: (m) => log.plugin(id, m),
-    }));
+    const pluginReplies = await Promise.race([
+      plugins.onMessage(msg, (id) => ({
+        pluginId: id,
+        reply: async () => undefined,
+        log: (m) => log.plugin(id, m),
+      })),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("插件处理超时")), 55_000);
+      }),
+    ]).catch((e) => {
+      const tip = e instanceof Error ? e.message : String(e);
+      log.warn(`插件分发失败：${tip}`);
+      return [
+        {
+          id: newId("msg"),
+          channel: msg.channel,
+          chatId: msg.chatId,
+          userId: "nexus",
+          type: "text" as const,
+          content: tip.includes("超时") ? "插件处理超时，请稍后重试" : `插件异常：${tip}`,
+          createdAt: nowIso(),
+        },
+      ];
+    });
 
     if (pluginReplies.length) {
       const texts = pluginReplies.map((r) => {
@@ -554,7 +573,18 @@ async function bootstrap(): Promise<void> {
       role: t.role as "user" | "assistant" | "system",
       content: t.content,
     }));
-    const assistant = (await llm.chat(history)).trim();
+    const assistant = (
+      await Promise.race([
+        llm.chat(history),
+        new Promise<string>((_, reject) => {
+          setTimeout(() => reject(new Error("AI 响应超时")), 50_000);
+        }),
+      ]).catch((e) => {
+        const tip = e instanceof Error ? e.message : String(e);
+        log.warn(`LLM 调用失败：${tip}`);
+        return tip.includes("超时") ? "AI 响应超时" : `AI 异常：${tip}`;
+      })
+    ).trim();
     if (!assistant) return [];
 
     sessions.append(session, "assistant", assistant);
@@ -586,10 +616,16 @@ async function bootstrap(): Promise<void> {
     const msg = web.normalizeInbound(raw);
     const texts = await processInbound(msg, opts);
     let assistant = texts.join("\n");
-    if (!assistant && opts?.isAdminConsole) {
+    if (!assistant) {
       const c = String((raw as { content?: string } | null)?.content ?? "").trim();
-      if (c.startsWith("#")) {
-        assistant = "未命中指令，发送 #帮助";
+      if (opts?.isAdminConsole) {
+        if (c.startsWith("#")) {
+          assistant = "未命中指令，发送 #帮助";
+        } else {
+          assistant = "无插件应答。管理指令发送 #帮助";
+        }
+      } else if (c.startsWith("#")) {
+        assistant = "无权限或未登录";
       }
     }
     const replies = texts.map((content) =>

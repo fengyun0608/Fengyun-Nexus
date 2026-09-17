@@ -110,15 +110,20 @@ export async function renderMenuShot(opts: {
     const browser = await pw.chromium.launch({
       headless: true,
       executablePath: process.env.NEXUS_BROWSER_BIN || undefined,
+      timeout: 20_000,
     });
     try {
       const page = await browser.newPage({
         viewport: { width: 800, height: 1000 },
         deviceScaleFactor: 2,
       });
-      await page.goto(pathToFileURL(htmlPath).href, { waitUntil: "networkidle" });
+      page.setDefaultTimeout(15_000);
+      await page.goto(pathToFileURL(htmlPath).href, {
+        waitUntil: "domcontentloaded",
+        timeout: 15_000,
+      });
       const el = page.locator("#shot");
-      await el.screenshot({ path: pngPath, type: "png" });
+      await el.screenshot({ path: pngPath, type: "png", timeout: 10_000 });
     } finally {
       await browser.close();
     }

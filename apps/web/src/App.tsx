@@ -227,17 +227,41 @@ function writeStoredToken(token: string): void {
   }
 }
 
-async function api<T>(path: string, init?: RequestInit & { token?: string }): Promise<T> {
+async function api<T>(path: string, init?: RequestInit & { token?: string; timeoutMs?: number }): Promise<T> {
+  const { token, timeoutMs, headers: initHeaders, ...rest } = init ?? {};
   const headers: Record<string, string> = {
     "content-type": "application/json",
-    ...(init?.headers as Record<string, string> | undefined),
+    ...(initHeaders as Record<string, string> | undefined),
   };
-  if (init?.token) headers.authorization = `Bearer ${init.token}`;
-  const res = await fetch(path, { ...init, headers });
-  const data = await res.json();
+  if (token) headers.authorization = `Bearer ${token}`;
+
+  const ctrl = new AbortController();
+  const ms = timeoutMs ?? 45_000;
+  const timer = window.setTimeout(() => ctrl.abort(), ms);
+  let res: Response;
+  try {
+    res = await fetch(path, { ...rest, headers, signal: ctrl.signal });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error(`请求超时（${Math.round(ms / 1000)} 秒）`);
+    }
+    throw e;
+  } finally {
+    window.clearTimeout(timer);
+  }
+
+  const text = await res.text();
+  let data: Record<string, unknown> = {};
+  if (text) {
+    try {
+      data = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error(res.ok ? "响应不是 JSON" : `HTTP ${res.status}`);
+    }
+  }
   if (!res.ok) {
-    const tip = data.error || data.message || res.statusText;
-    const hint = data.hint ? `（${data.hint}）` : "";
+    const tip = String(data.error || data.message || res.statusText || "请求失败");
+    const hint = data.hint ? `（${String(data.hint)}）` : "";
     throw new Error(`${tip}${hint}`);
   }
   return data as T;
@@ -764,13 +788,14 @@ export default function App() {
   const send = async () => {
     const content = input.trim();
     if (!content || busy) return;
-    setInput("");
-    setMsgs((m) => [...m, { role: "user", content }]);
     setBusy(true);
+    setMsgs((m) => [...m, { role: "user", content }]);
+    setInput("");
     try {
       const res = await api<{ assistant: string }>("/v1/chat", {
         method: "POST",
         token: token || undefined,
+        timeoutMs: 60_000,
         body: JSON.stringify({ content, chatId: "web-main", userId: "web-user" }),
       });
       setMsgs((m) => [
@@ -1429,15 +1454,18 @@ export default function App() {
               <textarea
                 value={input}
                 placeholder={tr("typeMessage")}
+                disabled={false}
+                autoComplete="off"
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     void send();
                   }
                 }}
               />
-              <button className="btn" disabled={busy} onClick={() => void send()}>
+              <button className="btn" disabled={busy || !input.trim()} onClick={() => void send()}>
                 {busy ? tr("sending") : tr("send")}
               </button>
             </div>
