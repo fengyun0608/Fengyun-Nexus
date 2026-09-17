@@ -35,7 +35,8 @@ GitCode 的 `raw` 链接常返回网页，**不要**再用 `curl …/raw/… | b
 - 强制重装：`NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`
 
 ```bash
-pkg install -y openssl ca-certificates git
+yes | apt update && yes | apt full-upgrade -y
+pkg reinstall -y openssl libcurl libssh2 ca-certificates git
 git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
 bash ~/Fengyun-Nexus/termux-install.sh
 ```

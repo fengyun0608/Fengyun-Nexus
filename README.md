@@ -54,10 +54,13 @@ cd Fengyun-Nexus
 - Termux：
 
 ```bash
-pkg install -y openssl ca-certificates git
+yes | apt update && yes | apt full-upgrade -y
+pkg reinstall -y openssl libcurl libssh2 ca-certificates git
 git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
 bash ~/Fengyun-Nexus/termux-install.sh
 ```
+
+若出现 `libssl.so.1.1 not found`，说明 Termux 包只升了一半，**必须先 `apt full-upgrade`**，不要只装 git。
 
 手机端**只这一个脚本**：自动检测未装 / 残缺 / 已装，修好环境并拉齐后启动，**不弹选择题**。  
 强制整仓重装：`cd ~ && NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`  

@@ -2,8 +2,10 @@
 # Fengyun Nexus — 手机端 / Termux 唯一安装入口（自动检测，不问选择题）
 #
 # 用法（推荐始终在家目录执行，避免删仓时 cwd 失效）：
-#   pkg install -y openssl ca-certificates git
-#   bash -c 'git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus 2>/dev/null; bash ~/Fengyun-Nexus/termux-install.sh'
+#   yes | apt update && yes | apt full-upgrade -y
+#   pkg reinstall -y openssl libcurl libssh2 ca-certificates git
+#   git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
+#   bash ~/Fengyun-Nexus/termux-install.sh
 #
 # 或仓已在：
 #   bash ~/Fengyun-Nexus/termux-install.sh
@@ -30,35 +32,56 @@ log() { echo ">>> $*"; }
 ok() { echo "OK  $*"; }
 warn() { echo "!!  $*"; }
 
-# Termux 的 git 会带上 openssh；openssh 安装脚本会调 ssh-keygen，
-# 缺 openssl 时出现 libcrypto.so.3 not found。HTTPS 克隆不需要 ssh，但必须先装 openssl。
+# Termux 常见坑：只装了 git/openssl，没 full-upgrade → libcurl 仍链 libssl.so.1.1，
+# git-remote-https / curl 全部 CANNOT LINK。必须先对齐再克隆。
 pkg_fix_termux_base() {
   if ! command -v pkg >/dev/null 2>&1; then
     return 1
   fi
-  pkg update -y || true
-  # openssl 提供 libcrypto.so.3；ca-certificates 给 HTTPS git clone
-  pkg install -y openssl ca-certificates git || pkg install -y git
-  # 装完再补一次 openssl，避免旧镜像残留缺库
-  pkg install -y openssl >/dev/null 2>&1 || true
+  log "对齐 Termux 包（full-upgrade + 重装 openssl/libcurl）"
+  # pkg 依赖 curl；curl 坏了时改用 apt（仍可能走 https method）
+  yes | apt update 2>/dev/null || pkg update -y || true
+  yes | apt full-upgrade -y 2>/dev/null || pkg upgrade -y || true
+  pkg install -y openssl ca-certificates libcurl libssh2 git || true
+  pkg reinstall -y openssl libcurl libssh2 ca-certificates git || true
+  # 过渡期：若仍有 openssl-1.1 目录，补上动态链接器常用路径
+  local libdir="${PREFIX:-/data/data/com.termux/files/usr}/lib"
+  if [ -d "$libdir/openssl-1.1" ]; then
+    ln -sf openssl-1.1/libssl.so.1.1 "$libdir/libssl.so.1.1" 2>/dev/null || true
+    ln -sf openssl-1.1/libcrypto.so.1.1 "$libdir/libcrypto.so.1.1" 2>/dev/null || true
+  fi
+  return 0
+}
+
+git_https_ok() {
+  command -v git >/dev/null 2>&1 || return 1
+  # 探测 remote-https 能否加载（不真正联网）
+  if ! git remote-https 2>&1 | head -n 1 >/dev/null 2>&1; then
+    # 有的版本无此子命令输出；用 ldd/直接跑一次空探测
+    :
+  fi
+  # 真正能跑：对假地址短超时；失败则看 CANNOT LINK
+  local out
+  out="$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads https://example.invalid/ 2>&1 || true)"
+  echo "$out" | grep -qi 'CANNOT LINK\|libssl\.so\|libcrypto\.so' && return 1
+  return 0
 }
 
 ensure_git() {
-  if command -v git >/dev/null 2>&1; then
-    # 已有 git 但仍可能缺 libcrypto：补装 openssl，避免后续偶发失败
-    if command -v pkg >/dev/null 2>&1; then
-      if ! command -v openssl >/dev/null 2>&1 || \
-         ! ls "${PREFIX:-/data/data/com.termux/files/usr}/lib"/libcrypto.so* >/dev/null 2>&1; then
-        pkg install -y openssl ca-certificates || true
-      fi
+  if command -v pkg >/dev/null 2>&1; then
+    pkg_fix_termux_base || true
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    echo "未找到 git，请先安装"
+    exit 1
+  fi
+  if ! git_https_ok; then
+    warn "git HTTPS 仍异常，再强制重装一次网络库"
+    pkg reinstall -y openssl libcurl libssh2 git || true
+    if ! git_https_ok; then
+      warn "git HTTPS 探测仍失败，将尝试 zip 下载回退"
     fi
-    return 0
   fi
-  if pkg_fix_termux_base; then
-    return 0
-  fi
-  echo "未找到 git，请先安装"
-  exit 1
 }
 
 framework_ok() {
@@ -130,13 +153,77 @@ remove_install_dir() {
   safe_cd_home
 }
 
+clone_via_zip() {
+  # GitCode / GitHub 风格 archive；不依赖 git-remote-https
+  local zip_urls=(
+    "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/repository/archive/${BRANCH}.zip"
+    "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/-/archive/${BRANCH}/Fengyun-Nexus-${BRANCH}.zip"
+  )
+  local tmp="$HOME/.nexus-dl-$$"
+  mkdir -p "$tmp"
+  local z="$tmp/nexus.zip"
+  local ok_dl=0
+  local u
+  for u in "${zip_urls[@]}"; do
+    log "尝试 zip 下载 $u"
+    if command -v curl >/dev/null 2>&1 && curl -fsSL --connect-timeout 20 -o "$z" "$u"; then
+      ok_dl=1
+      break
+    fi
+    if command -v wget >/dev/null 2>&1 && wget -q -O "$z" "$u"; then
+      ok_dl=1
+      break
+    fi
+  done
+  if [ "$ok_dl" != "1" ] || [ ! -s "$z" ]; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  command -v unzip >/dev/null 2>&1 || pkg install -y unzip || true
+  unzip -q "$z" -d "$tmp/out" || {
+    rm -rf "$tmp"
+    return 1
+  }
+  local src=""
+  # Termux busybox find 可能没有 -printf
+  while IFS= read -r f; do
+    src="$(dirname "$f")"
+    break
+  done < <(find "$tmp/out" -maxdepth 3 -type f \( -name package.json -o -name boot.sh \) 2>/dev/null)
+  if [ -z "$src" ] || [ ! -f "$src/boot.sh" ]; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  rm -rf "$INSTALL_DIR"
+  mv "$src" "$INSTALL_DIR"
+  rm -rf "$tmp"
+  ok "已用 zip 安装到 $INSTALL_DIR"
+  return 0
+}
+
 clone_fresh() {
   heal_cwd
   safe_cd_home
   mkdir -p "$(dirname "$INSTALL_DIR")"
   log "克隆 $REPO_URL"
-  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" || \
-    git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+  if git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" 2>/tmp/nexus-git-err.$$ || \
+     git clone --depth 1 "$REPO_URL" "$INSTALL_DIR" 2>>/tmp/nexus-git-err.$$; then
+    rm -f /tmp/nexus-git-err.$$
+    return 0
+  fi
+  warn "git clone 失败，尝试 zip 回退"
+  cat /tmp/nexus-git-err.$$ 2>/dev/null || true
+  rm -f /tmp/nexus-git-err.$$
+  remove_install_dir
+  if clone_via_zip; then
+    return 0
+  fi
+  echo "克隆失败。请先在 Termux 执行："
+  echo "  yes | apt update && yes | apt full-upgrade -y"
+  echo "  pkg reinstall -y openssl libcurl libssh2 ca-certificates git"
+  echo "然后再："
+  echo "  cd ~ && git clone --depth 1 $REPO_URL \"$INSTALL_DIR\" && bash \"$INSTALL_DIR/termux-install.sh\""
+  exit 1
 }
 
 finalize_tree() {
