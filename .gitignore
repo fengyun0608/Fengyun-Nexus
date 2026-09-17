@@ -3,11 +3,19 @@ dist/
 build/
 .turbo/
 *.log
+
+# Personal / runtime secrets — never commit or push
 .env
-.env.local
-configs/registry.local.json
+.env.*
+!.env.example
+configs/*.local.json
 configs/admin.local.json
+configs/registry.local.json
 data/
+*.pem
+*.key
+credentials*.json
+
 .DS_Store
 *.tsbuildinfo
 .vite/

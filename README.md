@@ -44,39 +44,31 @@
 - **插件生态**：远程源挂载示例、基础、标准插件（地址见仓库配置）
 - **工作流与工具桥**：把对话、插件、通道串起来，并对外暴露工具能力
 
-## 快速开始
+## 启动方法（越简单越好）
 
-先确认已安装 [必备环境](docs/product/environment.md)，再执行：
+**方式 A（推荐，Windows）**  
+双击仓库根目录的 `启动.bat`。
+
+**方式 B（一条命令）**
 
 ```bash
 cd Fengyun-Nexus
-pnpm install
-pnpm run build:packages
-# 终端 1
-pnpm dev
-# 终端 2
-pnpm dev:web
+pnpm boot
 ```
 
-浏览器打开控制台（默认开发页），即可对话。
+首次会自动 `install` + 编译内部包，然后同时拉起网关和控制台。  
+浏览器打开：**http://127.0.0.1:5173**
 
-管理端初始账号：
+管理端初始：`console` / `console`（首次登录后必须改用户名密码并重新登录）。  
+刷新页面登录态会失效；会话 12 小时；改密后全部会话失效。
 
-- 用户名：`console`
-- 密码：`console`
+> 你的本地配置（密码、Token、`.env`、`*.local.json`）**不会上传到 GitCode**，已写入 `.gitignore`。
 
-首次登录后**必须**在控制台重配用户名与密码，然后重新登录。刷新页面会使登录态立即失效；会话有效期 12 小时；修改用户名/密码会使全部会话立即失效。
-
-也可用环境变量 `NEXUS_ADMIN_PASSWORD` 覆盖当前密码（一般仅调试用）。
-
-运行环境：
+切换姿态（可选）：
 
 ```bash
-# 手机端 / 电脑端 / 服务器
-set NEXUS_ENV=mobile    # Windows
-# export NEXUS_ENV=desktop
-# export NEXUS_ENV=server
-pnpm dev
+set NEXUS_ENV=mobile
+pnpm boot
 ```
 
 ## 远程插件源

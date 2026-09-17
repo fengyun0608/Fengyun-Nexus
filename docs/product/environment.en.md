@@ -35,15 +35,22 @@ git --version
 
 ## First run
 
-```bash
-cd Fengyun-Nexus
-pnpm install
-pnpm run build:packages
-pnpm dev          # gateway http://127.0.0.1:8787
-pnpm dev:web      # console http://127.0.0.1:5173
-```
+**Simplest**
 
-Open `http://127.0.0.1:5173`. Admin bootstrap: `console` / `console` — then reconfigure and log in again. See [How it works](how-it-works.en.md).
+- Windows: double-click `启动.bat`
+- Or: `pnpm boot`
+
+Opens http://127.0.0.1:5173 after auto install/build when needed.
+
+### Your local config is never uploaded
+
+Ignored by git (will not be pushed):
+
+- `.env` / `.env.*`
+- `configs/*.local.json`
+- `data/`
+
+Only templates like `admin.default.json` and `.env.example` live in the repo.
 
 ---
 

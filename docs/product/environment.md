@@ -38,25 +38,31 @@ git --version
 
 ## 首次把项目跑起来
 
+**最简单：**
+
+- Windows：双击根目录 `启动.bat`
+- 或一条命令：`pnpm boot`
+
+会自动安装依赖（如需要）、编译内部包，并同时启动网关 + 控制台。  
+浏览器打开 `http://127.0.0.1:5173`。
+
+手动分步（一般不必）：
+
 ```bash
-# 1. 进入仓库
-cd Fengyun-Nexus
-
-# 2. 安装依赖
 pnpm install
-
-# 3. 编译内部包（首次或改 packages 后需要）
 pnpm run build:packages
-
-# 4. 开两个终端
-pnpm dev          # 网关，默认 http://127.0.0.1:8787
-pnpm dev:web      # 控制台，默认 http://127.0.0.1:5173
+pnpm run dev:all
 ```
 
-浏览器打开 `http://127.0.0.1:5173`：
+### 你的本地配置不会上传
 
-- **对话**：可直接用  
-- **管理**：初始 `console` / `console`，首次登录后必须改用户名密码并重新登录  
+以下文件只留在你电脑上，**已忽略、不会 push**：
+
+- `.env` / `.env.*`（密钥）
+- `configs/*.local.json`（含管理账号、远程 Token 等）
+- `data/` 运行数据
+
+仓库里只有默认模板（如 `admin.default.json`、`.env.example`），不含你改过的密码。
 
 更完整启动与安全规则见：[如何运作](how-it-works.md)。
 
