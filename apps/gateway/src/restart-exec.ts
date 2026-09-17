@@ -4,8 +4,8 @@ import { join } from "node:path";
 
 /**
  * Invoke repo-root restart executable (like Yunzai-style system restart).
- * - Windows: restart.bat
- * - Unix/Termux: restart.sh → boot.sh
+ * - Windows: start /min restart.bat in a breakaway console so it survives gateway exit
+ * - Unix/Termux: restart.sh backgrounds wait + boot.sh
  */
 export function scheduleSystemRestart(root: string): {
   ok: boolean;
@@ -27,24 +27,40 @@ export function scheduleSystemRestart(root: string): {
       }
     }
 
-    const child = isWin
-      ? spawn("cmd.exe", ["/c", script], {
+    if (isWin) {
+      // CRITICAL: do NOT use `cmd /c restart.bat` alone — that process exits with the
+      // gateway and nested `start /b` children often die with it.
+      // `start "title" /min` creates a new console process that outlives us.
+      const child = spawn(
+        "cmd.exe",
+        ["/c", "start", "FengyunNexusRestart", "/min", "cmd.exe", "/c", `call "${script}"`],
+        {
           cwd: root,
           detached: true,
           stdio: "ignore",
           windowsHide: true,
-          env: { ...process.env },
-        })
-      : spawn("bash", [script], {
-          cwd: root,
-          detached: true,
-          stdio: "ignore",
-          env: { ...process.env },
-        });
+          env: {
+            ...process.env,
+            NEXUS_RESTART_DELAY: process.env.NEXUS_RESTART_DELAY || "4",
+          },
+        },
+      );
+      child.unref();
+    } else {
+      const child = spawn("bash", [script], {
+        cwd: root,
+        detached: true,
+        stdio: "ignore",
+        env: {
+          ...process.env,
+          NEXUS_RESTART_DELAY: process.env.NEXUS_RESTART_DELAY || "4",
+        },
+      });
+      child.unref();
+    }
 
-    child.unref();
     return { ok: true, message: "正在重启", script };
-  } catch (e) {
+  } catch {
     return {
       ok: false,
       message: "重启失败",

@@ -1,14 +1,23 @@
 @echo off
-REM Fengyun Nexus — system-level restart executable
-REM Invoked by gateway #重启: wait, then start.bat
+REM Fengyun Nexus — system restart (called by #重启)
+REM Parent launches this via: start /min ... so we survive gateway exit.
+setlocal EnableExtensions
 cd /d "%~dp0"
+
 if not exist "data" mkdir data
-set DELAY=%NEXUS_RESTART_DELAY%
-if "%DELAY%"=="" set DELAY=2
+set "LOG=%~dp0data\restart.log"
+set "DELAY=%NEXUS_RESTART_DELAY%"
+if "%DELAY%"=="" set "DELAY=4"
 
-echo [%date% %time%] Nexus restart begin delay=%DELAY%s>> "data\restart.log"
+echo [%date% %time%] restart.bat begin delay=%DELAY%s>> "%LOG%"
 
-start "" /b cmd /c "timeout /t %DELAY% /nobreak >nul & call \"%~dp0start.bat\" >> \"%~dp0data\restart.log\" 2>&1"
+REM Wait for old gateway to release the listen port
+timeout /t %DELAY% /nobreak >nul
 
-echo Fengyun Nexus restart scheduled
+echo [%date% %time%] launching start.bat in new console>> "%LOG%"
+REM New titled console = the running Nexus instance (one window, stays while gateway runs)
+start "Fengyun Nexus" /D "%~dp0" cmd /c "call start.bat >> data\restart.log 2>&1 & if errorlevel 1 (echo Boot failed & pause)"
+
+echo [%date% %time%] restart scheduled OK>> "%LOG%"
+endlocal
 exit /b 0

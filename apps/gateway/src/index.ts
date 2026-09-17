@@ -483,7 +483,8 @@ async function bootstrap(): Promise<void> {
             return [r.message];
           }
           log.ok(`已调用系统重启程序 → ${r.script}`);
-          setTimeout(() => process.exit(0), 1600);
+          // Give the detached restart console a moment to spawn before we die
+          setTimeout(() => process.exit(0), 2200);
         }
         return replies;
       }
@@ -1391,7 +1392,7 @@ async function bootstrap(): Promise<void> {
       } else {
         log.warn(`更新完成，但重启程序未就绪：${r.message}`);
       }
-      setTimeout(() => process.exit(0), 900);
+      setTimeout(() => process.exit(0), 2200);
     }
   });
 
