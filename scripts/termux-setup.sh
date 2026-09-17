@@ -10,10 +10,10 @@
 #   cd ~/Fengyun-Nexus && bash scripts/termux-setup.sh
 #
 # 目录已在但缺脚本（旧残缺仓）先拉齐再跑：
-#   cd ~/Fengyun-Nexus
-#   git fetch --depth 1 origin main
-#   git reset --hard origin/main
-#   bash scripts/termux-setup.sh
+#   cd ~
+#   git -C ~/Fengyun-Nexus fetch --depth 1 origin main
+#   git -C ~/Fengyun-Nexus reset --hard origin/main
+#   bash ~/Fengyun-Nexus/scripts/termux-setup.sh
 #
 # 不要 curl GitCode /raw/… | bash
 set -euo pipefail
@@ -24,6 +24,12 @@ set -euo pipefail
 REPO_URL="${NEXUS_REPO_URL:-https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git}"
 INSTALL_DIR="${NEXUS_INSTALL_DIR:-$HOME/Fengyun-Nexus}"
 BRANCH="${NEXUS_BRANCH:-main}"
+
+# 删掉安装目录前必须离开该目录，否则 cwd 失效，git clone 会报
+# fatal: Unable to read current working directory: No such file or directory
+safe_cd_home() {
+  cd "$HOME" 2>/dev/null || cd / 2>/dev/null || true
+}
 
 is_termux() {
   [ -n "${TERMUX_VERSION:-}" ] || echo "${PREFIX:-}" | grep -q com.termux
@@ -62,6 +68,9 @@ install_env() {
     exit 1
   fi
   npm config set allow-scripts=pnpm --location=user >/dev/null 2>&1 || true
+  # 去掉会刷警告的旧 npm 配置
+  npm config delete manage-package-manager-versions --location=user >/dev/null 2>&1 || true
+  npm config delete package-manager-strict --location=user >/dev/null 2>&1 || true
   npm install -g pnpm@9.15.0
   if ! command -v pnpm >/dev/null 2>&1; then
     echo "未找到 pnpm"
@@ -69,11 +78,8 @@ install_env() {
   fi
   export NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false
   if [ -f "$HOME/.npmrc" ]; then
-    if ! grep -q 'manage-package-manager-versions=false' "$HOME/.npmrc" 2>/dev/null; then
-      printf '\nmanage-package-manager-versions=false\npackage-manager-strict=false\n' >> "$HOME/.npmrc"
-    fi
-  else
-    printf 'manage-package-manager-versions=false\npackage-manager-strict=false\n' > "$HOME/.npmrc"
+    # 清理已废弃键，避免 npm warn
+    sed -i '/^manage-package-manager-versions=/d;/^package-manager-strict=/d' "$HOME/.npmrc" 2>/dev/null || true
   fi
   echo "环境就绪  node=$(node -v)  pnpm=$(pnpm -v)"
 }
@@ -91,36 +97,59 @@ sync_git_tree() {
   git -C "$INSTALL_DIR" clean -fd
 }
 
+remove_install_dir() {
+  safe_cd_home
+  if [ -d "$INSTALL_DIR" ]; then
+    echo "移除旧框架目录…"
+    rm -rf "$INSTALL_DIR"
+  fi
+  # 确认 cwd 仍可用
+  safe_cd_home
+  pwd >/dev/null
+}
+
+clone_fresh() {
+  safe_cd_home
+  mkdir -p "$(dirname "$INSTALL_DIR")"
+  echo "克隆 $REPO_URL → $INSTALL_DIR"
+  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" || \
+    git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+}
+
 # 克隆 / 拉齐 / 强制重装框架（无提问）
+# force=1：删目录重装；force=0：尽量拉齐，残缺再重装
 install_framework() {
   local force="${1:-0}"
   echo ">>> 安装框架 → $INSTALL_DIR"
   ensure_git
-  PARENT="$(dirname "$INSTALL_DIR")"
-  mkdir -p "$PARENT"
+  mkdir -p "$(dirname "$INSTALL_DIR")"
+  safe_cd_home
 
-  if [ "$force" = "1" ] && [ -d "$INSTALL_DIR" ]; then
-    echo "移除旧框架目录…"
-    rm -rf "$INSTALL_DIR"
-  fi
-
-  if [ -d "$INSTALL_DIR/.git" ]; then
+  if [ "$force" = "1" ]; then
+    remove_install_dir
+    clone_fresh
+  elif [ -d "$INSTALL_DIR/.git" ]; then
     echo "拉齐远程 $BRANCH…"
     sync_git_tree
   else
     if [ -d "$INSTALL_DIR" ]; then
       echo "目录存在但不是完整 git 仓，已改名备份"
+      safe_cd_home
       mv "$INSTALL_DIR" "${INSTALL_DIR}.bak.$(date +%s)"
     fi
-    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" || \
-      git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+    clone_fresh
   fi
 
   if ! framework_ok; then
     echo "框架文件仍不完整，强制重装…"
-    rm -rf "$INSTALL_DIR"
-    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" || \
-      git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+    remove_install_dir
+    clone_fresh
+  fi
+
+  if ! framework_ok; then
+    echo "克隆后仍缺少 boot.sh，请检查网络后重试："
+    echo "  cd ~ && rm -rf \"$INSTALL_DIR\" && git clone --depth 1 $REPO_URL \"$INSTALL_DIR\""
+    exit 1
   fi
 
   cd "$INSTALL_DIR"
@@ -129,10 +158,11 @@ install_framework() {
   export NEXUS_ENV="${NEXUS_ENV:-termux}"
   export NEXUS_BOOT_MODE="${NEXUS_BOOT_MODE:-lite}"
   if [ ! -f .npmrc ]; then
-    printf 'manage-package-manager-versions=false\npackage-manager-strict=false\n' > .npmrc
+    printf 'package-manager-strict=false\n' > .npmrc
   fi
   date -u +%Y-%m-%dT%H:%M:%SZ > "$INSTALL_DIR/.nexus-installed"
   echo "框架就绪  $INSTALL_DIR"
+  git -C "$INSTALL_DIR" log -1 --oneline 2>/dev/null || true
 }
 
 boot_now() {
