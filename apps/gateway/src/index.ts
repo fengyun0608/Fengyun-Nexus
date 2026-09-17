@@ -127,6 +127,30 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ba, bb);
 }
 
+/** English letters only, length 4–8. */
+function validateUsername(username: string): string | null {
+  if (!/^[A-Za-z]{4,8}$/.test(username)) {
+    return "用户名须为 4–8 位英文字母";
+  }
+  if (username.toLowerCase() === "console") {
+    return "请勿使用保留用户名 console";
+  }
+  return null;
+}
+
+/**
+ * Strong password: ≥10 chars, upper, lower, digit, special.
+ */
+function validatePassword(password: string): string | null {
+  if (password.length < 10) return "密码至少 10 位";
+  if (!/[a-z]/.test(password)) return "密码须含小写字母";
+  if (!/[A-Z]/.test(password)) return "密码须含大写字母";
+  if (!/[0-9]/.test(password)) return "密码须含数字";
+  if (!/[^A-Za-z0-9]/.test(password)) return "密码须含特殊字符";
+  if (password === "console") return "请勿使用初始密码";
+  return null;
+}
+
 loadDotEnv();
 
 const envId = resolveEnvId();
@@ -372,20 +396,22 @@ app.get("/v1/admin/overview", authMiddleware, (req, res) => {
 /** First-time or forced console reconfiguration of username + password. */
 app.post("/v1/admin/setup-credentials", authMiddleware, (req, res) => {
   const { username, password, confirmPassword } = req.body ?? {};
-  if (typeof username !== "string" || username.trim().length < 3) {
-    res.status(400).json({ error: "username must be at least 3 characters" });
+  if (typeof username !== "string" || typeof password !== "string") {
+    res.status(400).json({ error: "invalid payload" });
     return;
   }
-  if (typeof password !== "string" || password.length < 8) {
-    res.status(400).json({ error: "password must be at least 8 characters" });
+  const uErr = validateUsername(username.trim());
+  if (uErr) {
+    res.status(400).json({ error: uErr });
+    return;
+  }
+  const pErr = validatePassword(password);
+  if (pErr) {
+    res.status(400).json({ error: pErr });
     return;
   }
   if (password !== confirmPassword) {
-    res.status(400).json({ error: "password confirmation mismatch" });
-    return;
-  }
-  if (username.trim() === "console" && password === "console") {
-    res.status(400).json({ error: "请勿继续使用初始账号 console / console" });
+    res.status(400).json({ error: "两次密码不一致" });
     return;
   }
 
@@ -416,19 +442,24 @@ app.post("/v1/admin/credentials", authMiddleware, (req, res) => {
     res.status(401).json({ error: "current password mismatch" });
     return;
   }
-  const nextUser = typeof username === "string" && username.trim() ? username.trim() : adminCfg.username;
-  if (nextUser.length < 3) {
-    res.status(400).json({ error: "username must be at least 3 characters" });
-    return;
+  let nextUser = adminCfg.username;
+  if (typeof username === "string" && username.trim()) {
+    const uErr = validateUsername(username.trim());
+    if (uErr) {
+      res.status(400).json({ error: uErr });
+      return;
+    }
+    nextUser = username.trim();
   }
   let nextPass = currentPassword();
   if (typeof password === "string" && password.length > 0) {
-    if (password.length < 8) {
-      res.status(400).json({ error: "password must be at least 8 characters" });
+    const pErr = validatePassword(password);
+    if (pErr) {
+      res.status(400).json({ error: pErr });
       return;
     }
     if (password !== confirmPassword) {
-      res.status(400).json({ error: "password confirmation mismatch" });
+      res.status(400).json({ error: "两次密码不一致" });
       return;
     }
     nextPass = password;

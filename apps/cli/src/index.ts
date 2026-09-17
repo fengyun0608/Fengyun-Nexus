@@ -114,16 +114,18 @@ function setEnv(id: string): void {
 async function setupInteractive(): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    console.log("管理账号设置（只写本机 configs/admin.local.json，不上传）");
+    console.log("管理账号设置（只写本机，不上传）");
+    console.log("用户名：4–8 位英文字母；密码：≥10 位，含大小写、数字、特殊字符");
     const username = await ask(rl, "新用户名", "owner");
-    const password = await ask(rl, "新密码（至少 8 位）");
+    const password = await ask(rl, "新密码");
     const confirm = await ask(rl, "再输入一次密码");
-    if (username.length < 3) throw new Error("用户名至少 3 位");
-    if (password.length < 8) throw new Error("密码至少 8 位");
-    if (password !== confirm) throw new Error("两次密码不一致");
-    if (username === "console" && password === "console") {
-      throw new Error("请勿继续使用初始 console/console");
+    if (!/^[A-Za-z]{4,8}$/.test(username)) throw new Error("用户名须为 4–8 位英文字母");
+    if (username.toLowerCase() === "console") throw new Error("请勿使用保留名 console");
+    if (password.length < 10) throw new Error("密码至少 10 位");
+    if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+      throw new Error("密码须含大小写字母、数字与特殊字符");
     }
+    if (password !== confirm) throw new Error("两次密码不一致");
     writeJson(join(root, "configs/admin.local.json"), {
       username,
       passwordEnv: "NEXUS_ADMIN_PASSWORD",
