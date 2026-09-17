@@ -4,7 +4,7 @@ import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plug
 export class ZEchoPlugin extends Plugin {
   manifest = {
     id: "z.echo",
-    name: "Z Echo",
+    name: "回声",
     version: "0.1.1",
     priority: 1000,
     category: "demo" as const,

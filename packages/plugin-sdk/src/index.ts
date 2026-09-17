@@ -10,7 +10,15 @@ export type PluginPermission =
   | "db.write";
 
 export interface PluginManifest {
+  /**
+   * Technical id — English only (ASCII). Prefer `z.xxx` / `vendor.feature`.
+   * Used for enable/disable, config keys, logs. Not shown as the main console title.
+   */
   id: string;
+  /**
+   * Display name for the console plugin manager.
+   * Prefer Chinese for the default UI (e.g. 「菜单」「回声」); id stays English.
+   */
   name: string;
   version: string;
   engines?: { nexus?: string };

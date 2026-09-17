@@ -1,6 +1,6 @@
 {
   "id": "template.ts-plugin",
-  "name": "TS Plugin Template",
+  "name": "TS 插件模板",
   "version": "0.1.0",
   "main": "src/index.ts",
   "hooks": ["onMessage", "onReady"],

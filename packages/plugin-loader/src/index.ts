@@ -19,6 +19,11 @@ export interface ScanResult {
   loaded: PluginManifest[];
 }
 
+/** Plugin id must be English ASCII: start with letter, then letters/digits/._- */
+export function isValidPluginId(id: string): boolean {
+  return /^[a-z][a-z0-9._-]*$/i.test(id) && !/[^\x00-\x7F]/.test(id);
+}
+
 function readManifest(dir: string): PluginManifest | null {
   const file = join(dir, "nexus.plugin.json");
   if (!existsSync(file)) return null;
@@ -31,7 +36,7 @@ function readManifest(dir: string): PluginManifest | null {
 
 /**
  * Scan `plugins/*` directories (skip templates/) and load ESM entry.
- * Convention: plugin ids prefer `z.*` namespace.
+ * Convention: id = English (`z.*`); name = console display label (Chinese OK).
  */
 export async function loadPluginsFromDir(
   pluginsRoot: string,
@@ -64,6 +69,21 @@ export async function loadPluginsFromDir(
       tip({ level: "warn", id: ent.name, message: "skip: no nexus.plugin.json" });
       continue;
     }
+    if (!manifest.id || !isValidPluginId(manifest.id)) {
+      tip({
+        level: "error",
+        id: manifest.id || ent.name,
+        message: "插件 id 必须是英文（字母开头，仅 a-z 0-9 . _ -），中文请写在 name 显示名",
+      });
+      continue;
+    }
+    if (!manifest.name?.trim()) {
+      tip({
+        level: "warn",
+        id: manifest.id,
+        message: "未设置 name 显示名，控制台将只显示 id；建议填写中文名称",
+      });
+    }
     const mainRel = manifest.main ?? "index.js";
     const mainPath = join(dir, mainRel);
     const tsPath = join(dir, mainRel.replace(/\.js$/, ".ts"));
@@ -80,13 +100,29 @@ export async function loadPluginsFromDir(
         tip({ level: "error", id: manifest.id, message: "default export missing manifest" });
         continue;
       }
-      plugin.manifest = { ...manifest, ...plugin.manifest, id: manifest.id };
+      // id 以目录清单为准；name 优先代码里的显示名，否则用 json
+      const mergedName =
+        (plugin.manifest.name || manifest.name || manifest.id).trim() || manifest.id;
+      plugin.manifest = {
+        ...manifest,
+        ...plugin.manifest,
+        id: manifest.id,
+        name: mergedName,
+      };
+      if (!isValidPluginId(plugin.manifest.id)) {
+        tip({
+          level: "error",
+          id: plugin.manifest.id,
+          message: "插件 id 必须是英文，中文请写在 name",
+        });
+        continue;
+      }
       host.register(plugin);
       loaded.push(plugin.manifest);
       tip({
         level: "ok",
         id: plugin.manifest.id,
-        message: `loaded ${plugin.manifest.name}@${plugin.manifest.version}`,
+        message: `已加载 ${plugin.manifest.name}（${plugin.manifest.id}@${plugin.manifest.version}）`,
       });
     } catch (e) {
       tip({

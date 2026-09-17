@@ -201,6 +201,11 @@ function resolveAdapterScope(p: PluginItem): "all" | "channel" | "specified" {
   return chs.length === 1 ? "channel" : "specified";
 }
 
+/** 管理端主标题：显示中文 name；id 仅作副标题 */
+function pluginDisplayName(p: { name?: string; id: string }): string {
+  return (p.name || "").trim() || p.id;
+}
+
 /** 本通道可见：专用/指定通道插件 + 框架通用（all）插件，两边同时显示 */
 function pluginsVisibleOnChannel(items: PluginItem[], channelId?: string): PluginItem[] {
   return items.filter((p) => {
@@ -1787,7 +1792,7 @@ export default function App() {
                   <option value="">—</option>
                   {plugins.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} ({p.id})
+                      {pluginDisplayName(p)}（{p.id}）
                     </option>
                   ))}
                 </select>
@@ -1826,7 +1831,7 @@ export default function App() {
                   key={p.id}
                 >
                   <div>
-                    <strong>{p.name}</strong>
+                    <strong>{pluginDisplayName(p)}</strong>
                     <span className="cat-pill">{p.category}</span>
                     <div className="muted">
                       {p.model || "—"} · {p.hasKey ? tr("aiHasKey") : tr("aiNoKey")}
@@ -2550,7 +2555,7 @@ export default function App() {
                   {filteredPlugins.map((p) => (
                     <div className="list-row" key={p.id}>
                       <div>
-                        <strong>{p.name}</strong>
+                        <strong>{pluginDisplayName(p)}</strong>
                         <span className="cat-pill">{scopeLabel(resolveAdapterScope(p))}</span>
                         <div className="muted">
                           {p.id}
@@ -2615,19 +2620,23 @@ export default function App() {
                   </p>
                   <pre className="code-block">
                     {pluginLayer.kind === "channel"
-                      ? `manifest.kind = "channel";
-manifest.adapterScope = "channel"; // 或 "specified"
+                      ? `manifest.id = "z.onebot.hi";   // 英文 id
+manifest.name = "QQ 打招呼"; // 中文显示名
+manifest.kind = "channel";
+manifest.adapterScope = "channel";
 manifest.channels = ["onebot11"];
 rule = [{ reg: "^#hi$", fnc: "hi" }];
 async hi(e) {
   if (e.channel !== "onebot11") return;
   await e.reply("…");
 }`
-                      : `manifest.kind = "framework";
+                      : `manifest.id = "z.menu";  // 英文 id
+manifest.name = "菜单"; // 中文显示名（管理端显示这个）
+manifest.kind = "framework";
 manifest.adapterScope = "all";
 rule = [{ reg: "^#菜单$", fnc: "menu" }];
 async menu(e) {
-  await e.reply("菜单…"); // 全通道可用
+  await e.reply("菜单…");
 }`}
                   </pre>
                   <button type="button" className="btn ghost" onClick={() => backPluginLayer()}>
@@ -2883,7 +2892,7 @@ async menu(e) {
           {pluginsVisibleOnChannel(plugins, activeChannelId).map((p) => (
             <div className="list-row" key={p.id}>
               <div>
-                <strong>{p.name}</strong>
+                <strong>{pluginDisplayName(p)}</strong>
                 <span className="cat-pill">{scopeLabel(resolveAdapterScope(p))}</span>
                 <div className="muted">
                   {p.id}
@@ -3009,7 +3018,8 @@ async menu(e) {
           closeModal();
         }}
         title={
-          plugins.find((p) => p.id === activePluginId)?.name || activePluginId || tr("plugins")
+          pluginDisplayName(plugins.find((p) => p.id === activePluginId) || { id: activePluginId }) ||
+          tr("plugins")
         }
         subtitle={tr("pluginConfigHero")}
         status={modalStatus}

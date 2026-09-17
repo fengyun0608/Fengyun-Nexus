@@ -1,7 +1,7 @@
 {
   "id": "z.echo",
-  "name": "Z Echo",
-  "version": "0.1.0",
+  "name": "回声",
+  "version": "0.1.1",
   "main": "index.ts",
   "priority": 1000,
   "hooks": ["onMessage", "onReady"],

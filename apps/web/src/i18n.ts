@@ -63,9 +63,9 @@ const zh: Dict = {
   docsFramework: "框架插件编写",
   docsFrameworkHint: "框架插件的编写基准与示例。",
   docsChannelBody:
-    "通道插件请声明 kind=channel，adapterScope=channel 或 specified，并用 channels 绑定通道 id；在 accept/rule 里用 e.channel 过滤。指令仍以 # 开头。",
+    "插件 id 必须英文（如 z.onebot.hi）；name 写中文显示名，管理端只突出显示 name。通道插件请声明 kind=channel，adapterScope=channel 或 specified，并用 channels 绑定通道；指令以 # 开头。",
   docsFrameworkBody:
-    "框架插件请声明 kind=framework 与 adapterScope=all；默认全通道可用。适合菜单、生图、工具类能力。指令仍以 # 开头。",
+    "插件 id 必须英文（如 z.menu）；name 写中文显示名（如「菜单」），管理端显示 name。框架插件声明 kind=framework 与 adapterScope=all；指令以 # 开头。",
   adapterScopeAll: "全部通道",
   adapterScopeChannel: "本通道",
   adapterScopeSpecified: "指定通道",
@@ -337,9 +337,9 @@ const en: Dict = {
   docsFramework: "Framework plugin guide",
   docsFrameworkHint: "Writing baseline for framework plugins.",
   docsChannelBody:
-    'Declare kind=channel, adapterScope=channel|specified, and channels=["onebot11"]. Filter with e.channel. Commands still start with #.',
+    "Plugin id must be English (e.g. z.onebot.hi); put the Chinese/UI label in name — the console shows name. Declare kind=channel, adapterScope=channel|specified, and channels. Commands start with #.",
   docsFrameworkBody:
-    "Declare kind=framework and adapterScope=all; available across channels. Good for menu/draw/tools. Commands still start with #.",
+    "Plugin id must be English (e.g. z.menu); put the display label in name (e.g. 菜单). Console lists name. Declare kind=framework and adapterScope=all. Commands start with #.",
   adapterScopeAll: "All channels",
   adapterScopeChannel: "This channel",
   adapterScopeSpecified: "Specified channels",

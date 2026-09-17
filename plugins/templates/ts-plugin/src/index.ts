@@ -4,7 +4,7 @@ import { newId, nowIso } from "@fengyun/nexus-shared";
 export default definePlugin({
   manifest: {
     id: "template.ts-plugin",
-    name: "TS Plugin Template",
+    name: "TS 插件模板",
     version: "0.1.0",
     hooks: ["onMessage"],
     permissions: ["channel.send"],
