@@ -148,7 +148,8 @@ npm install -g pnpm@9.15.0
 ./boot.sh
 ```
 
-或在仓库内重跑：`bash scripts/termux-setup.sh` 选「重装环境」  
+或重跑唯一入口：`bash ~/Fengyun-Nexus/termux-install.sh`  
+强制重装：`cd ~ && NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`
 （不要 curl GitCode `/raw/`，会下到 HTML。）
 
 **网关起不来 / 端口占用**  

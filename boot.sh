@@ -22,8 +22,8 @@ fi
 if ! command -v node >/dev/null 2>&1; then
   echo "未找到 Node.js。"
   if is_termux; then
-    echo "请先装环境（在已克隆的仓库内）："
-    echo "  cd ~/Fengyun-Nexus && bash scripts/termux-setup.sh"
+    echo "请先装环境："
+    echo "  bash ~/Fengyun-Nexus/termux-install.sh"
     echo "不要 curl GitCode /raw/…（常返回 HTML）。"
   else
     echo "请安装 Node.js 20+，再安装 pnpm 后重试。"

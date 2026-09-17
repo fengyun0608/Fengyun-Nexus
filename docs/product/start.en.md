@@ -24,30 +24,25 @@ chmod +x boot.sh && ./boot.sh
 
 ### Termux (Android)
 
-One script: `scripts/termux-setup.sh` (alias `termux-install.sh`).
-
-- Missing / broken tree: no prompts — repair env + sync + boot
-- Healthy install: ask once — `1` reinstall env / `2` reinstall framework
+**One script only:** `termux-install.sh` — auto-detects missing / broken / installed, repairs, syncs, then boots. No menu prompts.
 
 ```bash
 pkg install git -y
 git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
-cd ~/Fengyun-Nexus
-bash scripts/termux-setup.sh
+bash ~/Fengyun-Nexus/termux-install.sh
 ```
 
-If the folder already exists but the script is missing:
+Already cloned:
 
 ```bash
-cd ~/Fengyun-Nexus
-git fetch --depth 1 origin main
-git reset --hard origin/main
-bash scripts/termux-setup.sh
+bash ~/Fengyun-Nexus/termux-install.sh
 ```
+
+Force wipe + reinstall: `cd ~ && NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`
 
 Do **not** `curl` GitCode `/raw/` URLs. Use `pnpm@9` on Termux.
 
 ## Bootstrap login
 
 - First login: `console` / `console`
-- Then set a permanent username/password in the console
+- Then set a permanent username (4–8 letters) and password

@@ -268,7 +268,7 @@ main().catch((e) => {
     bootLog(
       "INFO",
       ANSI.cyan,
-      "或一键重装：cd ~/Fengyun-Nexus && bash scripts/termux-setup.sh  选 1 重装环境",
+      "或一键重装：cd ~ && NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh",
     );
   }
   process.exit(1);
