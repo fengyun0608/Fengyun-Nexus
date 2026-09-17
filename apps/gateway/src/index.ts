@@ -23,6 +23,7 @@ import {
   type RegistryConfig,
 } from "@fengyun/nexus-shared";
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
+import { log } from "./log.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../../..");
@@ -278,7 +279,7 @@ async function handleChat(raw: unknown): Promise<{ replies: unknown[]; assistant
   const pluginReplies = await plugins.onMessage(msg, (id) => ({
     pluginId: id,
     reply: async () => undefined,
-    log: (m) => console.log(`[插件:${id}]`, m),
+    log: (m) => log.plugin(id, m),
   }));
 
   let assistant: string;
@@ -352,10 +353,12 @@ app.post("/v1/admin/login", (req, res) => {
     !safeEqual(password, expectPass)
   ) {
     res.status(401).json({ error: "用户名或密码错误" });
+    log.warn(`管理登录失败  用户=${typeof username === "string" ? username : "?"}`);
     return;
   }
   const token = issueToken(expectUser);
   const mustReconfigure = !adminCfg.setupCompleted;
+  log.info(`管理登录成功  用户=${expectUser}  需重设账号=${mustReconfigure ? "是" : "否"}`);
   res.json({
     token,
     username: expectUser,
@@ -549,7 +552,7 @@ app.post("/v1/channels/webhook", async (req, res) => {
   const pluginReplies = await plugins.onMessage(msg, (id) => ({
     pluginId: id,
     reply: async () => undefined,
-    log: (m) => console.log(`[插件:${id}]`, m),
+    log: (m) => log.plugin(id, m),
   }));
   const assistant = pluginReplies[0]?.content
     ?? (await llm.chat([{ role: "user", content: msg.content }]));
@@ -585,9 +588,9 @@ const port = Number(process.env.PORT ?? profile.gateway.port);
 const host = process.env.HOST ?? profile.gateway.host;
 
 app.listen(port, host, () => {
-  console.log(`[风云枢纽] 环境=${profile.id}  http://${host}:${port}`);
-  console.log(
-    `[风云枢纽] 管理账号=${adminCfg.username} 已完成首次设置=${adminCfg.setupCompleted ? "是" : "否"} 会话小时=${adminCfg.sessionHours}`,
+  log.ok(`网关已启动  环境=${profile.id}  地址=http://${host}:${port}`);
+  log.info(
+    `管理账号=${adminCfg.username}  首次设置完成=${adminCfg.setupCompleted ? "是" : "否"}  会话=${adminCfg.sessionHours}小时`,
   );
-  console.log(`[风云枢纽] 控制台 http://127.0.0.1:${port}/`);
+  log.info(`控制台 http://127.0.0.1:${port}/`);
 });
