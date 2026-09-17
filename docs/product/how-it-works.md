@@ -65,11 +65,11 @@
 
 对应配置：`configs/env.*.json`。
 
-## 插件与远程更新
+## 插件与扩展
 
-- 本地模板：`plugins/templates`  
-- 远程源：`configs/registry.json` → GitCode 仓  
-- 示例 / 基础 / 标准插件分类已预留；通行证：`NEXUS_REGISTRY_TOKEN`
+- 控制台内可查看已加载插件与适配器状态  
+- 可用 `pnpm nexus create plugin` 做本地脚手架  
+- 远程安装与更新细节不对公开展示  
 
 ## 相关文档
 

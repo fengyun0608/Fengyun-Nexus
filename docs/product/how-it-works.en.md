@@ -56,11 +56,11 @@ Credentials persist to local `configs/admin.local.json` (do not commit secrets).
 
 Set `NEXUS_ENV` to `mobile`, `desktop` (default), or `server`. See `configs/env.*.json`.
 
-## Plugins & remote updates
+## Plugins
 
-- Local templates: `plugins/templates`  
-- Remote registry: `configs/registry.json` → GitCode  
-- Demo / basic / standard categories reserved; token via `NEXUS_REGISTRY_TOKEN`
+- View loaded plugins and adapters in the single console  
+- Local scaffold: `pnpm nexus create plugin`  
+- Remote install internals are not documented publicly  
 
 ## Related
 

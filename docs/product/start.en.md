@@ -1,33 +1,19 @@
-# How to start on each platform
+# Start on each platform
 
 [← 中文](start.md)
 
-Local secrets stay in `.env` / `configs/*.local.json` and are **never uploaded**.
+**One console only:** open http://127.0.0.1:8787/ after boot.
 
-| Platform | Start |
-|----------|-------|
-| Windows | Double-click `start.bat` (recommended) or `pnpm boot` |
-| **Linux / macOS** | `./boot.sh` or `pnpm boot` |
-| **Termux** | `./boot.sh` (auto lite mode) |
-
-Open the URL printed (usually `http://127.0.0.1:8787/`).
-
-## Configure by commands (no file editing)
+## Deploy from remote
 
 ```bash
-pnpm nexus setup
-pnpm nexus env desktop|mobile|server|termux
-pnpm nexus set llm-key sk-xxx
-pnpm nexus status
-pnpm nexus boot
-```
-
-## Termux
-
-```bash
-pkg update && pkg install nodejs git
-npm install -g pnpm
+git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
+cd Fengyun-Nexus
+# Windows: start.bat
+# Linux/macOS/Termux:
 chmod +x boot.sh && ./boot.sh
 ```
+
+Or: `pnpm boot`
 
 Bootstrap login: `console` / `console` — then `pnpm nexus setup`.

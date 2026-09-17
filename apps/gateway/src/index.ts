@@ -308,13 +308,11 @@ app.get("/v1/meta", (_req, res) => {
     admin: {
       setupCompleted: adminCfg.setupCompleted,
       sessionHours: adminCfg.sessionHours || 12,
-      /** Browser refresh does not keep login; token is memory-only on client. */
       refreshInvalidatesSession: true,
     },
-    registry: {
-      baseUrl: registry.baseUrl,
-      categories: registry.categories,
-      tokenConfigured: Boolean(process.env[registry.tokenEnv]),
+    plugins: {
+      available: true,
+      loaded: plugins.list().length,
     },
   });
 });
@@ -367,7 +365,6 @@ app.get("/v1/admin/overview", authMiddleware, (req, res) => {
     workflows: workflows.list().map((w) => ({ id: w.id, name: w.name })),
     sessions: sessions.list().length,
     mcpTools: mcp.list(),
-    registry,
     adminUser: (req as express.Request & { adminUser?: string }).adminUser,
   });
 });
@@ -538,10 +535,10 @@ app.post("/v1/channels/webhook", async (req, res) => {
   );
 });
 
-app.get("/v1/registry", (_req, res) => {
+app.get("/v1/registry", authMiddleware, (_req, res) => {
   res.json({
-    ...registry,
-    note: "示例/基础/标准插件挂载于开源平台；填写 token 后可远程安装与更新。",
+    ok: true,
+    categories: Object.keys(registry.categories),
     tokenConfigured: Boolean(process.env[registry.tokenEnv]),
   });
 });
@@ -561,6 +558,5 @@ app.listen(port, host, () => {
   console.log(
     `[Nexus] admin user=${adminCfg.username} setupCompleted=${adminCfg.setupCompleted} sessionHours=${adminCfg.sessionHours}`,
   );
-  console.log(`[Nexus] registry=${registry.baseUrl}`);
-  console.log(`[Nexus] 控制台(内置) http://127.0.0.1:${port}/`);
+  console.log(`[Nexus] Console http://127.0.0.1:${port}/`);
 });

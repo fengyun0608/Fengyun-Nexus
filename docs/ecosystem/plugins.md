@@ -2,28 +2,13 @@
 
 [English →](plugins.en.md)
 
-Fengyun Nexus 的示例插件、基础插件、标准插件挂载在开源平台远程仓，支持后续远程更新。
+Fengyun Nexus 支持示例、基础、标准等插件能力，可在控制台中管理与扩展。  
+远程安装与更新的内部细节不对公开展示；维护者请查阅仓库内对内说明。
 
-- 远程仓：[https://gitcode.com/fengyunnb_admin/Fengyun-Nexus](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus)
-- 配置文件：`configs/registry.json`
-- 通行证：环境变量 `NEXUS_REGISTRY_TOKEN`（或本地 `configs/registry.local.json`，勿提交）
-
-## 分类
-
-| 分类 | 说明 |
-|------|------|
-| demo / 示例 | 演示能力与写法 |
-| basic / 基础 | 常用基础能力 |
-| standard / 标准 | 生产向标准插件 |
-
-## 本地开发
+本地脚手架：
 
 ```bash
 pnpm nexus create plugin my-bot
 ```
 
-模板见 `plugins/templates/ts-plugin`。
-
-## 许可
-
-远程插件建议使用与主仓兼容的开源许可（推荐 MIT），并在插件清单中声明。
+插件建议使用与主仓兼容的开源许可（推荐 MIT）。

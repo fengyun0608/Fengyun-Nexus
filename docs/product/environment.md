@@ -38,33 +38,25 @@ git --version
 
 ## 首次把项目跑起来
 
-**最简单：**
-
-- Windows：双击根目录 `启动.bat`
-- 或一条命令：`pnpm boot`
-
-会自动安装依赖（如需要）、编译内部包，并同时启动网关 + 控制台。  
-浏览器打开 `http://127.0.0.1:5173`。
-
-手动分步（一般不必）：
+远程拉取后一键启动（详见 [各平台启动](start.md)）：
 
 ```bash
-pnpm install
-pnpm run build:packages
-pnpm run dev:all
+git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
+cd Fengyun-Nexus
+# Windows: start.bat
+# Linux / macOS / Termux:
+chmod +x boot.sh && ./boot.sh
 ```
+
+或：`pnpm boot`
+
+浏览器只打开：**http://127.0.0.1:8787/**（唯一控制台）。
 
 ### 你的本地配置不会上传
 
-以下文件只留在你电脑上，**已忽略、不会 push**：
-
-- `.env` / `.env.*`（密钥）
-- `configs/*.local.json`（含管理账号、远程 Token 等）
-- `data/` 运行数据
-
-仓库里只有默认模板（如 `admin.default.json`、`.env.example`），不含你改过的密码。
-
-更完整启动与安全规则见：[如何运作](how-it-works.md)。
+- `.env` / `.env.*`
+- `configs/*.local.json`
+- `data/`
 
 ---
 
@@ -102,15 +94,14 @@ pnpm dev
 
 | 变量 | 是否必须 | 说明 |
 |------|----------|------|
-| `NEXUS_ENV` | 否 | `mobile` / `desktop` / `server` / `termux`，默认电脑为 `desktop`；Termux 自动 `termux` |
-| `NEXUS_ADMIN_PASSWORD` | 否 | 覆盖管理密码（调试用；正常请在控制台改） |
-| `NEXUS_REGISTRY_TOKEN` | 否 | 远程插件仓通行证 |
-| `NEXUS_LLM_API_KEY` | 否 | 模型密钥；不配则本地回声回复 |
-| `NEXUS_LLM_BASE_URL` | 否 | 兼容 OpenAI 的接口根地址 |
+| `NEXUS_ENV` | 否 | `mobile` / `desktop` / `server` / `termux` |
+| `NEXUS_ADMIN_PASSWORD` | 否 | 调试用密码覆盖（正常请在控制台改） |
+| `NEXUS_LLM_API_KEY` | 否 | 模型密钥；不配则本地回声 |
+| `NEXUS_LLM_BASE_URL` | 否 | 兼容接口根地址 |
 | `NEXUS_LLM_MODEL` | 否 | 模型名 |
-| `HOST` / `PORT` | 否 | 覆盖网关监听地址与端口 |
+| `HOST` / `PORT` | 否 | 网关监听 |
 
-凭据落盘文件（本地，勿提交）：`configs/admin.local.json`、`configs/registry.local.json`。
+本地凭据文件已忽略，勿提交。
 
 ---
 
@@ -118,12 +109,11 @@ pnpm dev
 
 | 软件 | 何时需要 | 用途 |
 |------|----------|------|
-| **Go** | 要跑 / 编译 `workers/go-pump` | 高并发消息泵等辅助运行时 |
-| **Python 3.10+** | 要跑 `workers/python-tools`（UIA 等） | 本地自动化、验收脚本 |
-| **模型服务账号** | 要真实大模型对话 | 配置 `NEXUS_LLM_*` |
-| **GitCode 通行证** | 要远程装示例/基础/标准插件 | `NEXUS_REGISTRY_TOKEN` |
+| **Go** | 要跑 / 编译辅助并发 worker | 高并发消息泵等 |
+| **Python 3.10+** | 要跑本地自动化脚本 | UIA / 验收 |
+| **模型服务账号** | 要真实大模型对话 | `pnpm nexus set llm-key …` |
 
-未安装 Go / Python 时：**主框架（网关 + Web + 管理 + 对话）仍可正常使用**。
+未安装 Go / Python 时，主控制台仍可正常使用。
 
 ### 可选：检查 Go / Python
 
@@ -140,7 +130,7 @@ python --version    # 可选，建议 3.10+
 |------|------|
 | 操作系统 | Windows 10/11、macOS、常见 Linux、**Android Termux** |
 | 磁盘 | 预留约 500MB+（依赖与构建产物） |
-| 端口 | 本机 `8787`（网关/内置控制台）、可选 `5173`（电脑完整 Web） |
+| 端口 | 本机 `8787`（唯一控制台）勿被占用 |
 | 出网 | 首次 `pnpm install` 需访问 npm 源；接模型/远程插件时需对应网络 |
 
 Termux 专用步骤见 [各平台启动](start.md)。

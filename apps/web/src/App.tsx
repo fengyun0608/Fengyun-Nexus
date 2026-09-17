@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 type Panel = "chat" | "adapters" | "config" | "admin" | "ecosystem" | "status";
 
 type Meta = {
   env: { id: string; label: string; features: Record<string, boolean>; web: { maxWidth: number } };
   admin?: { setupCompleted: boolean; sessionHours: number; refreshInvalidatesSession: boolean };
-  registry: { baseUrl: string; tokenConfigured: boolean; categories: Record<string, { label: string }> };
+  plugins?: { available: boolean; loaded: number };
 };
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -144,7 +144,6 @@ export default function App() {
 
   const envLabel = meta?.env.label ?? "…";
   const sessionHours = meta?.admin?.sessionHours ?? 12;
-  const cats = useMemo(() => Object.entries(meta?.registry.categories ?? {}), [meta]);
 
   const send = async () => {
     const content = input.trim();
@@ -412,10 +411,7 @@ export default function App() {
               <p className="muted">
                 会话策略：刷新立即失效 · 有效期 {sessionHours} 小时 · 改密踢全部会话
               </p>
-              <p className="muted">远程源：{meta?.registry.baseUrl ?? "…"}</p>
-              <p className="muted">
-                Registry Token：{meta?.registry.tokenConfigured ? "已配置" : "未配置（pnpm nexus set registry-token）"}
-              </p>
+              <p className="muted">已加载插件：{meta?.plugins?.loaded ?? plugins.length}</p>
               <button type="button" className="btn ghost" onClick={() => setPanel("admin")}>
                 去管理端改账号密码
               </button>
@@ -501,16 +497,19 @@ export default function App() {
           <section className="panel">
             <div className="hero">
               <h1>插件生态</h1>
-              <p>远程源：{meta?.registry.baseUrl ?? "…"}</p>
+              <p>在控制台扩展能力。远程安装细节不对公开展示。</p>
             </div>
-            <div className="chips">
-              {cats.map(([k, v]) => (
-                <div className="chip" key={k}>
-                  {k} · <strong>{v.label}</strong>
+            <div className="list">
+              {plugins.map((p) => (
+                <div className="list-row" key={p.id}>
+                  <div>
+                    <strong>{p.name}</strong>
+                    <div className="muted">{p.id}</div>
+                  </div>
+                  <span className="badge ok">已加载</span>
                 </div>
               ))}
             </div>
-            <p className="muted pad">用指令配置 Token：pnpm nexus set registry-token …</p>
           </section>
         )}
       </main>

@@ -163,7 +163,7 @@
         document.getElementById("envLabel").textContent=m.env?.label||m.env?.id||"";
         document.getElementById("hBadge").textContent=h.ok?"OK":"?";
         document.getElementById("statusPre").textContent=JSON.stringify({health:h,meta:m},null,2);
-        document.getElementById("configText").textContent="姿态 "+(m.env?.id||"")+" · 远程 "+(m.registry?.baseUrl||"")+" · Token "+(m.registry?.tokenConfigured?"已配置":"未配置");
+        document.getElementById("configText").textContent="姿态 "+(m.env?.id||"")+" · 已加载插件 "+(m.plugins?.loaded??0)+" · 打开本页即为唯一控制台";
         const box=document.getElementById("adapterList"); box.innerHTML="";
         const items=document.getElementById("chItems");
         items.querySelectorAll("[data-ch]").forEach(n=>n.remove());

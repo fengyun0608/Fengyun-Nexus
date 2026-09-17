@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
- * One-shot boot for desktop / server / Termux.
- * Loads local .env + runtime.local.json (never uploaded).
+ * One console only: gateway serves the unique control UI at :8787
  */
 import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -70,46 +69,30 @@ function run(args) {
 async function main() {
   loadDotEnv();
 
-  const argMode = process.argv[2];
-  if (argMode === "lite" || argMode === "full") {
-    process.env.NEXUS_BOOT_MODE = argMode;
-  }
-
   if (!process.env.NEXUS_ENV) {
     const hint = runtimeEnv();
     if (hint) process.env.NEXUS_ENV = hint;
     else if (isTermux()) process.env.NEXUS_ENV = "termux";
+    else process.env.NEXUS_ENV = "desktop";
   }
 
-  const mode =
-    process.env.NEXUS_BOOT_MODE ||
-    (isTermux() || process.env.NEXUS_ENV === "termux" || process.env.NEXUS_ENV === "server"
-      ? "lite"
-      : "full");
-
   if (!existsSync(join(root, "node_modules"))) {
-    console.log("[Nexus] 首次启动：安装依赖…");
+    console.log("[Nexus] Installing dependencies...");
     await run(["install"]);
   }
 
   const sharedDist = join(root, "packages/shared/dist/index.js");
   if (!existsSync(sharedDist)) {
-    console.log("[Nexus] 编译内部包…");
+    console.log("[Nexus] Building packages...");
     await run(["run", "build:packages"]);
   }
 
   const port = process.env.PORT || "8787";
-  console.log(`[Nexus] 姿态=${process.env.NEXUS_ENV || "desktop"} 模式=${mode}`);
-  console.log(`[Nexus] 内置控制台 http://127.0.0.1:${port}/`);
-  console.log("[Nexus] 初始账号 console / console；也可用: pnpm nexus setup");
+  console.log(`[Nexus] env=${process.env.NEXUS_ENV}`);
+  console.log(`[Nexus] Console (only)  http://127.0.0.1:${port}/`);
+  console.log("[Nexus] Login bootstrap: console / console  |  or: pnpm nexus setup");
 
-  if (mode === "lite") {
-    console.log("[Nexus] 精简启动：仅网关（适合 Termux / 服务器）");
-    await run(["--filter", "@fengyun/nexus-gateway", "dev"]);
-  } else {
-    console.log("[Nexus] 完整启动：网关 + Web 开发界面 http://127.0.0.1:5173");
-    await run(["run", "dev:all"]);
-  }
+  await run(["--filter", "@fengyun/nexus-gateway", "dev"]);
 }
 
 main().catch((e) => {

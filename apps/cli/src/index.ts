@@ -22,28 +22,14 @@ const [cmd, sub, ...rest] = process.argv.slice(2);
 const isWin = process.platform === "win32";
 
 function help() {
-  console.log(`Fengyun Nexus 指令（主中文）
+  console.log(`Fengyun Nexus
 
-启动：
-  nexus boot              一键启动（电脑会开网关+界面；Termux 默认精简只开网关）
-  nexus boot lite         只开网关（手机/服务器省资源，浏览器打开网关地址）
-  nexus boot full         网关 + Web 开发界面
-
-环境姿态（不用改文件）：
-  nexus env               查看当前
-  nexus env desktop|mobile|server|termux
-
-交互配置（写入本地，不上传）：
-  nexus setup             设置管理用户名/密码
-  nexus set llm-key <值>
-  nexus set llm-url <值>
-  nexus set llm-model <值>
-  nexus set registry-token <值>
-  nexus status            查看配置摘要（密钥打码）
-
-其它：
-  nexus create plugin <名>
-  nexus registry show
+  nexus boot
+  nexus setup
+  nexus env [desktop|mobile|server|termux]
+  nexus set llm-key|llm-url|llm-model <value>
+  nexus status
+  nexus create plugin <name>
   nexus help
 `);
 }
@@ -184,7 +170,6 @@ function status(): void {
   console.log(`管理用户: ${admin.username || "console（初始）"}`);
   console.log(`已完成首次改密: ${admin.setupCompleted ? "是" : "否"}`);
   console.log(`LLM Key: ${mask(envMap.NEXUS_LLM_API_KEY)}`);
-  console.log(`Registry Token: ${mask(envMap.NEXUS_REGISTRY_TOKEN)}`);
   console.log("本地文件不会上传：.env、configs/*.local.json");
 }
 
