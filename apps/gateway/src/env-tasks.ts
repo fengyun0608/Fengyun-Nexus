@@ -61,6 +61,8 @@ let seq = 1;
 let rootDir = process.cwd();
 let workerBusy = false;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
+/** Print install lines to the backend terminal (not only web). */
+let consoleSink: ((line: string) => void) | null = null;
 
 function now() {
   return new Date().toISOString();
@@ -146,8 +148,12 @@ function refreshInstalledFlags(): void {
   }
 }
 
-export function initEnvTasks(root: string): void {
+export function initEnvTasks(
+  root: string,
+  opts?: { onLog?: (line: string) => void },
+): void {
   rootDir = root;
+  consoleSink = opts?.onLog ?? null;
   mkdirSync(join(rootDir, "data", "runtimes"), { recursive: true });
   refreshInstalledFlags();
   kickWorker();
@@ -172,6 +178,7 @@ function appendLog(task: EnvTask, line: string): void {
   task.logs.push(row);
   if (task.logs.length > 800) task.logs.splice(0, task.logs.length - 800);
   task.updatedAt = now();
+  consoleSink?.(`[环境/${task.runtime}] ${line}`);
   try {
     const logFile = join(runtimeHome(task.runtime), "install.log");
     mkdirSync(runtimeHome(task.runtime), { recursive: true });

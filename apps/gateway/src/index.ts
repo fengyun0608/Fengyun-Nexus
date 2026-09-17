@@ -51,6 +51,7 @@ import {
 } from "./env-tasks.js";
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
 import { scheduleSystemRestart } from "./restart-exec.js";
+import { startTerminalRepl } from "./terminal-repl.js";
 import {
   buildRestartingMessage,
   buildRestartOkMessage,
@@ -379,8 +380,20 @@ async function bootstrap(): Promise<void> {
   await bootStep("  · 注册工具 nexus.status");
 
   await bootStep("初始化：环境安装队列…");
-  initEnvTasks(ROOT);
-  await bootStep("  · 未安装运行时将自动排队安装");
+  initEnvTasks(ROOT, {
+    onLog: (line) => log.info(line),
+  });
+  // 启动时自动把未装环境排进队列，进度打在本终端
+  try {
+    const aq = autoQueueMissing();
+    if (aq.queued.length) {
+      await bootStep(`  · 已自动排队 ${aq.queued.length} 个未安装环境`);
+    } else {
+      await bootStep("  · 运行时环境已就绪");
+    }
+  } catch (e) {
+    log.warn(`环境自动排队跳过：${e instanceof Error ? e.message : String(e)}`);
+  }
 
   await bootStep("初始化：HTTP 网关路由…");
 
@@ -1477,6 +1490,26 @@ async function bootstrap(): Promise<void> {
       log.info(`文档 https://napneko.github.io`);
     }
     void deliverRestartSuccessNotice();
+
+    // 后端终端输入（跑代码的那个窗口），不是网页
+    startTerminalRepl({
+      logTip: (m) => log.ok(m),
+      onLine: async (line) => {
+        const result = await handleChat(
+          { content: line, chatId: "terminal-main", userId: "terminal-admin" },
+          { isAdminConsole: true },
+        );
+        if (result.assistant) return [result.assistant];
+        return result.replies
+          .map((r) => {
+            if (r && typeof r === "object" && "content" in (r as object)) {
+              return String((r as { content?: string }).content ?? "");
+            }
+            return "";
+          })
+          .filter(Boolean);
+      },
+    });
   });
 
   async function deliverRestartSuccessNotice(): Promise<void> {
