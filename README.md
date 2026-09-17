@@ -12,111 +12,67 @@
 <p align="center">
   <a href="https://gitcode.com/fengyunnb_admin/Fengyun-Nexus">GitCode</a>
   ·
-  <a href="docs/product/how-it-works.md">如何运作</a>
+  <a href="docs/product/README.md">产品介绍</a>
   ·
-  <a href="docs/product/environment.md">环境要求</a>
+  <a href="docs/product/start.md">开始使用</a>
   ·
   <a href="LICENSE">MIT</a>
 </p>
 
 ---
 
-## 产品简介
+## 这是什么
 
-**Fengyun Nexus** 提供唯一控制台：对话、适配器状态、配置与管理都在同一网页里完成。  
-支持电脑、服务器、手机浏览器与 Termux，本地配置不会上传。
+**Fengyun Nexus** 是一套独立的对话与自动化产品：把框架内对话、消息通道、插件能力、工作流和管理控制台收进同一体验。
 
-框架名称固定为英文 **Fengyun Nexus**；控制台默认中文，可在「系统设置 → 配置」切换 English。
+- 产品名固定为英文 **Fengyun Nexus**
+- 控制台默认中文，可切换 English
+- 适合电脑、服务器、手机浏览器与 Termux
 
-插件放在 `plugins/`（推荐 `z.*` id），支持目录扫描、`NexusEvent`（`e`）、数据库与可插拔适配器。
+## 你能做什么
 
-## 一键部署
+- 在统一控制台里对话、看状态、管配置
+- 接入消息通道（含 QQ / OneBot 11）
+- 装载与管理插件（通道插件 / 框架插件分层）
+- 配置多种 AI 供应商，按需切换
+- 查看数据看板与最新消息
+- 用 `#` 指令做基础管理（如帮助、开关机）
 
-**必备：** Node.js ≥ 20、pnpm、Git。
+本地配置留在你自己的机器上，不会被上传。
 
-### Windows
+## 快速开始
 
-```bat
+**必备：** Node.js ≥ 20、pnpm、Git。详见 [环境要求](docs/product/environment.md)。
+
+```bash
 git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
 cd Fengyun-Nexus
-start.bat
 ```
 
-### Linux / macOS / 服务器
+- Windows：`start.bat`
+- Linux / macOS：`chmod +x boot.sh && ./boot.sh`
+- Termux：
 
 ```bash
-git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
-cd Fengyun-Nexus
-chmod +x boot.sh
-./boot.sh
+pkg install git -y
+git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
+cd ~/Fengyun-Nexus
+bash scripts/termux-setup.sh
 ```
 
-### 手机 Termux（推荐远程脚本）
+（不要用 GitCode `raw` 的 `curl | bash`，会下到 HTML。已安装时脚本只问：重装环境 / 重装框架。）
 
-**只装环境（可反复跑，逐步 Y/n）：**
-
-```bash
-curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-env.sh | bash
-```
-
-**环境 + 克隆 + 启动（逐步 Y/n）：**
-
-```bash
-curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-setup.sh | bash
-```
-
-少提问（默认全选 Y）：
-
-```bash
-curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-setup.sh | NEXUS_INSTALL_YES=1 bash
-```
-
-> Android 没有 `@pnpm/exe` 原生包。请用 `pnpm@9`，仓库已带 `.npmrc` 关闭版本切换。  
-> 若仍报 `ERR_PNPM_PNPM_ENGINE_NO_NATIVE_BINARY`：`npm i -g pnpm@9.15.0` 后重跑 `./boot.sh`。
-
-启动时会自动检测依赖、编译包与 Vite 控制台，然后拉起网关。
-
-浏览器只打开：
-
-**http://127.0.0.1:8787/**
-
-## 初次使用
-
-| 项 | 说明 |
-|----|------|
-| 初始账号 | `console` / `console` |
-| 正式用户名 | 4–8 位英文字母 |
-| 正式密码 | 至少 4 位，须含大小写、数字、特殊字符 |
-| 改密 | 控制台「管理」或 `pnpm nexus setup` |
-| 会话 | 刷新保持登录；12 小时过期；改密后全部失效 |
-| 语言 | 默认中文；「配置」里可切 English（产品名始终 Fengyun Nexus） |
-
-```bash
-pnpm nexus setup
-pnpm nexus env desktop|mobile|server|termux
-pnpm nexus status
-pnpm nexus boot
-```
-
-## 能力一览
-
-- 框架内对话（Vite React 控制台）
-- 可插拔消息通道（内置 OneBot 11 / NapCat）
-- 插件目录扫描与加载提示（`z.*`）
-- 嵌入式数据库（`data/nexus.db.json`）
-- 工作流（memory / tool / branch / delay）
-- 管理与配置（同一控制台）
-- AI 供应商配置；未配置时不自动回复（无本地回声）
+浏览器打开：**http://127.0.0.1:8787/**  
+初始账号：`console` / `console`（首次登录后请改成自己的账号密码）
 
 ## 文档
 
-- [如何运作](docs/product/how-it-works.md)
-- [环境要求](docs/product/environment.md)
-- [各平台启动](docs/product/start.md)
-- [规划](docs/product/README.md)
-- [通道插件写法基准](docs/ecosystem/channel-plugins.md)
+对外只放**介绍与上手**：
 
-文档页可用 **中文 | English** 切换。
+- [产品介绍](docs/product/README.md)
+- [环境要求](docs/product/environment.md)
+- [开始使用](docs/product/start.md)
+- [插件生态简介](docs/ecosystem/plugins.md)
 
 ## 开源协议
 

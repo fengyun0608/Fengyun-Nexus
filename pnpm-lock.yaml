@@ -189,7 +189,25 @@ importers:
 
   plugins/templates/ts-plugin: {}
 
+  plugins/z-draw:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   plugins/z-echo:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/z-menu:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/z-onebot-hi:
     dependencies:
       '@fengyun/nexus-plugin-sdk':
         specifier: workspace:*

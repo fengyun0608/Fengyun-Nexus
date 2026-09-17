@@ -1,4 +1,6 @@
-# Fengyun Nexus 如何运作
+# Fengyun Nexus 如何运作（对内）
+
+> 本文仅供维护者查阅，**不对外作为产品介绍**。
 
 中文 | [English](how-it-works.en.md)
 

@@ -36,11 +36,13 @@ function readManifest(dir: string): PluginManifest | null {
 export async function loadPluginsFromDir(
   pluginsRoot: string,
   log?: (tip: LoadTip) => void,
+  opts?: { cacheBust?: boolean },
 ): Promise<ScanResult> {
   const host = new PluginHost();
   const tips: LoadTip[] = [];
   const loaded: PluginManifest[] = [];
   const root = resolve(pluginsRoot);
+  const bust = opts?.cacheBust ? `?t=${Date.now()}` : "";
 
   const tip = (t: LoadTip) => {
     tips.push(t);
@@ -71,13 +73,13 @@ export async function loadPluginsFromDir(
       continue;
     }
     try {
-      const mod = await import(pathToFileURL(entry).href);
+      const href = `${pathToFileURL(entry).href}${bust}`;
+      const mod = await import(href);
       const plugin = (mod.default ?? mod.plugin) as NexusPlugin | undefined;
       if (!plugin?.manifest) {
         tip({ level: "error", id: manifest.id, message: "default export missing manifest" });
         continue;
       }
-      // Prefer file manifest fields
       plugin.manifest = { ...manifest, ...plugin.manifest, id: manifest.id };
       host.register(plugin);
       loaded.push(plugin.manifest);

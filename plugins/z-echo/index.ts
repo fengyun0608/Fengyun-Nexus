@@ -1,41 +1,38 @@
-import {
-  Plugin,
-  type NexusEvent,
-  type PluginConfigField,
-  type PluginContext,
-} from "@fengyun/nexus-plugin-sdk";
+import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
-/** Sample directory plugin — Z.* id convention. */
+/** Sample directory plugin — Z.* id convention. Commands use `#` prefix. */
 export class ZEchoPlugin extends Plugin {
   manifest = {
     id: "z.echo",
     name: "Z Echo",
-    version: "0.1.0",
+    version: "0.1.1",
     priority: 1000,
     category: "demo" as const,
+    kind: "framework" as const,
+    adapterScope: "all" as const,
     permissions: ["channel.send" as const],
   };
 
   rule = [
     {
-      reg: "^/echo\\s+(.+)$",
+      reg: "^#echo\\s+(.+)$",
       fnc: "echo",
-      describe: "Echo text after /echo",
+      describe: "Echo text after #echo",
     },
   ];
 
-  configSchema: PluginConfigField[] = [
+  configSchema = [
     {
       key: "prefix",
       label: "回复前缀",
-      type: "string",
+      type: "string" as const,
       description: "可选，拼在回声内容前",
       default: "",
     },
     {
       key: "enabled",
       label: "启用",
-      type: "boolean",
+      type: "boolean" as const,
       default: true,
     },
   ];
@@ -59,7 +56,7 @@ export class ZEchoPlugin extends Plugin {
 
   async echo(e: NexusEvent) {
     if (this.cfg.enabled === false) return;
-    const m = e.msg.match(/^\/echo\s+(.+)$/);
+    const m = e.msg.match(/^#echo\s+(.+)$/);
     const body = m?.[1] ?? "";
     const prefix = String(this.cfg.prefix ?? "");
     await e.reply(prefix ? `${prefix}${body}` : body);

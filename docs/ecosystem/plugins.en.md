@@ -1,16 +1,19 @@
-# Plugins
+# Plugin ecosystem
 
-[中文](plugins.md) | English
+Chinese | [中文](plugins.md)
 
-Fengyun Nexus loads plugins from `plugins/` via directory scan. Prefer **`z.*`** plugin ids (example: `z.echo`).
+Fengyun Nexus plugins fall into two families:
 
-Stack: `Plugin` base class, `NexusEvent` (`e`), rule matching, boot load tips, optional permissions.
+| Kind | About |
+|------|--------|
+| Channel plugins | Tied to a message channel (e.g. QQ) |
+| Framework plugins | Shared capabilities (menu, image gen, …) |
 
-**Channel + plugin baseline:** [channel-plugins.en.md](channel-plugins.en.md)  
-**OneBot 11:** [onebot11.en.md](onebot11.en.md)
+Install from the remote registry (demo / basic / standard) or develop under local `plugins/`.
 
-```bash
-pnpm nexus create plugin my-bot
-```
+- Remote: [GitCode · Fengyun-Nexus](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus)
+- Console: Settings → Plugin Manager (multi-layer, with back)
 
 Recommended license: MIT.
+
+> This page is an intro only — implementation details stay out of public product docs.

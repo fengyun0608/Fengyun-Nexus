@@ -70,15 +70,25 @@ export class OneBot11Channel {
     message_type: "private" | "group";
     user_id?: number;
     group_id?: number;
-    message: string;
+    message: string | Ob11Segment[];
   } {
     const mt = (msg.meta?.messageType as "private" | "group" | undefined) ?? "private";
+    let message: string | Ob11Segment[] = msg.content;
+    if (msg.type === "image") {
+      const file = msg.attachments?.[0]?.url || msg.content;
+      message = [
+        ...(msg.content && msg.content !== "image"
+          ? [{ type: "text" as const, data: { text: `${msg.content}\n` } }]
+          : []),
+        { type: "image", data: { file } },
+      ];
+    }
     if (mt === "group") {
       const gid = Number(msg.meta?.groupId ?? msg.chatId.replace(/^group:/, ""));
-      return { message_type: "group", group_id: gid, message: msg.content };
+      return { message_type: "group", group_id: gid, message };
     }
     const uid = Number(msg.userId !== "nexus" ? msg.userId : msg.chatId.replace(/^private:/, ""));
-    return { message_type: "private", user_id: uid, message: msg.content };
+    return { message_type: "private", user_id: uid, message };
   }
 
   formatOutbound(msg: NexusMessage): unknown {

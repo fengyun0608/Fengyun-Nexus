@@ -36,6 +36,27 @@ import {
 } from "./channel-settings.js";
 import { loadDbConfig, resolveDbOpenOpts, saveDbConfig } from "./db-config.js";
 import { formatErrorForClient, translateError } from "./errors-zh.js";
+import { isAdminHash, parseHashCommand } from "./hash-commands.js";
+import {
+  createInstallTask,
+  listRuntimes,
+  listTasks,
+  setTaskStatus,
+  taskCounts,
+  type EnvRuntimeId,
+  type EnvTaskStatus,
+} from "./env-tasks.js";
+import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
+import { scheduleSystemRestart } from "./restart-exec.js";
+import {
+  buildRestartingMessage,
+  buildRestartOkMessage,
+  clearRestartNotify,
+  formatUptime,
+  peekRestartNotify,
+  saveRestartNotify,
+} from "./restart-notify.js";
+import { reloadPlugins, watchPluginsHotReload } from "./plugin-hot-reload.js";
 import { getLogEntries, log } from "./log.js";
 import {
   activeProvider,
@@ -208,6 +229,7 @@ function validatePassword(password: string): string | null {
 }
 
 async function bootstrap(): Promise<void> {
+  const startedAt = Date.now();
   printBootBanner();
   loadDotEnv();
 
@@ -293,8 +315,34 @@ async function bootstrap(): Promise<void> {
     log: (m) => log.plugin(id, m),
   }));
 
+  const pluginHotDeps = {
+    pluginsDir: PLUGINS_DIR,
+    host: plugins,
+    listEnabled: () => db.listPlugins().map((p) => ({ id: p.id, enabled: p.enabled !== false })),
+    upsertPlugin: (row: {
+      id: string;
+      name: string;
+      version: string;
+      enabled: boolean;
+      loadedAt: string;
+    }) => db.upsertPlugin(row),
+    log: {
+      ok: (m: string) => log.ok(m),
+      warn: (m: string) => log.warn(m),
+      error: (m: string) => log.error(m),
+      info: (m: string) => log.info(m),
+    },
+  };
+  // 热更新只重载插件，不重启网关进程
+  const hotOff = process.env.NEXUS_PLUGIN_HOT === "0";
+  watchPluginsHotReload(pluginHotDeps, { enabled: !hotOff });
+
   let channelCfg: ChannelsConfigFile = loadChannelsConfig(ROOT);
   await bootStep("初始化：消息通道配置（主人等，与插件装载独立）…");
+
+  /** Soft power-off: ignore normal chat until #开机. #重启 calls system restart executable. */
+  let powerOff = false;
+
   await bootStep(`插件就绪：${plugins.list().length} 个`);
 
   await bootStep("初始化：工作流引擎…");
@@ -364,13 +412,90 @@ async function bootstrap(): Promise<void> {
     next();
   }
 
-  /** Process inbound message: plugins first; LLM only if configured; never local-echo. */
-  async function processInbound(msg: NexusMessage): Promise<string[]> {
+  /** Process inbound message: # admin → plugins (first match) → LLM. Never local-echo. */
+  async function processInbound(
+    msg: NexusMessage,
+    opts?: { isAdminConsole?: boolean },
+  ): Promise<string[]> {
     const chSettings = getChannelSettings(channelCfg, msg.channel);
-    if (chSettings.onlyMasters && chSettings.masters.length) {
-      if (!isChannelMaster(chSettings, msg.userId)) {
-        return [];
+    const isMaster = isChannelMaster(chSettings, msg.userId);
+    const isAdminConsole = Boolean(opts?.isAdminConsole);
+    const trimmed = msg.content.trim();
+    const isHash = trimmed.startsWith("#");
+    const hashCmd = isHash ? trimmed.split(/\s+/)[0] ?? "" : "";
+
+    if (powerOff && !isHash) {
+      return [];
+    }
+
+    // Framework admin # only — plugin # goes to PluginHost by priority
+    if (isHash && isAdminHash(hashCmd)) {
+      const cmd = parseHashCommand(trimmed, {
+        powerOff,
+        isMaster,
+        isAdminConsole,
+        uptime: formatUptime(Date.now() - startedAt),
+      });
+      if (cmd.handled) {
+        if (typeof cmd.powerOff === "boolean") powerOff = cmd.powerOff;
+
+        let replies = [...cmd.replies];
+        if (cmd.systemRestart) {
+          const uptime = formatUptime(Date.now() - startedAt);
+          replies = [buildRestartingMessage(uptime)];
+          saveRestartNotify(ROOT, {
+            channel: msg.channel,
+            chatId: msg.chatId,
+            userId: msg.userId,
+            messageType: msg.meta?.messageType,
+            groupId: msg.meta?.groupId,
+            requestedAt: nowIso(),
+            previousUptime: uptime,
+          });
+        }
+
+        for (const content of replies) {
+          db.insertMessage({
+            id: newId("msg"),
+            channel: msg.channel,
+            chatId: msg.chatId,
+            userId: "nexus",
+            role: "assistant",
+            content,
+            createdAt: nowIso(),
+          });
+        }
+        db.insertMessage({
+          id: msg.id,
+          channel: msg.channel,
+          chatId: msg.chatId,
+          userId: msg.userId,
+          role: "user",
+          content: msg.content,
+          createdAt: msg.createdAt,
+        });
+
+        if (cmd.systemRestart) {
+          const r = scheduleSystemRestart(ROOT);
+          if (!r.ok) {
+            clearRestartNotify(ROOT);
+            log.error(`系统重启失败：${r.message}`);
+            return [r.message];
+          }
+          log.ok(`已调用系统重启程序 → ${r.script}`);
+          setTimeout(() => process.exit(0), 1600);
+        }
+        return replies;
       }
+    }
+
+    if (!isHash && chSettings.onlyMasters && chSettings.masters.length && !isMaster) {
+      return [];
+    }
+
+    if (powerOff && isHash && !isAdminHash(hashCmd)) {
+      // Soft off: still allow #开机 via admin path above; block other plugin cmds
+      return [];
     }
 
     const session = sessions.getOrCreate({
@@ -396,7 +521,16 @@ async function bootstrap(): Promise<void> {
     }));
 
     if (pluginReplies.length) {
-      const texts = pluginReplies.map((r) => r.content).filter(Boolean);
+      const texts = pluginReplies.map((r) => {
+        if (r.type === "image") {
+          const url = r.attachments?.[0]?.url;
+          if (url) {
+            // OneBot / NapCat：CQ 图片；控制台也能看见路径提示
+            return `[CQ:image,file=${url}]`;
+          }
+        }
+        return r.content;
+      }).filter(Boolean);
       for (const content of texts) {
         sessions.append(session, "assistant", content);
         db.insertMessage({
@@ -436,11 +570,28 @@ async function bootstrap(): Promise<void> {
     return [assistant];
   }
 
-  async function handleChat(raw: unknown): Promise<{ replies: unknown[]; assistant: string }> {
+  function tokenIsAdmin(req: express.Request): boolean {
+    const header = req.headers.authorization ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    if (!token) return false;
+    const rec = tokens.get(hashToken(token));
+    return Boolean(rec && rec.exp >= Date.now());
+  }
+
+  async function handleChat(
+    raw: unknown,
+    opts?: { isAdminConsole?: boolean },
+  ): Promise<{ replies: unknown[]; assistant: string }> {
     const web = channels.get("web")!;
     const msg = web.normalizeInbound(raw);
-    const texts = await processInbound(msg);
-    const assistant = texts.join("\n");
+    const texts = await processInbound(msg, opts);
+    let assistant = texts.join("\n");
+    if (!assistant && opts?.isAdminConsole) {
+      const c = String((raw as { content?: string } | null)?.content ?? "").trim();
+      if (c.startsWith("#")) {
+        assistant = "未命中指令，发送 #帮助";
+      }
+    }
     const replies = texts.map((content) =>
       web.formatOutbound({
         id: newId("msg"),
@@ -477,7 +628,7 @@ async function bootstrap(): Promise<void> {
   app.get("/v1/meta", (_req, res) => {
     res.json({
       product: "Fengyun Nexus",
-      version: "0.1.0",
+      version: readLocalVersion(ROOT),
       env: profile,
       features: profile.features,
       admin: {
@@ -639,6 +790,16 @@ async function bootstrap(): Promise<void> {
     res.json({
       items: plugins.listConsole(),
       tips: scan.tips,
+    });
+  });
+
+  app.post("/v1/plugins/reload", authMiddleware, async (_req, res) => {
+    const result = await reloadPlugins(pluginHotDeps);
+    res.status(result.ok ? 200 : 500).json({
+      ok: result.ok,
+      message: result.message,
+      loaded: result.loaded,
+      items: plugins.listConsole(),
     });
   });
 
@@ -840,7 +1001,9 @@ async function bootstrap(): Promise<void> {
 
   app.post("/v1/chat", async (req, res) => {
     try {
-      const result = await handleChat(req.body);
+      const result = await handleChat(req.body, {
+        isAdminConsole: tokenIsAdmin(req),
+      });
       res.json({ ok: true, ...result });
     } catch (e) {
       const t = formatErrorForClient(e);
@@ -854,7 +1017,9 @@ async function bootstrap(): Promise<void> {
     res.setHeader("cache-control", "no-cache");
     res.setHeader("connection", "keep-alive");
     try {
-      const result = await handleChat(req.body);
+      const result = await handleChat(req.body, {
+        isAdminConsole: tokenIsAdmin(req),
+      });
       const chunk = result.assistant;
       const size = Math.max(8, Math.ceil(chunk.length / 12));
       for (let i = 0; i < chunk.length; i += size) {
@@ -868,6 +1033,18 @@ async function bootstrap(): Promise<void> {
       res.write(`data: ${JSON.stringify({ error: e instanceof Error ? e.message : String(e) })}\n\n`);
       res.end();
     }
+  });
+
+  app.get("/v1/messages/recent", authMiddleware, (req, res) => {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 60)));
+    const channel = typeof req.query.channel === "string" ? req.query.channel : "";
+    let items = db.recentAllMessages(limit);
+    if (channel) items = items.filter((m) => m.channel === channel);
+    res.json({
+      ok: true,
+      powerOff,
+      items,
+    });
   });
 
   app.post("/v1/channels/webhook", async (req, res) => {
@@ -1120,6 +1297,68 @@ async function bootstrap(): Promise<void> {
     });
   });
 
+  app.get("/v1/admin/env-runtimes", authMiddleware, (_req, res) => {
+    res.json({ ok: true, runtimes: listRuntimes(), counts: taskCounts() });
+  });
+
+  app.get("/v1/admin/env-tasks", authMiddleware, (_req, res) => {
+    res.json({ ok: true, items: listTasks(), counts: taskCounts() });
+  });
+
+  app.post("/v1/admin/env-tasks", authMiddleware, (req, res) => {
+    try {
+      const runtime = String(req.body?.runtime ?? "") as EnvRuntimeId;
+      const version = String(req.body?.version ?? "");
+      const mode = String(req.body?.mode ?? "binary") as "compile" | "binary";
+      const task = createInstallTask({ runtime, version, mode });
+      res.json({ ok: true, message: "已加入待执行任务", task, counts: taskCounts() });
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.post("/v1/admin/env-tasks/:id/status", authMiddleware, (req, res) => {
+    const status = String(req.body?.status ?? "") as EnvTaskStatus;
+    const allowed: EnvTaskStatus[] = ["pending", "running", "paused", "done", "failed"];
+    if (!allowed.includes(status)) {
+      res.status(400).json({ error: "状态无效" });
+      return;
+    }
+    const task = setTaskStatus(String(req.params.id), status);
+    if (!task) {
+      res.status(404).json({ error: "任务未找到" });
+      return;
+    }
+    res.json({ ok: true, task, counts: taskCounts() });
+  });
+
+  app.get("/v1/admin/update/check", authMiddleware, (_req, res) => {
+    const result = checkRemoteUpdate(ROOT);
+    res.status(result.ok ? 200 : 502).json(result);
+  });
+
+  app.post("/v1/admin/update/apply", authMiddleware, (req, res) => {
+    if (!req.body?.confirm) {
+      res.status(400).json({ error: "请确认后更新", errorType: "confirm_required" });
+      return;
+    }
+    const result = applyRemoteUpdate(ROOT);
+    if (!result.ok) {
+      res.status(500).json(result);
+      return;
+    }
+    res.json(result);
+    if (result.shouldExit) {
+      const r = scheduleSystemRestart(ROOT);
+      if (r.ok) {
+        log.ok(`更新完成，已调用系统重启 → ${r.script}`);
+      } else {
+        log.warn(`更新完成，但重启程序未就绪：${r.message}`);
+      }
+      setTimeout(() => process.exit(0), 900);
+    }
+  });
+
   const staticRoot = existsSync(join(WEB_DIST, "index.html"))
     ? WEB_DIST
     : existsSync(join(PUBLIC_FALLBACK, "index.html"))
@@ -1161,7 +1400,61 @@ async function bootstrap(): Promise<void> {
       );
       log.info(`文档 https://napneko.github.io`);
     }
+    void deliverRestartSuccessNotice();
   });
+
+  async function deliverRestartSuccessNotice(): Promise<void> {
+    const pending = peekRestartNotify(ROOT);
+    if (!pending) return;
+
+    const loaded = plugins
+      .listConsole()
+      .filter((p) => p.enabled !== false)
+      .map((p) => ({ id: p.id, name: p.name, version: p.version }));
+    const text = buildRestartOkMessage(loaded, pending.previousUptime);
+
+    db.insertMessage({
+      id: newId("msg"),
+      channel: pending.channel,
+      chatId: pending.chatId,
+      userId: "nexus",
+      role: "assistant",
+      content: text,
+      createdAt: nowIso(),
+    });
+
+    if (pending.channel === "onebot11") {
+      const ctx = {
+        id: newId("msg"),
+        channel: "onebot11" as const,
+        chatId: pending.chatId,
+        userId: pending.userId,
+        type: "text" as const,
+        content: text,
+        meta: {
+          messageType: pending.messageType,
+          groupId: pending.groupId,
+        },
+        createdAt: nowIso(),
+      };
+      for (let i = 0; i < 45; i++) {
+        if (onebot.status().connected) {
+          const ok = await onebot.sendText(text, ctx);
+          if (ok) {
+            clearRestartNotify(ROOT);
+            log.ok("已向原会话回复：重启成功 + 插件列表");
+            return;
+          }
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      log.warn("重启成功通知未发出：OneBot 未连接，保留待发记录");
+      return;
+    }
+
+    clearRestartNotify(ROOT);
+    log.ok("重启成功通知已写入消息流");
+  }
 
   server.on("error", (err) => {
     const t = translateError(err);

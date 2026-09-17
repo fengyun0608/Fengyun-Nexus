@@ -23,7 +23,22 @@ export interface PluginManifest {
     adapters?: string[];
   };
   category?: "demo" | "basic" | "standard" | "local";
-  /** Priority: smaller runs earlier (XRK-like). */
+  /**
+   * Plugin family for console multi-layer management:
+   * - channel: message-channel plugins (often bound to onebot/web/…)
+   * - framework: core / shared framework plugins
+   */
+  kind?: "channel" | "framework";
+  /**
+   * Adapter scope — where the plugin applies:
+   * - all: every channel (framework list only)
+   * - channel: single / “本通道” binding via `channels`
+   * - specified: only the listed `channels`
+   */
+  adapterScope?: "all" | "channel" | "specified";
+  /** Channel ids when adapterScope is channel | specified. */
+  channels?: string[];
+  /** Priority: smaller number runs first; first accept match wins. */
   priority?: number;
 }
 
@@ -44,7 +59,11 @@ export class NexusEvent {
   readonly userId: string;
   readonly msg: string;
   readonly raw: NexusMessage;
-  private _replies: string[] = [];
+  private _replies: Array<{
+    type: "text" | "image";
+    content: string;
+    file?: string;
+  }> = [];
 
   constructor(message: NexusMessage) {
     this.id = message.id;
@@ -60,26 +79,47 @@ export class NexusEvent {
   }
 
   async reply(content: string): Promise<void> {
-    this._replies.push(content);
+    this._replies.push({ type: "text", content });
   }
 
-  takeReplies(): string[] {
+  /** Reply with a local image file path or URL — for menu screenshots etc. */
+  async replyImage(file: string, caption = ""): Promise<void> {
+    if (caption) this._replies.push({ type: "text", content: caption });
+    this._replies.push({ type: "image", content: caption || "image", file });
+  }
+
+  takeReplies(): Array<{ type: "text" | "image"; content: string; file?: string }> {
     const out = [...this._replies];
     this._replies = [];
     return out;
   }
 
   toOutbound(userId = "nexus"): NexusMessage[] {
-    return this.takeReplies().map((content) => ({
-      id: newId("msg"),
-      channel: this.channel,
-      chatId: this.chatId,
-      userId,
-      type: "text" as const,
-      content,
-      meta: { replyTo: this.id },
-      createdAt: nowIso(),
-    }));
+    return this.takeReplies().map((r) => {
+      if (r.type === "image" && r.file) {
+        return {
+          id: newId("msg"),
+          channel: this.channel,
+          chatId: this.chatId,
+          userId,
+          type: "image" as const,
+          content: r.content || "image",
+          attachments: [{ kind: "image", url: r.file }],
+          meta: { replyTo: this.id, ...this.raw.meta },
+          createdAt: nowIso(),
+        };
+      }
+      return {
+        id: newId("msg"),
+        channel: this.channel,
+        chatId: this.chatId,
+        userId,
+        type: "text" as const,
+        content: r.content,
+        meta: { replyTo: this.id, ...this.raw.meta },
+        createdAt: nowIso(),
+      };
+    });
   }
 }
 
@@ -148,6 +188,16 @@ export class PluginHost {
     this.plugins.set(plugin.manifest.id, plugin);
   }
 
+  /** Drop all loaded plugins; enabled flags for known ids can be restored by caller. */
+  clear(): void {
+    this.plugins.clear();
+  }
+
+  /** Snapshot of disabled ids before a hot reload. */
+  disabledIds(): string[] {
+    return [...this.disabled];
+  }
+
   get(id: string): NexusPlugin | undefined {
     return this.plugins.get(id);
   }
@@ -170,13 +220,34 @@ export class PluginHost {
   }
 
   listConsole(): Array<
-    PluginManifest & { enabled: boolean; configSupported: boolean }
+    PluginManifest & {
+      enabled: boolean;
+      configSupported: boolean;
+      kind: "channel" | "framework";
+      adapterScope: "all" | "channel" | "specified";
+    }
   > {
-    return this.values().map((p) => ({
-      ...p.manifest,
-      enabled: this.isEnabled(p.manifest.id),
-      configSupported: Boolean(p.configSchema?.length),
-    }));
+    return this.values().map((p) => {
+      const channels = p.manifest.channels ?? [];
+      const kind: "channel" | "framework" =
+        p.manifest.kind ??
+        (p.manifest.contributes?.adapters?.length || channels.length ? "channel" : "framework");
+      const adapterScope: "all" | "channel" | "specified" =
+        p.manifest.adapterScope ??
+        (kind === "framework" || !channels.length
+          ? "all"
+          : channels.length === 1
+            ? "channel"
+            : "specified");
+      return {
+        ...p.manifest,
+        kind: adapterScope === "all" ? "framework" : "channel",
+        adapterScope,
+        channels,
+        enabled: this.isEnabled(p.manifest.id),
+        configSupported: Boolean(p.configSchema?.length),
+      };
+    });
   }
 
   values(): NexusPlugin[] {
@@ -196,17 +267,28 @@ export class PluginHost {
     const out: NexusMessage[] = [];
     for (const p of this.values()) {
       if (!this.isEnabled(p.manifest.id)) continue;
+      // Scope filter: all / channel / specified
+      const scope =
+        p.manifest.adapterScope ??
+        (p.manifest.kind === "framework" || !(p.manifest.channels?.length) ? "all" : "specified");
+      const chs = p.manifest.channels ?? [];
+      if (scope !== "all" && chs.length && !chs.includes(e.channel)) continue;
+
       const ctx = makeCtx(p.manifest.id);
       if (typeof p.accept === "function") {
         const hit = await p.accept(e, ctx);
         if (hit) {
           out.push(...e.toOutbound(`plugin:${p.manifest.id}`));
-          continue;
+          // First match wins — smaller priority already sorted first
+          return out;
         }
       }
       if (p.onMessage) {
         const r = await p.onMessage(e.raw, ctx);
-        if (r) out.push(r);
+        if (r) {
+          out.push(r);
+          return out;
+        }
       }
     }
     return out;

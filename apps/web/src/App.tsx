@@ -19,9 +19,9 @@ type Panel =
   | "channels"
   | "channel-detail"
   | "onebot"
-  | "workflows"
-  | "mcp"
+  | "automation"
   | "database"
+  | "dashboard"
   | "plugins"
   | "plugin-config"
   | "registry"
@@ -29,9 +29,12 @@ type Panel =
   | "logs"
   | "status"
   | "config"
-  | "admin";
+  | "admin"
+  | "env-setup"
+  | "env-tasks";
 
 type Meta = {
+  version?: string;
   env: { id: string; label: string; features: Record<string, boolean>; web: { maxWidth: number } };
   admin?: { setupCompleted: boolean; sessionHours: number; refreshInvalidatesSession: boolean };
   plugins?: { available: boolean; loaded: number };
@@ -49,9 +52,45 @@ type PluginItem = {
   name: string;
   version?: string;
   category?: string;
+  kind?: "channel" | "framework";
+  adapterScope?: "all" | "channel" | "specified";
+  channels?: string[];
   configSupported?: boolean;
   enabled?: boolean;
 };
+type EnvRuntimeId = "go" | "python" | "browser";
+type EnvTaskStatus = "pending" | "running" | "paused" | "done" | "failed";
+type EnvRuntimeDef = {
+  id: EnvRuntimeId;
+  label: string;
+  versions: string[];
+  modes: Array<"compile" | "binary">;
+  installed?: boolean;
+  activeVersion?: string;
+};
+type EnvTask = {
+  id: string;
+  runtime: EnvRuntimeId;
+  version: string;
+  mode: "compile" | "binary";
+  status: EnvTaskStatus;
+  createdAt: string;
+  updatedAt: string;
+  note?: string;
+};
+type EnvTaskCounts = {
+  pending: number;
+  running: number;
+  paused: number;
+  done: number;
+  failed: number;
+};
+
+type PluginLayer =
+  | { step: "home" }
+  | { step: "channels" }
+  | { step: "list"; kind: "channel" | "framework"; channelId?: string }
+  | { step: "docs"; kind: "channel" | "framework" };
 type ChannelSettings = {
   label?: string;
   masters: string[];
@@ -100,6 +139,15 @@ type LlmInfo = {
   }>;
 };
 type LogItem = { at: string; level: string; message: string };
+type FeedMsg = {
+  id: string;
+  channel: string;
+  chatId: string;
+  userId: string;
+  role: string;
+  content: string;
+  createdAt: string;
+};
 type DbDetectItem = {
   id: string;
   label: string;
@@ -125,6 +173,7 @@ type OneBotInfo = {
   docsUrl?: string;
   accessTokenSet?: boolean;
   lastEventAt?: string;
+  message?: string;
   config?: {
     enabled?: boolean;
     accessToken?: string;
@@ -132,6 +181,34 @@ type OneBotInfo = {
     httpPath?: string;
   };
 };
+
+type UiModal =
+  | null
+  | { kind: "db" }
+  | { kind: "channel-settings" }
+  | { kind: "channel-plugins" }
+  | { kind: "channel-docs" }
+  | { kind: "onebot-conn" }
+  | { kind: "plugin-config"; id: string }
+  | { kind: "password" }
+  | { kind: "update" };
+
+function resolveAdapterScope(p: PluginItem): "all" | "channel" | "specified" {
+  if (p.adapterScope) return p.adapterScope;
+  const kind = p.kind ?? "framework";
+  const chs = p.channels ?? [];
+  if (kind === "framework" || !chs.length) return "all";
+  return chs.length === 1 ? "channel" : "specified";
+}
+
+function channelScopedPlugins(items: PluginItem[], channelId?: string): PluginItem[] {
+  return items.filter((p) => {
+    const scope = resolveAdapterScope(p);
+    if (scope !== "channel" && scope !== "specified") return false;
+    if (!channelId) return true;
+    return (p.channels ?? []).includes(channelId);
+  });
+}
 
 function readStoredToken(): string {
   try {
@@ -214,9 +291,26 @@ export default function App() {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     usage: true,
     database: true,
+    environment: true,
     settings: true,
+    aiLayer: true,
   });
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [rawPage, setRawPage] = useState(false);
+  const [logsTab, setLogsTab] = useState<"gateway" | "messages">("gateway");
+  const [pwConfirmStep, setPwConfirmStep] = useState(false);
+  const [envRuntimes, setEnvRuntimes] = useState<EnvRuntimeDef[]>([]);
+  const [envTasks, setEnvTasks] = useState<EnvTask[]>([]);
+  const [envCounts, setEnvCounts] = useState<EnvTaskCounts>({
+    pending: 0,
+    running: 0,
+    paused: 0,
+    done: 0,
+    failed: 0,
+  });
+  const [envPickRuntime, setEnvPickRuntime] = useState<EnvRuntimeId>("go");
+  const [envPickVersion, setEnvPickVersion] = useState("");
+  const [envPickMode, setEnvPickMode] = useState<"compile" | "binary">("binary");
   const [meta, setMeta] = useState<Meta | null>(null);
   const [channels, setChannels] = useState<ChannelItem[]>([]);
   const [plugins, setPlugins] = useState<PluginItem[]>([]);
@@ -262,9 +356,13 @@ export default function App() {
   const [obWsPath, setObWsPath] = useState("/onebot/v11/ws");
   const [obHttpPath, setObHttpPath] = useState("/onebot/v11/http");
   const [logItems, setLogItems] = useState<LogItem[]>([]);
+  const [feedItems, setFeedItems] = useState<FeedMsg[]>([]);
+  const [feedPowerOff, setFeedPowerOff] = useState(false);
   const [dbInfo, setDbInfo] = useState<DbInfo | null>(null);
   const [dbDetect, setDbDetect] = useState<DbDetectItem[]>([]);
-  const [dbModalOpen, setDbModalOpen] = useState(false);
+  const [uiModal, setUiModal] = useState<UiModal>(null);
+  const [modalStatus, setModalStatus] = useState("");
+  const [modalTone, setModalTone] = useState<"muted" | "ok" | "error">("muted");
   const [dbDetecting, setDbDetecting] = useState(false);
   const [dbPick, setDbPick] = useState("");
   const [dbPath, setDbPath] = useState("");
@@ -272,6 +370,16 @@ export default function App() {
   const [chMasters, setChMasters] = useState("");
   const [chOnlyMasters, setChOnlyMasters] = useState(false);
   const [chNote, setChNote] = useState("");
+  const [pluginLayer, setPluginLayer] = useState<PluginLayer>({ step: "home" });
+  const [updateInfo, setUpdateInfo] = useState<{
+    currentVersion: string;
+    remoteVersion?: string;
+    updateAvailable: boolean;
+    message: string;
+    currentCommit?: string;
+    remoteCommit?: string;
+  } | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
 
   const tr = (key: string, vars?: Record<string, string | number>) => t(locale, key, vars);
 
@@ -388,6 +496,7 @@ export default function App() {
     api<{ items: LogItem[] }>("/v1/logs?limit=150", { token })
       .then((r) => setLogItems(r.items ?? []))
       .catch(() => setLogItems([]));
+    void checkFrameworkUpdate({ silent: true });
     api<DbInfo>("/v1/admin/db", { token })
       .then(setDbInfo)
       .catch(() => setDbInfo(null));
@@ -400,17 +509,169 @@ export default function App() {
         setObToken(r.config?.accessToken ?? "");
       })
       .catch(() => setOnebotInfo(null));
+    void refreshEnv();
   }, [token, mustReconfigure]);
+
+  useEffect(() => {
+    if ((panel !== "logs" || logsTab !== "messages") || !token) return;
+    void refreshMessages();
+    const timer = window.setInterval(() => void refreshMessages(), 2500);
+    return () => window.clearInterval(timer);
+  }, [panel, logsTab, token]);
+
+  useEffect(() => {
+    if (panel !== "dashboard" && panel !== "database") setRawPage(false);
+  }, [panel]);
 
   const sessionHours = meta?.admin?.sessionHours ?? 12;
   const displayEnv = envLabel(locale, meta?.env.id ?? envPick, meta?.env.label);
   const activeChannel = channels.find((c) => c.id === activeChannelId);
   const hint = activeChannelId ? channelHint(locale, activeChannelId) : null;
+  const taskBadgeCount = envCounts.pending + envCounts.running;
+
+  const scopeLabel = (scope: "all" | "channel" | "specified") => {
+    if (scope === "all") return tr("adapterScopeAll");
+    if (scope === "channel") return tr("adapterScopeChannel");
+    return tr("adapterScopeSpecified");
+  };
+
+  const filteredPlugins = (() => {
+    if (pluginLayer.step !== "list") return plugins;
+    if (pluginLayer.kind === "framework") {
+      return plugins.filter((p) => resolveAdapterScope(p) === "all");
+    }
+    return channelScopedPlugins(plugins, pluginLayer.channelId);
+  })();
+
+  const refreshEnv = async () => {
+    if (!token) return;
+    try {
+      const [rt, tk] = await Promise.all([
+        api<{ runtimes: EnvRuntimeDef[]; counts?: EnvTaskCounts }>("/v1/admin/env-runtimes", {
+          token,
+        }),
+        api<{ items: EnvTask[]; counts?: EnvTaskCounts }>("/v1/admin/env-tasks", { token }),
+      ]);
+      setEnvRuntimes(rt.runtimes ?? []);
+      setEnvTasks(tk.items ?? []);
+      const counts = tk.counts ?? rt.counts;
+      if (counts) setEnvCounts(counts);
+      const first = rt.runtimes?.[0];
+      if (first && !envPickVersion) {
+        setEnvPickRuntime(first.id);
+        setEnvPickVersion(first.versions[0] || "");
+        setEnvPickMode(first.modes.includes("binary") ? "binary" : first.modes[0] || "binary");
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const openPluginHome = () => {
+    setPluginLayer({ step: "home" });
+    setPanel("plugins");
+    setActionMsg("");
+  };
+
+  const openPluginList = (kind: "channel" | "framework", channelId?: string) => {
+    if (kind === "channel" && !channelId) {
+      setPluginLayer({ step: "channels" });
+      setPanel("plugins");
+      setActionMsg("");
+      return;
+    }
+    setPluginLayer({ step: "list", kind, channelId });
+    setPanel("plugins");
+    setActionMsg("");
+  };
+
+  const openPluginDocs = (kind: "channel" | "framework") => {
+    setPluginLayer({ step: "docs", kind });
+    setPanel("plugins");
+  };
+
+  /** 返回：通道插件列表 → 通道选择 → 插件首页 */
+  const backPluginLayer = () => {
+    if (pluginLayer.step === "list" && pluginLayer.kind === "channel" && pluginLayer.channelId) {
+      setPluginLayer({ step: "channels" });
+      setActionMsg("");
+      return;
+    }
+    if (pluginLayer.step === "channels") {
+      openPluginHome();
+      return;
+    }
+    openPluginHome();
+  };
+
+  const openChannelMastersFromPlugins = (channelId: string) => {
+    setActiveChannelId(channelId);
+    setModalStatus("");
+    setUiModal({ kind: "channel-settings" });
+    void loadChannelSettings(channelId);
+  };
+
+  const checkFrameworkUpdate = async (opts?: { silent?: boolean }) => {
+    if (!token) return;
+    try {
+      const res = await api<{
+        ok: boolean;
+        currentVersion: string;
+        remoteVersion?: string;
+        updateAvailable: boolean;
+        message: string;
+        currentCommit?: string;
+        remoteCommit?: string;
+      }>("/v1/admin/update/check", { token });
+      setUpdateInfo(res);
+      if (res.updateAvailable) {
+        setUiModal({ kind: "update" });
+        setModalStatus(res.message);
+        setModalTone("ok");
+      } else if (!opts?.silent) {
+        setActionMsg(res.message);
+      }
+    } catch (e) {
+      if (!opts?.silent) {
+        setActionMsg(e instanceof Error ? e.message : String(e));
+      }
+    }
+  };
+
+  const applyFrameworkUpdate = async () => {
+    if (!token) return;
+    setUpdateBusy(true);
+    setModalStatus("");
+    try {
+      const res = await api<{ ok?: boolean; message?: string }>("/v1/admin/update/apply", {
+        method: "POST",
+        token,
+        body: JSON.stringify({ confirm: true }),
+      });
+      flashModal(res.message || tr("updateApplying"), "ok");
+    } catch (e) {
+      flashModal(e instanceof Error ? e.message : String(e), "error");
+      setUpdateBusy(false);
+    }
+  };
+
+  const flashModal = (msg: string, tone: "muted" | "ok" | "error" = "ok") => {
+    setModalStatus(msg);
+    setModalTone(tone);
+  };
+
+  const closeModal = () => {
+    setUiModal(null);
+    setModalStatus("");
+    setModalTone("muted");
+    setPwConfirmStep(false);
+  };
 
   const openChannel = (id: string) => {
     setActiveChannelId(id);
     setPanel("channel-detail");
     setActionMsg("");
+    closeModal();
     void loadChannelSettings(id);
     if (id === "onebot11") void refreshOnebot();
   };
@@ -438,10 +699,13 @@ export default function App() {
   };
 
   const saveChannelSettings = async () => {
-    if (!token || !activeChannelId) return;
-    setActionMsg("");
+    if (!token || !activeChannelId) {
+      flashModal(tr("needLogin"), "error");
+      return;
+    }
+    setModalStatus("");
     try {
-      const res = await api<{ message?: string; settings?: ChannelSettings }>(
+      const res = await api<{ ok?: boolean; message?: string; settings?: ChannelSettings }>(
         `/v1/channels/${encodeURIComponent(activeChannelId)}/settings`,
         {
           method: "PUT",
@@ -453,34 +717,47 @@ export default function App() {
           }),
         },
       );
-      setActionMsg(res.message || tr("saveOk"));
       if (res.settings) {
         setChMasters((res.settings.masters ?? []).join(", "));
         setChOnlyMasters(Boolean(res.settings.onlyMasters));
         setChNote(res.settings.note ?? "");
+        setChannels((prev) =>
+          prev.map((c) =>
+            c.id === activeChannelId
+              ? {
+                  ...c,
+                  masters: res.settings!.masters,
+                  onlyMasters: res.settings!.onlyMasters,
+                  label: res.settings!.label || c.label,
+                }
+              : c,
+          ),
+        );
       }
+      flashModal(res.message || tr("saveOk"), "ok");
       void refreshSide();
     } catch (e) {
-      setActionMsg(e instanceof Error ? e.message : String(e));
+      flashModal(e instanceof Error ? e.message : String(e), "error");
     }
   };
 
   const setPluginEnabled = async (id: string, enabled: boolean) => {
     if (!token) {
-      setInfo(tr("needLogin"));
+      flashModal(tr("needLogin"), "error");
       return;
     }
-    setActionMsg("");
+    setModalStatus("");
     try {
       const res = await api<{ message?: string; items?: PluginItem[] }>(
         `/v1/plugins/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`,
         { method: "POST", token },
       );
-      if (res.items) setPlugins(res.items);
-      else void refreshSide();
+      if (res.items?.length) setPlugins(res.items);
+      else await refreshSide();
+      flashModal(res.message || tr("saveOk"), "ok");
       setActionMsg(res.message || tr("saveOk"));
     } catch (e) {
-      setActionMsg(e instanceof Error ? e.message : String(e));
+      flashModal(e instanceof Error ? e.message : String(e), "error");
     }
   };
 
@@ -493,9 +770,19 @@ export default function App() {
     try {
       const res = await api<{ assistant: string }>("/v1/chat", {
         method: "POST",
+        token: token || undefined,
         body: JSON.stringify({ content, chatId: "web-main", userId: "web-user" }),
       });
-      setMsgs((m) => [...m, { role: "assistant", content: res.assistant }]);
+      setMsgs((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: res.assistant || tr("emptyReply"),
+        },
+      ]);
+      if ((panel === "logs" && logsTab === "messages") || content.startsWith("#")) {
+        void refreshMessages();
+      }
     } catch (e) {
       setMsgs((m) => [
         ...m,
@@ -585,9 +872,62 @@ export default function App() {
       setNewUser("");
       setNewPass("");
       setNewPass2("");
+      setPwConfirmStep(false);
+      closeModal();
       clearSession(res.message || tr("credsUpdated"));
     } catch (e) {
       setLoginErr(e instanceof Error ? e.message : String(e));
+      setPwConfirmStep(false);
+    }
+  };
+
+  const openPasswordModal = () => {
+    setLoginErr("");
+    setPwConfirmStep(false);
+    setCurPass("");
+    setNewUser("");
+    setNewPass("");
+    setNewPass2("");
+    setUiModal({ kind: "password" });
+  };
+
+  const createEnvTask = async () => {
+    if (!token) return;
+    setActionMsg("");
+    try {
+      const res = await api<{ message?: string; counts?: EnvTaskCounts; task?: EnvTask }>(
+        "/v1/admin/env-tasks",
+        {
+          method: "POST",
+          token,
+          body: JSON.stringify({
+            runtime: envPickRuntime,
+            version: envPickVersion,
+            mode: envPickMode,
+          }),
+        },
+      );
+      if (res.counts) setEnvCounts(res.counts);
+      setActionMsg(res.message || tr("envTaskQueued"));
+      void refreshEnv();
+      setPanel("env-tasks");
+    } catch (e) {
+      setActionMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const setEnvTaskStatus = async (id: string, status: EnvTaskStatus) => {
+    if (!token) return;
+    try {
+      const res = await api<{ counts?: EnvTaskCounts }>(`/v1/admin/env-tasks/${id}/status`, {
+        method: "POST",
+        token,
+        body: JSON.stringify({ status }),
+      });
+      if (res.counts) setEnvCounts(res.counts);
+      void refreshEnv();
+    } catch (e) {
+      setActionMsg(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -657,19 +997,24 @@ export default function App() {
 
   const switchDb = async (id: string, path?: string) => {
     if (!token) return;
-    setActionMsg("");
+    setModalStatus("");
     try {
       const res = await api<DbInfo & { message?: string }>("/v1/admin/db/switch", {
         method: "POST",
         token,
         body: JSON.stringify({ id, path: path || undefined }),
       });
-      setDbInfo(res);
-      setActionMsg(res.message || tr("saveOk"));
-      setDbModalOpen(false);
+      setDbInfo({
+        active: res.active,
+        info: res.info,
+        stats: res.stats,
+        backends: res.backends,
+        message: res.message,
+      });
+      flashModal(res.message || tr("saveOk"), "ok");
       void refreshSide();
     } catch (e) {
-      setActionMsg(e instanceof Error ? e.message : String(e));
+      flashModal(e instanceof Error ? e.message : String(e), "error");
     }
   };
 
@@ -678,9 +1023,9 @@ export default function App() {
       setInfo(tr("needLogin"));
       return;
     }
-    setDbModalOpen(true);
+    setUiModal({ kind: "db" });
     setDbDetecting(true);
-    setActionMsg("");
+    setModalStatus("");
     try {
       const res = await api<DbInfo>("/v1/admin/db/detect", { token });
       setDbDetect(res.items ?? []);
@@ -690,7 +1035,7 @@ export default function App() {
       const backend = res.backends?.find((b) => b.id === pick);
       setDbPath(backend?.path ?? "");
     } catch (e) {
-      setActionMsg(e instanceof Error ? e.message : String(e));
+      flashModal(e instanceof Error ? e.message : String(e), "error");
     } finally {
       setDbDetecting(false);
     }
@@ -698,11 +1043,12 @@ export default function App() {
 
   const openPluginConfig = async (id: string) => {
     setActivePluginId(id);
-    setPanel("plugin-config");
-    setActionMsg("");
+    setUiModal({ kind: "plugin-config", id });
+    setModalStatus("");
     setPluginCfg(null);
     if (!token) {
       setPluginCfg({ supported: false, message: tr("needLogin") });
+      flashModal(tr("needLogin"), "error");
       return;
     }
     try {
@@ -711,19 +1057,21 @@ export default function App() {
       });
       setPluginCfg(res);
       setPluginCfgDraft({ ...(res.values ?? {}) });
+      if (!res.supported) flashModal(res.message || tr("pluginNoConfig"), "muted");
     } catch (e) {
       setPluginCfg({
         supported: false,
         message: e instanceof Error ? e.message : String(e),
       });
+      flashModal(e instanceof Error ? e.message : String(e), "error");
     }
   };
 
   const savePluginConfig = async () => {
     if (!token || !activePluginId) return;
-    setActionMsg("");
+    setModalStatus("");
     try {
-      const res = await api<{ message?: string; values?: Record<string, unknown> }>(
+      const res = await api<{ message?: string; values?: Record<string, unknown>; ok?: boolean }>(
         `/v1/plugins/${encodeURIComponent(activePluginId)}/config`,
         {
           method: "PUT",
@@ -731,10 +1079,13 @@ export default function App() {
           body: JSON.stringify(pluginCfgDraft),
         },
       );
-      setActionMsg(res.message || tr("saveOk"));
-      if (res.values) setPluginCfgDraft(res.values);
+      if (res.values) {
+        setPluginCfgDraft(res.values);
+        setPluginCfg((prev) => (prev ? { ...prev, values: res.values } : prev));
+      }
+      flashModal(res.message || tr("saveOk"), "ok");
     } catch (e) {
-      setActionMsg(e instanceof Error ? e.message : String(e));
+      flashModal(e instanceof Error ? e.message : String(e), "error");
     }
   };
 
@@ -743,6 +1094,19 @@ export default function App() {
     try {
       const r = await api<{ items: LogItem[] }>("/v1/logs?limit=150", { token });
       setLogItems(r.items ?? []);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const refreshMessages = async () => {
+    if (!token) return;
+    try {
+      const r = await api<{ items: FeedMsg[]; powerOff?: boolean }>("/v1/messages/recent?limit=80", {
+        token,
+      });
+      setFeedItems(r.items ?? []);
+      setFeedPowerOff(Boolean(r.powerOff));
     } catch {
       /* ignore */
     }
@@ -764,8 +1128,11 @@ export default function App() {
   };
 
   const saveOnebot = async () => {
-    if (!token) return;
-    setActionMsg("");
+    if (!token) {
+      flashModal(tr("needLogin"), "error");
+      return;
+    }
+    setModalStatus("");
     try {
       const res = await api<OneBotInfo & { message?: string }>("/v1/channels/onebot11/config", {
         method: "POST",
@@ -778,9 +1145,13 @@ export default function App() {
         }),
       });
       setOnebotInfo(res);
-      setActionMsg(res.message || tr("saveOk"));
+      setObEnabled(res.enabled !== false);
+      setObWsPath(res.reverseWsPath || res.config?.reverseWsPath || obWsPath);
+      setObHttpPath(res.httpPath || res.config?.httpPath || obHttpPath);
+      if (res.config?.accessToken != null) setObToken(res.config.accessToken);
+      flashModal(res.message || tr("saveOk"), "ok");
     } catch (e) {
-      setActionMsg(e instanceof Error ? e.message : String(e));
+      flashModal(e instanceof Error ? e.message : String(e), "error");
     }
   };
 
@@ -888,8 +1259,37 @@ export default function App() {
     <div className={`shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <strong>{BRAND}</strong>
+          <div className="brand-row">
+            <strong>{BRAND}</strong>
+            <button
+              type="button"
+              className="task-badge"
+              title={tr("envTasks")}
+              onClick={() => {
+                setPanel("env-tasks");
+                void refreshEnv();
+              }}
+            >
+              {taskBadgeCount}
+            </button>
+          </div>
           <span>{displayEnv}</span>
+        </div>
+
+        <div className="tree-top">
+          <TreeItem
+            label={tr("status")}
+            active={panel === "dashboard" || panel === "status"}
+            onClick={() => {
+              setPanel("dashboard");
+              void refreshSide();
+              if (token) {
+                void refreshMessages();
+                void refreshLogs();
+              }
+            }}
+            badge={health?.ok ? "OK" : "…"}
+          />
         </div>
 
         <TreeGroup
@@ -900,36 +1300,15 @@ export default function App() {
           <TreeItem label={tr("chat")} active={panel === "chat"} onClick={() => setPanel("chat")} />
           <TreeItem
             label={tr("allChannels")}
-            active={panel === "channels"}
+            active={panel === "channels" || panel === "channel-detail"}
             onClick={() => setPanel("channels")}
             badge={String(channels.length || 0)}
           />
-          {channels.map((c) => (
-            <TreeItem
-              key={c.id}
-              label={channelLabel(locale, c.id, c.label)}
-              active={panel === "channel-detail" && activeChannelId === c.id}
-              onClick={() => openChannel(c.id)}
-              badge={c.id === "onebot11" && onebotInfo?.connected ? "ON" : "on"}
-            />
-          ))}
           <TreeItem
-            label={tr("workflows")}
-            active={panel === "workflows"}
-            onClick={() => setPanel("workflows")}
-            badge={String(workflows.length)}
-          />
-          <TreeItem
-            label={tr("mcpTools")}
-            active={panel === "mcp"}
-            onClick={() => setPanel("mcp")}
-            badge={String(mcpTools.length)}
-          />
-          <TreeItem
-            label={tr("status")}
-            active={panel === "status"}
-            onClick={() => setPanel("status")}
-            badge={health?.ok ? "OK" : "…"}
+            label={tr("automation")}
+            active={panel === "automation"}
+            onClick={() => setPanel("automation")}
+            badge={String(workflows.length + mcpTools.length)}
           />
         </TreeGroup>
 
@@ -940,12 +1319,24 @@ export default function App() {
         >
           <TreeItem
             label={tr("dbCurrent")}
-            active={panel === "database" || dbModalOpen}
-            onClick={() => {
-              setPanel("database");
-              void openDbSwitchModal();
-            }}
+            active={panel === "database" || uiModal?.kind === "db"}
+            onClick={() => setPanel("database")}
             badge={dbInfo?.info?.driver ?? dbInfo?.active ?? "…"}
+          />
+        </TreeGroup>
+
+        <TreeGroup
+          title={tr("environment")}
+          open={openGroups.environment}
+          onToggle={() => toggleGroup("environment")}
+        >
+          <TreeItem
+            label={tr("envSetup")}
+            active={panel === "env-setup"}
+            onClick={() => {
+              setPanel("env-setup");
+              void refreshEnv();
+            }}
           />
         </TreeGroup>
 
@@ -956,11 +1347,8 @@ export default function App() {
         >
           <TreeItem
             label={tr("pluginManage")}
-            active={panel === "plugins" || panel === "plugin-config"}
-            onClick={() => {
-              setActionMsg("");
-              setPanel("plugins");
-            }}
+            active={panel === "plugins"}
+            onClick={() => openPluginHome()}
             badge={String(plugins.length)}
           />
           <TreeItem
@@ -973,6 +1361,25 @@ export default function App() {
             }}
           />
           <TreeItem
+            label={tr("logs")}
+            active={panel === "logs"}
+            onClick={() => {
+              setPanel("logs");
+              void refreshLogs();
+              void refreshMessages();
+            }}
+            badge={String(logItems.length || "…")}
+          />
+          <TreeItem label={tr("config")} active={panel === "config"} onClick={() => setPanel("config")} />
+          <TreeItem label={tr("admin")} active={panel === "admin"} onClick={() => setPanel("admin")} />
+        </TreeGroup>
+
+        <TreeGroup
+          title={tr("aiLayer")}
+          open={openGroups.aiLayer}
+          onToggle={() => toggleGroup("aiLayer")}
+        >
+          <TreeItem
             label={tr("aiProvider")}
             active={panel === "ai"}
             onClick={() => {
@@ -980,17 +1387,6 @@ export default function App() {
               setPanel("ai");
             }}
           />
-          <TreeItem
-            label={tr("logs")}
-            active={panel === "logs"}
-            onClick={() => {
-              setPanel("logs");
-              void refreshLogs();
-            }}
-            badge={String(logItems.length || "…")}
-          />
-          <TreeItem label={tr("config")} active={panel === "config"} onClick={() => setPanel("config")} />
-          <TreeItem label={tr("admin")} active={panel === "admin"} onClick={() => setPanel("admin")} />
         </TreeGroup>
 
         <div className="sidebar-foot">
@@ -1010,6 +1406,12 @@ export default function App() {
       )}
 
       <main className="workspace">
+        <div className="workspace-topbar">
+          <span className="muted">{tr("workspace")}</span>
+          <button type="button" className="btn ghost mini" onClick={() => clearSession()}>
+            {tr("signOut")}
+          </button>
+        </div>
         {panel === "chat" && (
           <section className="panel chat">
             <div className="hero">
@@ -1046,7 +1448,7 @@ export default function App() {
           <section className="panel">
             <div className="hero">
               <h1>{tr("channels")}</h1>
-              <p>{tr("channelsHero")}</p>
+              <p>{tr("channelsLayerHero")}</p>
             </div>
             <div className="list">
               {channels.length === 0 && <p className="muted pad">{tr("noChannels")}</p>}
@@ -1060,10 +1462,12 @@ export default function App() {
                   <div>
                     <strong>{channelLabel(locale, c.id, c.label)}</strong>
                     <div className="muted">
-                      {c.id} · {tr("openBaseline")}
+                      {c.id}
+                      {c.id === "onebot11" && onebotInfo?.connected ? ` · ${tr("onebotConnected")}` : ""}
+                      {c.masters?.length ? ` · ${tr("channelMastersShort")}:${c.masters.length}` : ""}
                     </div>
                   </div>
-                  <span className="badge ok">{tr("online")}</span>
+                  <span className="badge ok">{tr("enterChannel")}</span>
                 </button>
               ))}
             </div>
@@ -1073,110 +1477,70 @@ export default function App() {
         {panel === "channel-detail" && activeChannel && (
           <section className="panel">
             <div className="hero">
+              <p className="crumb">
+                <button type="button" className="linkish" onClick={() => setPanel("channels")}>
+                  {tr("allChannels")}
+                </button>
+                <span> / </span>
+                <strong>{channelLabel(locale, activeChannel.id, activeChannel.label)}</strong>
+              </p>
               <h1>{channelLabel(locale, activeChannel.id, activeChannel.label)}</h1>
               <p>
-                {tr("channelId")}: <code>{activeChannel.id}</code>. {tr("channelSettingsHero")}
+                {tr("channelId")}: <code>{activeChannel.id}</code> · {tr("channelHubHero")}
               </p>
             </div>
-            <div className="form">
-              <div className="hero sub">
-                <h1>{tr("channelSettings")}</h1>
-              </div>
-              <p className="muted">{tr("channelSettingsHint")}</p>
-              <label>
-                {tr("channelMasters")}
-                <input
-                  value={chMasters}
-                  onChange={(e) => setChMasters(e.target.value)}
-                  placeholder={tr("channelMastersPh")}
-                />
-              </label>
-              <label>
-                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={chOnlyMasters}
-                    onChange={(e) => setChOnlyMasters(e.target.checked)}
-                  />
-                  {tr("channelOnlyMasters")}
-                </span>
-              </label>
-              <label>
-                {tr("channelNote")}
-                <input value={chNote} onChange={(e) => setChNote(e.target.value)} />
-              </label>
-              {actionMsg && panel === "channel-detail" && <p className="muted">{actionMsg}</p>}
-              <button type="button" className="btn" onClick={() => void saveChannelSettings()}>
-                {tr("saveChannelSettings")}
+            <div className="layer-grid">
+              <button
+                type="button"
+                className="layer-card"
+                onClick={() => {
+                  setModalStatus("");
+                  setUiModal({ kind: "channel-settings" });
+                  void loadChannelSettings(activeChannel.id);
+                }}
+              >
+                <strong>{tr("channelSettings")}</strong>
+                <span>{tr("channelSettingsHint")}</span>
               </button>
-            </div>
-
-            {activeChannel.id === "onebot11" && (
-              <div className="form">
-                <div className="hero sub">
-                  <h1>{tr("onebotConn")}</h1>
-                </div>
-                <div className="chips">
-                  <div className="chip">
-                    {tr("onebotStatus")}{" "}
-                    <strong>
-                      {onebotInfo?.connected ? tr("onebotConnected") : tr("onebotDisconnected")}
-                    </strong>
-                  </div>
-                  <div className="chip">
-                    {tr("onebotClients")} <strong>{onebotInfo?.clients ?? 0}</strong>
-                  </div>
-                  <div className="chip">
-                    {tr("onebotSelfId")} <strong>{onebotInfo?.selfId || "—"}</strong>
-                  </div>
-                </div>
-                <p className="muted">{tr("onebotHint")}</p>
-                <label>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <input
-                      type="checkbox"
-                      checked={obEnabled}
-                      onChange={(e) => setObEnabled(e.target.checked)}
-                    />
-                    {tr("onebotEnabled")}
+              <button
+                type="button"
+                className="layer-card"
+                onClick={() => {
+                  setModalStatus("");
+                  setUiModal({ kind: "channel-plugins" });
+                }}
+              >
+                <strong>{tr("channelPluginManage")}</strong>
+                <span>{tr("channelPluginManageHint")}</span>
+              </button>
+              <button
+                type="button"
+                className="layer-card"
+                onClick={() => {
+                  setModalStatus("");
+                  setUiModal({ kind: "channel-docs" });
+                }}
+              >
+                <strong>{tr("pluginBaseline")}</strong>
+                <span>{tr("channelDocsHint")}</span>
+              </button>
+              {activeChannel.id === "onebot11" && (
+                <button
+                  type="button"
+                  className="layer-card"
+                  onClick={() => {
+                    setModalStatus("");
+                    setUiModal({ kind: "onebot-conn" });
+                    void refreshOnebot();
+                  }}
+                >
+                  <strong>{tr("onebotConn")}</strong>
+                  <span>
+                    {onebotInfo?.connected ? tr("onebotConnected") : tr("onebotDisconnected")}
                   </span>
-                </label>
-                <label>
-                  {tr("onebotWsPath")}
-                  <input value={obWsPath} onChange={(e) => setObWsPath(e.target.value)} />
-                </label>
-                <label>
-                  {tr("onebotHttpPath")}
-                  <input value={obHttpPath} onChange={(e) => setObHttpPath(e.target.value)} />
-                </label>
-                <label>
-                  {tr("onebotToken")}
-                  <input
-                    type="password"
-                    value={obToken}
-                    onChange={(e) => setObToken(e.target.value)}
-                    autoComplete="off"
-                  />
-                </label>
-                <button type="button" className="btn" onClick={() => void saveOnebot()}>
-                  {tr("onebotSave")}
                 </button>
-                <button type="button" className="btn ghost" onClick={() => void refreshOnebot()}>
-                  {tr("refresh")}
-                </button>
-              </div>
-            )}
-
-            {hint && (
-              <div className="form">
-                <div className="hero sub">
-                  <h1>{tr("pluginBaseline")}</h1>
-                </div>
-                <p className="muted">{hint.tip}</p>
-                <p className="muted">{tr("canonicalPattern")}</p>
-                <pre className="code-block">{hint.sample}</pre>
-              </div>
-            )}
+              )}
+            </div>
             <div className="form">
               <button type="button" className="btn ghost" onClick={() => setPanel("channels")}>
                 {tr("backChannels")}
@@ -1254,9 +1618,13 @@ export default function App() {
           </section>
         )}
 
-        {panel === "workflows" && (
+        {panel === "automation" && (
           <section className="panel">
             <div className="hero">
+              <h1>{tr("automation")}</h1>
+              <p>{tr("automationHero")}</p>
+            </div>
+            <div className="hero sub">
               <h1>{tr("workflows")}</h1>
               <p>{tr("workflowsHero")}</p>
             </div>
@@ -1279,7 +1647,7 @@ export default function App() {
                 </div>
               ))}
             </div>
-            {actionMsg && panel === "workflows" && <p className="error pad">{actionMsg}</p>}
+            {actionMsg && panel === "automation" && <p className="error pad">{actionMsg}</p>}
             {wfResult != null && (
               <>
                 <div className="hero sub">
@@ -1288,6 +1656,22 @@ export default function App() {
                 <pre className="code-block">{JSON.stringify(wfResult, null, 2)}</pre>
               </>
             )}
+            <div className="hero sub">
+              <h1>{tr("mcpTools")}</h1>
+              <p>{tr("mcpHero")}</p>
+            </div>
+            <div className="list">
+              {mcpTools.length === 0 && <p className="muted pad">{tr("noTools")}</p>}
+              {mcpTools.map((tool) => (
+                <div className="list-row" key={tool.name}>
+                  <div>
+                    <strong>{tool.name}</strong>
+                    <div className="muted">{tool.description || "—"}</div>
+                  </div>
+                  <span className="badge ok">{tr("tool")}</span>
+                </div>
+              ))}
+            </div>
           </section>
         )}
 
@@ -1439,61 +1823,218 @@ export default function App() {
               <p>{tr("logsHero")}</p>
             </div>
             <div className="form">
-              <button type="button" className="btn ghost" onClick={() => void refreshLogs()}>
+              <div className="seg-tabs">
+                <button
+                  type="button"
+                  className={`btn mini ${logsTab === "gateway" ? "" : "ghost"}`}
+                  onClick={() => {
+                    setLogsTab("gateway");
+                    void refreshLogs();
+                  }}
+                >
+                  {tr("logsGateway")}
+                </button>
+                <button
+                  type="button"
+                  className={`btn mini ${logsTab === "messages" ? "" : "ghost"}`}
+                  onClick={() => {
+                    setLogsTab("messages");
+                    void refreshMessages();
+                  }}
+                >
+                  {tr("liveMessages")}
+                </button>
+              </div>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  if (logsTab === "gateway") void refreshLogs();
+                  else void refreshMessages();
+                }}
+              >
                 {tr("refresh")}
               </button>
             </div>
-            <div className="log-list">
-              {logItems.length === 0 && <p className="muted pad">{tr("noLogs")}</p>}
-              {[...logItems].reverse().map((row, i) => (
-                <div className="log-row" key={`${row.at}-${i}`}>
-                  <span className="muted">{row.at.replace("T", " ").slice(0, 19)}</span>
-                  <span className={`lvl lvl-${row.level}`}>{row.level}</span>
-                  <span>{row.message}</span>
+            {logsTab === "gateway" ? (
+              <div className="log-list">
+                {logItems.length === 0 && <p className="muted pad">{tr("noLogs")}</p>}
+                {[...logItems].reverse().map((row, i) => (
+                  <div className="log-row" key={`${row.at}-${i}`}>
+                    <span className="muted">{row.at.replace("T", " ").slice(0, 19)}</span>
+                    <span className={`lvl lvl-${row.level}`}>{row.level}</span>
+                    <span>{row.message}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                <div className="chips">
+                  <div className="chip">
+                    {tr("powerState")}{" "}
+                    <strong>{feedPowerOff ? tr("powerOff") : tr("powerOn")}</strong>
+                  </div>
+                  <div className="chip">
+                    {tr("messages")} <strong>{feedItems.length}</strong>
+                  </div>
                 </div>
-              ))}
-            </div>
+                <p className="muted pad">{tr("hashHint")}</p>
+                <div className="log-list">
+                  {feedItems.length === 0 && <p className="muted pad">{tr("noLiveMessages")}</p>}
+                  {feedItems.map((row) => (
+                    <div className="log-row" key={row.id}>
+                      <span className="muted">{row.createdAt.replace("T", " ").slice(0, 19)}</span>
+                      <span className="lvl">{row.channel}</span>
+                      <span className="muted">
+                        {row.role}:{row.userId}
+                      </span>
+                      <span>{row.content}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </section>
         )}
 
-        {panel === "mcp" && (
+        {panel === "dashboard" && (
           <section className="panel">
-            <div className="hero">
-              <h1>{tr("mcpTools")}</h1>
-              <p>{tr("mcpHero")}</p>
+            <div className="hero hero-with-raw">
+              <div>
+                <h1
+                  className="title-toggle"
+                  onClick={() => setRawPage((v) => !v)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") setRawPage((v) => !v);
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
+                  {tr("dashboard")}
+                </h1>
+                <p>{tr("dashboardHero")}</p>
+              </div>
+              <button type="button" className="btn ghost mini" onClick={() => setRawPage((v) => !v)}>
+                {rawPage ? tr("hideRaw") : tr("showRaw")}
+              </button>
             </div>
-            <div className="list">
-              {mcpTools.length === 0 && <p className="muted pad">{tr("noTools")}</p>}
-              {mcpTools.map((tool) => (
-                <div className="list-row" key={tool.name}>
-                  <div>
-                    <strong>{tool.name}</strong>
-                    <div className="muted">{tool.description || "—"}</div>
+            {rawPage ? (
+              <pre className="code-block raw-page">
+                {JSON.stringify(
+                  {
+                    health,
+                    meta,
+                    db: dbInfo,
+                    channels,
+                    plugins,
+                    llm: llmInfo,
+                    onebot: onebotInfo,
+                    powerOff: feedPowerOff,
+                    recentMessages: feedItems.slice(0, 20),
+                  },
+                  null,
+                  2,
+                )}
+              </pre>
+            ) : (
+              <div className="dash-board">
+                <div className="dash-grid">
+                  <div className="dash-tile">
+                    <span>{tr("health")}</span>
+                    <strong>{health?.ok ? tr("ok") : tr("unknown")}</strong>
                   </div>
-                  <span className="badge ok">{tr("tool")}</span>
+                  <div className="dash-tile">
+                    <span>{tr("env")}</span>
+                    <strong>{displayEnv}</strong>
+                  </div>
+                  <div className="dash-tile">
+                    <span>{tr("channels")}</span>
+                    <strong>{channels.length}</strong>
+                  </div>
+                  <div className="dash-tile">
+                    <span>{tr("plugins")}</span>
+                    <strong>{plugins.length}</strong>
+                  </div>
+                  <div className="dash-tile">
+                    <span>{tr("pluginKindChannel")}</span>
+                    <strong>
+                      {plugins.filter((p) => resolveAdapterScope(p) !== "all").length}
+                    </strong>
+                  </div>
+                  <div className="dash-tile">
+                    <span>{tr("pluginKindFramework")}</span>
+                    <strong>
+                      {plugins.filter((p) => resolveAdapterScope(p) === "all").length}
+                    </strong>
+                  </div>
+                  <div className="dash-tile">
+                    <span>{tr("messages")}</span>
+                    <strong>
+                      {dbInfo?.stats?.messages ?? meta?.db?.messages ?? feedItems.length}
+                    </strong>
+                  </div>
+                  <div className="dash-tile">
+                    <span>{tr("dbDriver")}</span>
+                    <strong>{dbInfo?.info?.driver ?? "…"}</strong>
+                  </div>
+                  <div className="dash-tile">
+                    <span>{tr("powerState")}</span>
+                    <strong>{feedPowerOff ? tr("powerOff") : tr("powerOn")}</strong>
+                  </div>
+                  <div className="dash-tile">
+                    <span>{tr("onebotStatus")}</span>
+                    <strong>
+                      {onebotInfo?.connected ? tr("onebotConnected") : tr("onebotDisconnected")}
+                    </strong>
+                  </div>
+                  <div className="dash-tile">
+                    <span>{tr("aiProvider")}</span>
+                    <strong>
+                      {llmInfo?.providers?.find((p) => p.id === llmInfo.activeId)?.name ?? "—"}
+                    </strong>
+                  </div>
+                  <div className="dash-tile">
+                    <span>{tr("user")}</span>
+                    <strong>{adminUser || "…"}</strong>
+                  </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </section>
         )}
 
         {panel === "database" && (
           <section className="panel">
-            <div className="hero">
-              <h1>{tr("database")}</h1>
-              <p>{tr("databaseHeroMulti")}</p>
-            </div>
-            <div className="form">
-              <button type="button" className="btn" onClick={() => void openDbSwitchModal()}>
-                {tr("dbSwitchOpen")}
+            <div className="hero hero-with-raw">
+              <div>
+                <h1
+                  className="title-toggle"
+                  onClick={() => setRawPage((v) => !v)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") setRawPage((v) => !v);
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
+                  {tr("database")}
+                </h1>
+                <p>{tr("databaseHeroMulti")}</p>
+              </div>
+              <button type="button" className="btn ghost mini" onClick={() => setRawPage((v) => !v)}>
+                {rawPage ? tr("hideRaw") : tr("showRaw")}
               </button>
             </div>
-            {actionMsg && <p className="muted pad">{actionMsg}</p>}
-            <RawBlock
-              showLabel={tr("showRaw")}
-              hideLabel={tr("hideRaw")}
-              summary={
-                <div className="chips" style={{ padding: 0 }}>
+            {rawPage ? (
+              <pre className="code-block raw-page">{JSON.stringify(dbInfo ?? meta?.db ?? {}, null, 2)}</pre>
+            ) : (
+              <>
+                <div className="form">
+                  <button type="button" className="btn" onClick={() => void openDbSwitchModal()}>
+                    {tr("dbSwitchOpen")}
+                  </button>
+                </div>
+                {actionMsg && <p className="muted pad">{actionMsg}</p>}
+                <div className="chips">
                   <div className="chip">
                     {tr("dbDriver")} <strong>{dbInfo?.info?.driver ?? "…"}</strong>
                   </div>
@@ -1510,48 +2051,22 @@ export default function App() {
                     {tr("kv")} <strong>{dbInfo?.stats?.kv ?? meta?.db?.kv ?? 0}</strong>
                   </div>
                 </div>
-              }
-              raw={dbInfo ?? meta?.db ?? {}}
-            />
+              </>
+            )}
           </section>
         )}
 
         {panel === "status" && (
           <section className="panel">
             <div className="hero">
-              <h1>{tr("status")}</h1>
-              <p>{tr("statusHero")}</p>
+              <h1>{tr("dashboard")}</h1>
+              <p>{tr("dashboardHero")}</p>
             </div>
-            <RawBlock
-              showLabel={tr("showRaw")}
-              hideLabel={tr("hideRaw")}
-              summary={
-                <div className="chips" style={{ padding: 0 }}>
-                  <div className="chip">
-                    {tr("health")} <strong>{health?.ok ? tr("ok") : tr("unknown")}</strong>
-                  </div>
-                  <div className="chip">
-                    {tr("env")} <strong>{displayEnv}</strong>
-                  </div>
-                  <div className="chip">
-                    {tr("channels")} <strong>{channels.length}</strong>
-                  </div>
-                  <div className="chip">
-                    {tr("plugins")} <strong>{plugins.length}</strong>
-                  </div>
-                  <div className="chip">
-                    {tr("user")} <strong>{adminUser || "…"}</strong>
-                  </div>
-                  <div className="chip">
-                    {tr("aiProvider")}{" "}
-                    <strong>
-                      {llmInfo?.providers?.find((p) => p.id === llmInfo.activeId)?.name ?? "—"}
-                    </strong>
-                  </div>
-                </div>
-              }
-              raw={{ health, meta, llm: llmInfo, db: dbInfo }}
-            />
+            <div className="form">
+              <button type="button" className="btn" onClick={() => setPanel("dashboard")}>
+                {tr("openDashboard")}
+              </button>
+            </div>
           </section>
         )}
 
@@ -1595,6 +2110,17 @@ export default function App() {
               <p className="muted">
                 {tr("pluginsLoaded")}: {meta?.plugins?.loaded ?? plugins.length}
               </p>
+              <p className="muted">
+                {tr("frameworkVersion")}: {meta?.version ?? "…"}
+              </p>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void checkFrameworkUpdate()}
+              >
+                {tr("checkUpdate")}
+              </button>
+              {actionMsg && <p className="muted">{actionMsg}</p>}
               <button type="button" className="btn ghost" onClick={() => setPanel("admin")}>
                 {tr("manageCreds")}
               </button>
@@ -1608,33 +2134,13 @@ export default function App() {
               <h1>{tr("admin")}</h1>
               <p>{tr("adminHero", { user: adminUser || "…" })}</p>
             </div>
-            <div className="form">
-              <button className="btn ghost" type="button" onClick={() => clearSession()}>
-                {tr("signOut")}
-              </button>
-              <label>
-                {tr("currentPassword")}
-                <input type="password" value={curPass} onChange={(e) => setCurPass(e.target.value)} />
-              </label>
-              <label>
-                {tr("newUsernameOpt")}
-                <input value={newUser} onChange={(e) => setNewUser(e.target.value)} />
-              </label>
-              <label>
-                {tr("newPasswordOpt")}
-                <input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} />
-              </label>
-              <label>
-                {tr("confirmNewPassword")}
-                <input
-                  type="password"
-                  value={newPass2}
-                  onChange={(e) => setNewPass2(e.target.value)}
-                />
-              </label>
-              {loginErr && <div className="error">{loginErr}</div>}
-              <button className="btn" type="button" onClick={() => void updateCredentials()}>
-                {tr("updateCreds")}
+            <div className="admin-row">
+              <div>
+                <strong>{tr("changePassword")}</strong>
+                <p className="muted">{tr("changePasswordHint")}</p>
+              </div>
+              <button type="button" className="btn" onClick={() => openPasswordModal()}>
+                {tr("changePasswordBtn")}
               </button>
             </div>
             {overview && (
@@ -1645,11 +2151,19 @@ export default function App() {
                   <div className="chips">
                     <div className="chip">
                       {tr("plugins")}{" "}
-                      <strong>{Array.isArray((overview as { plugins?: unknown[] }).plugins) ? (overview as { plugins: unknown[] }).plugins.length : "…"}</strong>
+                      <strong>
+                        {Array.isArray((overview as { plugins?: unknown[] }).plugins)
+                          ? (overview as { plugins: unknown[] }).plugins.length
+                          : "…"}
+                      </strong>
                     </div>
                     <div className="chip">
                       {tr("channels")}{" "}
-                      <strong>{Array.isArray((overview as { channels?: unknown[] }).channels) ? (overview as { channels: unknown[] }).channels.length : "…"}</strong>
+                      <strong>
+                        {Array.isArray((overview as { channels?: unknown[] }).channels)
+                          ? (overview as { channels: unknown[] }).channels.length
+                          : "…"}
+                      </strong>
                     </div>
                   </div>
                 }
@@ -1659,132 +2173,509 @@ export default function App() {
           </section>
         )}
 
-        {panel === "plugin-config" && (
+        {panel === "env-setup" && (
           <section className="panel">
             <div className="hero">
-              <h1>
-                {plugins.find((p) => p.id === activePluginId)?.name || activePluginId || tr("plugins")}
-              </h1>
-              <p>{tr("pluginConfigHero")}</p>
+              <h1>{tr("envSetup")}</h1>
+              <p>{tr("envSetupHero")}</p>
             </div>
-            {!pluginCfg ? (
-              <p className="muted pad">{tr("loading")}</p>
-            ) : !pluginCfg.supported ? (
-              <p className="pad">{pluginCfg.message || tr("pluginNoConfig")}</p>
-            ) : (
-              <div className="form">
-                {(pluginCfg.schema ?? []).map((field) => (
-                  <label key={field.key}>
-                    {field.label}
-                    {field.type === "boolean" ? (
-                      <select
-                        value={String(pluginCfgDraft[field.key] ?? field.default ?? true)}
-                        onChange={(e) =>
-                          setPluginCfgDraft((d) => ({
-                            ...d,
-                            [field.key]: e.target.value === "true",
-                          }))
-                        }
-                      >
-                        <option value="true">{tr("on")}</option>
-                        <option value="false">{tr("off")}</option>
-                      </select>
-                    ) : field.type === "select" ? (
-                      <select
-                        value={String(pluginCfgDraft[field.key] ?? field.default ?? "")}
-                        onChange={(e) =>
-                          setPluginCfgDraft((d) => ({ ...d, [field.key]: e.target.value }))
-                        }
-                      >
-                        {(field.options ?? []).map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type={
-                          field.type === "password"
-                            ? "password"
-                            : field.type === "number"
-                              ? "number"
-                              : "text"
-                        }
-                        value={String(pluginCfgDraft[field.key] ?? field.default ?? "")}
-                        onChange={(e) =>
-                          setPluginCfgDraft((d) => ({
-                            ...d,
-                            [field.key]:
-                              field.type === "number" ? Number(e.target.value) : e.target.value,
-                          }))
-                        }
-                      />
-                    )}
-                    {field.description ? <span className="muted">{field.description}</span> : null}
-                  </label>
-                ))}
-                {actionMsg && <p className="muted">{actionMsg}</p>}
-                <button type="button" className="btn" onClick={() => void savePluginConfig()}>
-                  {tr("saveConfig")}
+            <div className="env-grid">
+              {envRuntimes.map((rt) => (
+                <button
+                  type="button"
+                  key={rt.id}
+                  className={`env-card ${envPickRuntime === rt.id ? "active" : ""}`}
+                  onClick={() => {
+                    setEnvPickRuntime(rt.id);
+                    setEnvPickVersion(rt.versions[0] || "");
+                    setEnvPickMode(rt.modes.includes("binary") ? "binary" : rt.modes[0] || "binary");
+                  }}
+                >
+                  <strong>{rt.label}</strong>
+                  <span className="muted">
+                    {rt.installed
+                      ? `${tr("envInstalled")}: ${rt.activeVersion || "—"}`
+                      : tr("envNotInstalled")}
+                  </span>
                 </button>
-              </div>
-            )}
+              ))}
+            </div>
             <div className="form">
-              <button type="button" className="btn ghost" onClick={() => setPanel("plugins")}>
-                {tr("backPlugins")}
+              <label>
+                {tr("envVersion")}
+                <select
+                  value={envPickVersion}
+                  onChange={(e) => setEnvPickVersion(e.target.value)}
+                >
+                  {(envRuntimes.find((r) => r.id === envPickRuntime)?.versions ?? []).map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {tr("envMode")}
+                <select
+                  value={envPickMode}
+                  onChange={(e) =>
+                    setEnvPickMode(e.target.value === "compile" ? "compile" : "binary")
+                  }
+                >
+                  {(envRuntimes.find((r) => r.id === envPickRuntime)?.modes ?? ["binary"]).map(
+                    (m) => (
+                      <option key={m} value={m}>
+                        {m === "compile" ? tr("envModeCompile") : tr("envModeBinary")}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </label>
+              {actionMsg && <p className="muted">{actionMsg}</p>}
+              <button type="button" className="btn" onClick={() => void createEnvTask()}>
+                {tr("envInstall")}
               </button>
             </div>
           </section>
         )}
 
-        {panel === "plugins" && (
+        {panel === "env-tasks" && (
           <section className="panel">
             <div className="hero">
-              <h1>{tr("pluginManage")}</h1>
-              <p>{tr("pluginManageHero")}</p>
+              <h1>{tr("envTasks")}</h1>
+              <p>{tr("envTasksHero")}</p>
             </div>
-            {actionMsg && panel === "plugins" && <p className="muted pad">{actionMsg}</p>}
-            <div className="list">
-              {plugins.length === 0 && <p className="muted pad">{tr("noPlugins")}</p>}
-              {plugins.map((p) => (
-                <div className="list-row" key={p.id}>
-                  <div>
-                    <strong>{p.name}</strong>
-                    <div className="muted">
-                      {p.id}
-                      {p.version ? ` @${p.version}` : ""}
-                      {p.enabled === false ? ` · ${tr("pluginDisabled")}` : ""}
-                    </div>
+            <div className="form">
+              <button type="button" className="btn ghost" onClick={() => void refreshEnv()}>
+                {tr("refresh")}
+              </button>
+            </div>
+            {(["pending", "running", "paused"] as const).map((st) => {
+              const rows = envTasks.filter((t) => t.status === st);
+              return (
+                <div key={st}>
+                  <div className="hero sub">
+                    <h1>
+                      {tr(`taskStatus_${st}`)} ({rows.length})
+                    </h1>
                   </div>
-                  <div className="row-actions">
-                    <button
-                      type="button"
-                      className="btn mini"
-                      onClick={() => void openPluginConfig(p.id)}
-                    >
-                      {tr("pluginManageBtn")}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn mini ghost"
-                      onClick={() => void setPluginEnabled(p.id, p.enabled === false)}
-                    >
-                      {p.enabled === false ? tr("pluginEnable") : tr("pluginDisable")}
-                    </button>
+                  <div className="list">
+                    {rows.length === 0 && <p className="muted pad">{tr("noEnvTasks")}</p>}
+                    {rows.map((task) => (
+                      <div className="list-row" key={task.id}>
+                        <div>
+                          <strong>
+                            {task.runtime} · {task.version}
+                          </strong>
+                          <div className="muted">
+                            {task.note || task.id} · {task.mode}
+                          </div>
+                        </div>
+                        <div className="row-actions">
+                          {st === "pending" && (
+                            <button
+                              type="button"
+                              className="btn mini"
+                              onClick={() => void setEnvTaskStatus(task.id, "running")}
+                            >
+                              {tr("taskStart")}
+                            </button>
+                          )}
+                          {st === "running" && (
+                            <button
+                              type="button"
+                              className="btn mini ghost"
+                              onClick={() => void setEnvTaskStatus(task.id, "paused")}
+                            >
+                              {tr("taskPause")}
+                            </button>
+                          )}
+                          {st === "paused" && (
+                            <button
+                              type="button"
+                              className="btn mini"
+                              onClick={() => void setEnvTaskStatus(task.id, "running")}
+                            >
+                              {tr("taskResume")}
+                            </button>
+                          )}
+                          {(st === "running" || st === "paused" || st === "pending") && (
+                            <button
+                              type="button"
+                              className="btn mini ghost"
+                              onClick={() => void setEnvTaskStatus(task.id, "done")}
+                            >
+                              {tr("taskDone")}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
+          </section>
+        )}
+
+        {panel === "plugins" && (
+          <section className="panel">
+            {pluginLayer.step === "home" && (
+              <>
+                <div className="hero">
+                  <h1>{tr("pluginManage")}</h1>
+                  <p>{tr("pluginManageLayerHero")}</p>
+                </div>
+                <div className="layer-grid">
+                  <button
+                    type="button"
+                    className="layer-card"
+                    onClick={() => openPluginList("channel")}
+                  >
+                    <strong>{tr("pluginKindChannel")}</strong>
+                    <span>{tr("pluginKindChannelHint")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="layer-card"
+                    onClick={() => openPluginList("framework")}
+                  >
+                    <strong>{tr("pluginKindFramework")}</strong>
+                    <span>{tr("pluginKindFrameworkHint")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="layer-card"
+                    onClick={() => openPluginDocs("channel")}
+                  >
+                    <strong>{tr("docsChannel")}</strong>
+                    <span>{tr("docsChannelHint")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="layer-card"
+                    onClick={() => openPluginDocs("framework")}
+                  >
+                    <strong>{tr("docsFramework")}</strong>
+                    <span>{tr("docsFrameworkHint")}</span>
+                  </button>
+                </div>
+              </>
+            )}
+
+            {pluginLayer.step === "channels" && (
+              <>
+                <div className="hero">
+                  <p className="crumb">
+                    <button type="button" className="linkish" onClick={() => backPluginLayer()}>
+                      {tr("pluginManage")}
+                    </button>
+                    <span> / </span>
+                    <strong>{tr("pluginKindChannel")}</strong>
+                  </p>
+                  <h1>{tr("pluginKindChannel")}</h1>
+                  <p>{tr("pluginChannelPickHero")}</p>
+                </div>
+                <div className="list">
+                  {channels.length === 0 && <p className="muted pad">{tr("noChannels")}</p>}
+                  {channels.map((c) => {
+                    const count = channelScopedPlugins(plugins, c.id).length;
+                    return (
+                      <div className="list-row" key={c.id}>
+                        <div>
+                          <strong>{channelLabel(locale, c.id, c.label)}</strong>
+                          <div className="muted">
+                            {c.id}
+                            {c.masters?.length
+                              ? ` · ${tr("channelMastersShort")}:${c.masters.length}`
+                              : ` · ${tr("mastersNotSet")}`}
+                          </div>
+                        </div>
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="btn mini ghost"
+                            onClick={() => openChannelMastersFromPlugins(c.id)}
+                          >
+                            {tr("channelSettings")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn mini"
+                            onClick={() => openPluginList("channel", c.id)}
+                          >
+                            {tr("channelPluginManage")} · {count}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="form">
+                  <button type="button" className="btn ghost" onClick={() => backPluginLayer()}>
+                    {tr("backLayer")}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {pluginLayer.step === "list" && (
+              <>
+                <div className="hero">
+                  <p className="crumb">
+                    <button type="button" className="linkish" onClick={() => backPluginLayer()}>
+                      {pluginLayer.kind === "channel" && pluginLayer.channelId
+                        ? tr("channelPluginManage")
+                        : tr("pluginManage")}
+                    </button>
+                    <span> / </span>
+                    <strong>
+                      {pluginLayer.kind === "channel"
+                        ? tr("pluginKindChannel")
+                        : tr("pluginKindFramework")}
+                    </strong>
+                    {pluginLayer.channelId ? (
+                      <>
+                        <span> / </span>
+                        <strong>{pluginLayer.channelId}</strong>
+                      </>
+                    ) : null}
+                  </p>
+                  <h1>
+                    {pluginLayer.kind === "channel"
+                      ? tr("pluginKindChannel")
+                      : tr("pluginKindFramework")}
+                  </h1>
+                  <p>
+                    {pluginLayer.kind === "channel"
+                      ? tr("pluginKindChannelHint")
+                      : tr("pluginKindFrameworkHint")}
+                  </p>
+                </div>
+                {pluginLayer.kind === "channel" && pluginLayer.channelId ? (
+                  <div className="form" style={{ paddingTop: 0 }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => openChannelMastersFromPlugins(pluginLayer.channelId!)}
+                    >
+                      {tr("configMasters")}
+                    </button>
+                    <p className="muted">{tr("channelSettingsHint")}</p>
+                  </div>
+                ) : null}
+                {actionMsg && <p className="muted pad">{actionMsg}</p>}
+                <div className="list">
+                  {filteredPlugins.length === 0 && (
+                    <p className="muted pad">
+                      {pluginLayer.kind === "channel"
+                        ? tr("noChannelPluginsHint")
+                        : tr("noPlugins")}
+                    </p>
+                  )}
+                  {filteredPlugins.map((p) => (
+                    <div className="list-row" key={p.id}>
+                      <div>
+                        <strong>{p.name}</strong>
+                        <span className="cat-pill">{scopeLabel(resolveAdapterScope(p))}</span>
+                        <div className="muted">
+                          {p.id}
+                          {p.version ? ` @${p.version}` : ""}
+                          {p.enabled === false ? ` · ${tr("pluginDisabled")}` : ""}
+                          {p.channels?.length ? ` · ${p.channels.join(",")}` : ""}
+                        </div>
+                      </div>
+                      <div className="row-actions">
+                        <button
+                          type="button"
+                          className="btn mini"
+                          onClick={() => void openPluginConfig(p.id)}
+                        >
+                          {tr("pluginManageBtn")}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn mini ghost"
+                          onClick={() => void setPluginEnabled(p.id, p.enabled === false)}
+                        >
+                          {p.enabled === false ? tr("pluginEnable") : tr("pluginDisable")}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="form">
+                  <button type="button" className="btn ghost" onClick={() => backPluginLayer()}>
+                    {tr("backLayer")}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {pluginLayer.step === "docs" && (
+              <>
+                <div className="hero">
+                  <p className="crumb">
+                    <button type="button" className="linkish" onClick={() => backPluginLayer()}>
+                      {tr("pluginManage")}
+                    </button>
+                    <span> / </span>
+                    <strong>
+                      {pluginLayer.kind === "channel" ? tr("docsChannel") : tr("docsFramework")}
+                    </strong>
+                  </p>
+                  <h1>
+                    {pluginLayer.kind === "channel" ? tr("docsChannel") : tr("docsFramework")}
+                  </h1>
+                  <p>
+                    {pluginLayer.kind === "channel"
+                      ? tr("docsChannelHint")
+                      : tr("docsFrameworkHint")}
+                  </p>
+                </div>
+                <div className="form">
+                  <p className="muted">
+                    {pluginLayer.kind === "channel"
+                      ? tr("docsChannelBody")
+                      : tr("docsFrameworkBody")}
+                  </p>
+                  <pre className="code-block">
+                    {pluginLayer.kind === "channel"
+                      ? `manifest.kind = "channel";
+manifest.adapterScope = "channel"; // 或 "specified"
+manifest.channels = ["onebot11"];
+rule = [{ reg: "^#hi$", fnc: "hi" }];
+async hi(e) {
+  if (e.channel !== "onebot11") return;
+  await e.reply("…");
+}`
+                      : `manifest.kind = "framework";
+manifest.adapterScope = "all";
+rule = [{ reg: "^#菜单$", fnc: "menu" }];
+async menu(e) {
+  await e.reply("菜单…"); // 全通道可用
+}`}
+                  </pre>
+                  <button type="button" className="btn ghost" onClick={() => backPluginLayer()}>
+                    {tr("backLayer")}
+                  </button>
+                </div>
+              </>
+            )}
           </section>
         )}
       </main>
 
       <FloatModal
-        open={dbModalOpen}
-        onClose={() => setDbModalOpen(false)}
+        open={uiModal?.kind === "update"}
+        onClose={closeModal}
+        title={tr("updateTitle")}
+        subtitle={tr("updateLead")}
+        status={modalStatus}
+        statusTone={modalTone}
+        footer={
+          <>
+            <button type="button" className="btn ghost" onClick={closeModal} disabled={updateBusy}>
+              {tr("updateLater")}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={updateBusy || !updateInfo?.updateAvailable}
+              onClick={() => void applyFrameworkUpdate()}
+            >
+              {updateBusy ? tr("updateApplying") : tr("updateNow")}
+            </button>
+          </>
+        }
+      >
+        {updateInfo ? (
+          <div className="chips" style={{ padding: 0 }}>
+            <div className="chip">
+              {tr("frameworkVersion")} <strong>{updateInfo.currentVersion}</strong>
+            </div>
+            <div className="chip">
+              {tr("remoteVersion")} <strong>{updateInfo.remoteVersion || "—"}</strong>
+            </div>
+            {updateInfo.currentCommit ? (
+              <div className="chip">
+                HEAD <strong>{updateInfo.currentCommit}</strong>
+              </div>
+            ) : null}
+            {updateInfo.remoteCommit ? (
+              <div className="chip">
+                remote <strong>{updateInfo.remoteCommit}</strong>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="muted">{tr("loading")}</p>
+        )}
+        <p className="muted">{tr("updateConfirmHint")}</p>
+      </FloatModal>
+
+      <FloatModal
+        open={uiModal?.kind === "password"}
+        onClose={closeModal}
+        title={tr("changePassword")}
+        subtitle={tr("changePasswordHint")}
+        status={loginErr || modalStatus}
+        statusTone={loginErr ? "error" : modalTone}
+        footer={
+          <>
+            {!pwConfirmStep ? (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setLoginErr("");
+                  if (!curPass) {
+                    setLoginErr(tr("currentPassword"));
+                    return;
+                  }
+                  if (newPass && newPass !== newPass2) {
+                    setLoginErr(tr("confirmNewPassword"));
+                    return;
+                  }
+                  setPwConfirmStep(true);
+                }}
+              >
+                {tr("updateCreds")}
+              </button>
+            ) : (
+              <button type="button" className="btn" onClick={() => void updateCredentials()}>
+                {tr("confirmUpdateCreds")}
+              </button>
+            )}
+          </>
+        }
+      >
+        <label>
+          {tr("currentPassword")}
+          <input type="password" value={curPass} onChange={(e) => setCurPass(e.target.value)} />
+        </label>
+        <label>
+          {tr("newUsernameOpt")}
+          <input value={newUser} onChange={(e) => setNewUser(e.target.value)} />
+        </label>
+        <label>
+          {tr("newPasswordOpt")}
+          <input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} />
+        </label>
+        <label>
+          {tr("confirmNewPassword")}
+          <input type="password" value={newPass2} onChange={(e) => setNewPass2(e.target.value)} />
+        </label>
+        {pwConfirmStep && <p className="muted">{tr("confirmUpdateCredsHint")}</p>}
+      </FloatModal>
+
+      <FloatModal
+        open={uiModal?.kind === "db"}
+        onClose={closeModal}
         title={tr("dbSwitchTitle")}
         subtitle={tr("dbSwitchLead")}
+        status={modalStatus}
+        statusTone={modalTone}
         footer={
           <>
             <button type="button" className="btn ghost" onClick={() => void openDbSwitchModal()}>
@@ -1813,12 +2704,16 @@ export default function App() {
               setDbPath(backend?.path ?? "");
             }}
           >
-            {(dbDetect.length ? dbDetect : (dbInfo?.backends ?? []).map((b) => ({
-              id: b.id,
-              label: b.label,
-              available: b.enabled,
-              reason: b.enabled ? undefined : tr("dbDisabled"),
-            }))).map((d) => (
+            {(dbDetect.length
+              ? dbDetect
+              : (dbInfo?.backends ?? []).map((b) => ({
+                  id: b.id,
+                  label: b.label,
+                  available: b.enabled,
+                  reason: b.enabled ? undefined : tr("dbDisabled"),
+                  recommended: false as boolean | undefined,
+                }))
+            ).map((d) => (
               <option key={d.id} value={d.id} disabled={!d.available}>
                 {d.label}
                 {d.recommended ? ` · ${tr("dbRecommended")}` : ""}
@@ -1846,7 +2741,270 @@ export default function App() {
             </div>
           ))}
         </div>
-        {actionMsg && <p className="muted">{actionMsg}</p>}
+      </FloatModal>
+
+      <FloatModal
+        open={uiModal?.kind === "channel-settings"}
+        onClose={closeModal}
+        title={tr("channelSettings")}
+        subtitle={tr("channelSettingsHint")}
+        status={modalStatus}
+        statusTone={modalTone}
+        footer={
+          <button type="button" className="btn" onClick={() => void saveChannelSettings()}>
+            {tr("saveChannelSettings")}
+          </button>
+        }
+      >
+        <label>
+          {tr("channelMasters")}
+          <input
+            value={chMasters}
+            onChange={(e) => setChMasters(e.target.value)}
+            placeholder={tr("channelMastersPh")}
+          />
+        </label>
+        <label>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={chOnlyMasters}
+              onChange={(e) => setChOnlyMasters(e.target.checked)}
+            />
+            {tr("channelOnlyMasters")}
+          </span>
+        </label>
+        <label>
+          {tr("channelNote")}
+          <input value={chNote} onChange={(e) => setChNote(e.target.value)} />
+        </label>
+      </FloatModal>
+
+      <FloatModal
+        open={uiModal?.kind === "channel-plugins"}
+        onClose={closeModal}
+        closeLabel={tr("backLayer")}
+        title={tr("channelPluginManage")}
+        subtitle={tr("channelPluginManageHint")}
+        status={modalStatus}
+        statusTone={modalTone}
+      >
+        <div className="form" style={{ padding: 0, marginBottom: 12 }}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              if (activeChannelId) openChannelMastersFromPlugins(activeChannelId);
+            }}
+          >
+            {tr("configMasters")}
+          </button>
+          <p className="muted">{tr("channelSettingsHint")}</p>
+        </div>
+        <div className="list compact">
+          {channelScopedPlugins(plugins, activeChannelId).length === 0 && (
+            <p className="muted">{tr("noPlugins")}</p>
+          )}
+          {channelScopedPlugins(plugins, activeChannelId).map((p) => (
+            <div className="list-row" key={p.id}>
+              <div>
+                <strong>{p.name}</strong>
+                <span className="cat-pill">{scopeLabel(resolveAdapterScope(p))}</span>
+                <div className="muted">
+                  {p.id}
+                  {p.enabled === false ? ` · ${tr("pluginDisabled")}` : ""}
+                </div>
+              </div>
+              <div className="row-actions">
+                <button type="button" className="btn mini" onClick={() => void openPluginConfig(p.id)}>
+                  {tr("pluginManageBtn")}
+                </button>
+                <button
+                  type="button"
+                  className="btn mini ghost"
+                  onClick={() => void setPluginEnabled(p.id, p.enabled === false)}
+                >
+                  {p.enabled === false ? tr("pluginEnable") : tr("pluginDisable")}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </FloatModal>
+
+      <FloatModal
+        open={uiModal?.kind === "channel-docs"}
+        onClose={closeModal}
+        title={tr("pluginBaseline")}
+        subtitle={activeChannelId ? `${tr("channelId")}: ${activeChannelId}` : undefined}
+      >
+        {hint ? (
+          <>
+            <p className="muted">{hint.tip}</p>
+            <p className="muted">{tr("canonicalPattern")}</p>
+            <pre className="code-block">{hint.sample}</pre>
+          </>
+        ) : (
+          <p className="muted">{tr("noChannelDocs")}</p>
+        )}
+      </FloatModal>
+
+      <FloatModal
+        open={uiModal?.kind === "onebot-conn"}
+        onClose={closeModal}
+        title={tr("onebotConn")}
+        subtitle={tr("onebotHint")}
+        status={modalStatus}
+        statusTone={modalTone}
+        footer={
+          <>
+            <button type="button" className="btn ghost" onClick={() => void refreshOnebot()}>
+              {tr("refresh")}
+            </button>
+            <button type="button" className="btn" onClick={() => void saveOnebot()}>
+              {tr("onebotSave")}
+            </button>
+          </>
+        }
+      >
+        <div className="chips" style={{ padding: 0 }}>
+          <div className="chip">
+            {tr("onebotStatus")}{" "}
+            <strong>
+              {onebotInfo?.connected ? tr("onebotConnected") : tr("onebotDisconnected")}
+            </strong>
+          </div>
+          <div className="chip">
+            {tr("onebotClients")} <strong>{onebotInfo?.clients ?? 0}</strong>
+          </div>
+          <div className="chip">
+            {tr("onebotSelfId")} <strong>{onebotInfo?.selfId || "—"}</strong>
+          </div>
+        </div>
+        <label>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={obEnabled}
+              onChange={(e) => setObEnabled(e.target.checked)}
+            />
+            {tr("onebotEnabled")}
+          </span>
+        </label>
+        <label>
+          {tr("onebotWsPath")}
+          <input value={obWsPath} onChange={(e) => setObWsPath(e.target.value)} />
+        </label>
+        <label>
+          {tr("onebotHttpPath")}
+          <input value={obHttpPath} onChange={(e) => setObHttpPath(e.target.value)} />
+        </label>
+        <label>
+          {tr("onebotToken")}
+          <input
+            type="password"
+            value={obToken}
+            onChange={(e) => setObToken(e.target.value)}
+            autoComplete="off"
+          />
+        </label>
+      </FloatModal>
+
+      <FloatModal
+        open={uiModal?.kind === "plugin-config"}
+        closeLabel={tr("backLayer")}
+        onClose={() => {
+          setModalStatus("");
+          // 从本通道插件弹窗进入 → 回到本通道插件管理
+          if (panel === "channel-detail") {
+            setUiModal({ kind: "channel-plugins" });
+            return;
+          }
+          // 从「带通道 id 的通道插件列表」进入 → 回到该列表，不进框架首页
+          if (
+            panel === "plugins" &&
+            pluginLayer.step === "list" &&
+            pluginLayer.kind === "channel" &&
+            pluginLayer.channelId
+          ) {
+            closeModal();
+            return;
+          }
+          closeModal();
+        }}
+        title={
+          plugins.find((p) => p.id === activePluginId)?.name || activePluginId || tr("plugins")
+        }
+        subtitle={tr("pluginConfigHero")}
+        status={modalStatus}
+        statusTone={modalTone}
+        footer={
+          pluginCfg?.supported ? (
+            <button type="button" className="btn" onClick={() => void savePluginConfig()}>
+              {tr("saveConfig")}
+            </button>
+          ) : undefined
+        }
+      >
+        {!pluginCfg ? (
+          <p className="muted">{tr("loading")}</p>
+        ) : !pluginCfg.supported ? (
+          <p>{pluginCfg.message || tr("pluginNoConfig")}</p>
+        ) : (
+          <>
+            {(pluginCfg.schema ?? []).map((field) => (
+              <label key={field.key}>
+                {field.label}
+                {field.type === "boolean" ? (
+                  <select
+                    value={String(pluginCfgDraft[field.key] ?? field.default ?? true)}
+                    onChange={(e) =>
+                      setPluginCfgDraft((d) => ({
+                        ...d,
+                        [field.key]: e.target.value === "true",
+                      }))
+                    }
+                  >
+                    <option value="true">{tr("on")}</option>
+                    <option value="false">{tr("off")}</option>
+                  </select>
+                ) : field.type === "select" ? (
+                  <select
+                    value={String(pluginCfgDraft[field.key] ?? field.default ?? "")}
+                    onChange={(e) =>
+                      setPluginCfgDraft((d) => ({ ...d, [field.key]: e.target.value }))
+                    }
+                  >
+                    {(field.options ?? []).map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={
+                      field.type === "password"
+                        ? "password"
+                        : field.type === "number"
+                          ? "number"
+                          : "text"
+                    }
+                    value={String(pluginCfgDraft[field.key] ?? field.default ?? "")}
+                    onChange={(e) =>
+                      setPluginCfgDraft((d) => ({
+                        ...d,
+                        [field.key]:
+                          field.type === "number" ? Number(e.target.value) : e.target.value,
+                      }))
+                    }
+                  />
+                )}
+                {field.description ? <span className="muted">{field.description}</span> : null}
+              </label>
+            ))}
+          </>
+        )}
       </FloatModal>
     </div>
   );

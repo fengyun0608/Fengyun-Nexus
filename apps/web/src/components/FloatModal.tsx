@@ -7,6 +7,9 @@ export function FloatModal({
   onClose,
   children,
   footer,
+  status,
+  statusTone = "muted",
+  closeLabel = "关闭",
 }: {
   title: string;
   subtitle?: string;
@@ -14,6 +17,9 @@ export function FloatModal({
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  status?: string;
+  statusTone?: "muted" | "ok" | "error";
+  closeLabel?: string;
 }) {
   if (!open) return null;
   return (
@@ -31,10 +37,11 @@ export function FloatModal({
             {subtitle ? <p>{subtitle}</p> : null}
           </div>
           <button type="button" className="btn ghost mini" onClick={onClose}>
-            关闭
+            {closeLabel}
           </button>
         </header>
         <div className="float-body">{children}</div>
+        {status ? <p className={`float-status tone-${statusTone}`}>{status}</p> : null}
         {footer ? <footer className="float-foot">{footer}</footer> : null}
       </div>
     </div>

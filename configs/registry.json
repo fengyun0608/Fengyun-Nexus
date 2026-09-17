@@ -8,6 +8,6 @@
   },
   "update": {
     "enabled": true,
-    "checkOnStart": false
+    "checkOnStart": true
   }
 }

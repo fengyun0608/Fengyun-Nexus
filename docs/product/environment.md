@@ -148,8 +148,8 @@ npm install -g pnpm@9.15.0
 ./boot.sh
 ```
 
-或重跑环境脚本：  
-`curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-env.sh | bash`
+或在仓库内重跑：`bash scripts/termux-setup.sh` 选「重装环境」  
+（不要 curl GitCode `/raw/`，会下到 HTML。）
 
 **网关起不来 / 端口占用**  
 换端口：`set PORT=8788` 后重启；或结束占用 8787 的进程。
@@ -167,7 +167,6 @@ npm install -g pnpm@9.15.0
 
 ## 相关文档
 
-- [如何运作](how-it-works.md)
+- [产品介绍](README.md)
 - [各平台启动](start.md)
-- [产品文档首页](README.md)
-- [插件生态](../ecosystem/plugins.md)
+- [插件生态简介](../ecosystem/plugins.md)

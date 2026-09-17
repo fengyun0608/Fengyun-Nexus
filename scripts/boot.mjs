@@ -177,7 +177,12 @@ async function main() {
   bootLog("INFO", ANSI.cyan, `控制台 http://127.0.0.1:${port}/`);
   bootLog("INFO", ANSI.cyan, "初始账号 console / console  |  或: pnpm nexus setup");
 
-  await run(["--filter", "@fengyun/nexus-gateway", "dev"]);
+  // 正式启动用 start（无 watch）。开发热重载：NEXUS_DEV=1 或 pnpm --filter @fengyun/nexus-gateway dev
+  const gatewayScript = process.env.NEXUS_DEV === "1" ? "dev" : "start";
+  if (gatewayScript === "dev") {
+    bootLog("WARN", ANSI.yellow, "NEXUS_DEV=1 → tsx watch 热重载；聊天写库勿误触需排除 data/");
+  }
+  await run(["--filter", "@fengyun/nexus-gateway", gatewayScript]);
 }
 
 main().catch((e) => {
@@ -195,7 +200,7 @@ main().catch((e) => {
     bootLog(
       "INFO",
       ANSI.cyan,
-      "或一键重装环境：curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-env.sh | bash",
+      "或一键重装：cd ~/Fengyun-Nexus && bash scripts/termux-setup.sh  选 1 重装环境",
     );
   }
   process.exit(1);

@@ -25,21 +25,23 @@ chmod +x boot.sh && ./boot.sh
 
 ### Termux（Android）
 
-**推荐：远程脚本（环境与安装可分开）**
+GitCode 的 `raw` 链接常返回网页，**不要**再用 `curl …/raw/… | bash`。
+
+手机端**只保留一个脚本** `scripts/termux-setup.sh`：
+
+- 未安装：不问，直接装环境 + 框架 + 启动
+- 已安装：只问「重装环境」或「重装框架」
 
 ```bash
-# 1) 只装环境（Node / Git / pnpm@9）— 可单独反复跑，按 Y/n 选择
-curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-env.sh | bash
-
-# 2) 环境 + 克隆 + 启动 — 逐步确认
-curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-setup.sh | bash
+pkg install git -y
+git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
+cd ~/Fengyun-Nexus
+bash scripts/termux-setup.sh
 ```
 
-全自动：`NEXUS_INSTALL_YES=1 bash` 接在管道后。
+已有仓库时再跑同一脚本即可，或直接 `./boot.sh` 启动。
 
-**说明：** Termux 上不要用会拉取 `@pnpm/exe` 的版本切换；仓库 `.npmrc` 已关闭。请用 `pnpm@9.15.0`。
-
-已有仓库时：`cd Fengyun-Nexus && ./boot.sh`。
+**说明：** Termux 请用 `pnpm@9`；仓库 `.npmrc` 已关闭原生二进制切换。
 
 ## 常用指令（不用改文件）
 

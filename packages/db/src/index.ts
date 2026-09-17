@@ -252,6 +252,19 @@ export class NexusDatabase {
     return this.data.messages.filter((m) => m.chatId === chatId).slice(-limit);
   }
 
+  /** Latest messages across all channels (for console live feed). */
+  recentAllMessages(limit = 80): DbMessageRow[] {
+    if (this.sqlite) {
+      return this.sqlite
+        .prepare(
+          `SELECT id,channel,chatId,userId,role,content,createdAt FROM messages
+           ORDER BY createdAt DESC LIMIT ?`,
+        )
+        .all(limit) as unknown as DbMessageRow[];
+    }
+    return [...this.data.messages].slice(-limit).reverse();
+  }
+
   upsertPlugin(row: DbPluginRow): void {
     if (this.sqlite) {
       this.sqlite

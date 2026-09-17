@@ -1,0 +1,7 @@
+{
+  "id": "z.draw",
+  "name": "生图",
+  "version": "0.2.0",
+  "main": "index.ts",
+  "description": "用浏览器渲染菜单网页并截图发群，不是 AI 文生图"
+}

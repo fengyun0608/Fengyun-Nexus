@@ -1,4 +1,6 @@
-# How Fengyun Nexus Works
+# How Fengyun Nexus Works (internal)
+
+> Maintainer notes only — **not** part of the public product intro.
 
 [中文](how-it-works.md) | English
 

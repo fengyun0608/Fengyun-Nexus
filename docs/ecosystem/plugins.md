@@ -2,17 +2,18 @@
 
 中文 | [English](plugins.en.md)
 
-Fengyun Nexus 从 `plugins/` 目录扫描加载插件。插件 id 优先 **`z.*`**（示例：`z.echo`）。
+Fengyun Nexus 的插件生态面向两类能力：
 
-能力：`Plugin` 基类、`NexusEvent`（`e`）、rule 匹配、启动加载提示、权限声明。
+| 类型 | 说明 |
+|------|------|
+| 消息通道插件 | 服务于某一消息通道（如 QQ），在对应通道场景下使用 |
+| 框架插件 | 通用能力（如菜单、浏览器截菜单图发群等），不绑死单一通道 |
 
-**消息通道对应插件写法基准：** [channel-plugins.md](channel-plugins.md)  
-**OneBot 11：** [onebot11.md](onebot11.md)
+插件可从远程仓安装与更新（示例 / 基础 / 标准分类），也可在本地 `plugins/` 中开发。
 
-本地脚手架：
+- 远程仓：[GitCode · Fengyun-Nexus](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus)
+- 控制台：系统设置 → 插件管理（分层进入，可返回上一层）
 
-```bash
-pnpm nexus create plugin my-bot
-```
+推荐开源许可：MIT。
 
-推荐 MIT。
+> 本页为生态介绍。具体写法与对接步骤不在对外介绍文档展开。

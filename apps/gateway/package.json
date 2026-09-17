@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --clear-screen=false --exclude ../../data/** --exclude ../../data/* --exclude **/*.sqlite --exclude **/*.sqlite-* --exclude **/*.db.json --exclude ../../configs/*.local.json --exclude ../../configs/**/*.local.json --exclude ../web/dist/** --exclude ./public/** --exclude ../../plugins/** --exclude ../../**/node_modules/** src/index.ts",
     "start": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
