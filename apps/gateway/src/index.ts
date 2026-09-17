@@ -58,6 +58,8 @@ import {
   buildRestartOkMessage,
   clearRestartNotify,
   formatUptime,
+  originGroupId,
+  originMessageType,
   peekRestartNotify,
   saveRestartNotify,
 } from "./restart-notify.js";
@@ -475,15 +477,20 @@ async function bootstrap(): Promise<void> {
         if (cmd.systemRestart) {
           const uptime = formatUptime(Date.now() - startedAt);
           replies = [buildRestartingMessage(uptime)];
+          const gid = originGroupId(msg);
+          const mt = originMessageType(msg);
           saveRestartNotify(ROOT, {
             channel: msg.channel,
-            chatId: msg.chatId,
+            chatId: gid ? `group:${gid}` : msg.chatId,
             userId: msg.userId,
-            messageType: msg.meta?.messageType,
-            groupId: msg.meta?.groupId,
+            messageType: mt,
+            groupId: gid,
             requestedAt: nowIso(),
             previousUptime: uptime,
           });
+          log.info(
+            `已记录重启回执目标  ${mt}${gid ? ` 群=${gid}` : ` 会话=${msg.chatId}`}`,
+          );
         }
 
         if (cmd.systemUpdate) {
@@ -496,48 +503,76 @@ async function bootstrap(): Promise<void> {
             log.error(detail);
             replies = [detail];
           } else {
-            // 终端/网页看完整报告；QQ 只走合并转发，不再额外 sendText
-            replies = [upd.reportText || upd.message];
+            const report = upd.reportText || upd.message;
+            replies = [report];
             const uptime = formatUptime(Date.now() - startedAt);
+            const gid = originGroupId(msg);
+            const mt = originMessageType(msg);
             saveRestartNotify(ROOT, {
               channel: msg.channel,
-              chatId: msg.chatId,
+              chatId: gid ? `group:${gid}` : msg.chatId,
               userId: msg.userId,
-              messageType: msg.meta?.messageType,
-              groupId: msg.meta?.groupId,
+              messageType: mt,
+              groupId: gid,
               requestedAt: nowIso(),
               previousUptime: uptime,
             });
-            if (msg.channel === "onebot11" && upd.forwardNodes?.length) {
+            // 主人在哪个群发的，更新报告就发回哪个群（纯文本保达；合并转发作增强）
+            if (msg.channel === "onebot11") {
               try {
-                const okFwd = await onebot.sendForward(upd.forwardNodes, msg);
-                log.info(okFwd ? "更新报告已合并转发" : "合并转发未发出，将回退纯文本");
-                const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
-                const originGid = msg.meta?.groupId ? String(msg.meta.groupId) : "";
-                for (const gid of notifyIds) {
-                  if (originGid && gid === originGid) continue;
-                  await onebot.sendForwardToGroup(gid, upd.forwardNodes);
+                let sent = false;
+                if (upd.forwardNodes?.length) {
+                  sent = await onebot.sendForward(upd.forwardNodes, {
+                    ...msg,
+                    chatId: gid ? `group:${gid}` : msg.chatId,
+                    meta: { ...msg.meta, messageType: mt, groupId: gid },
+                  });
                 }
-                // 转发成功：写入库供控制台查看，但不再对群 sendText（避免刷屏）
-                if (okFwd && upd.reportText) {
+                if (!sent) {
+                  sent = await onebot.sendText(report, {
+                    ...msg,
+                    chatId: gid ? `group:${gid}` : msg.chatId,
+                    meta: { ...msg.meta, messageType: mt, groupId: gid },
+                  });
+                }
+                log.info(
+                  sent
+                    ? `更新报告已发回原${mt === "group" ? `群 ${gid}` : "会话"}`
+                    : "更新报告发送失败，将回退由回复通道再试",
+                );
+                // 额外通报群（可选）
+                if (sent && upd.forwardNodes?.length) {
+                  const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
+                  for (const extra of notifyIds) {
+                    if (gid && extra === gid) continue;
+                    await onebot.sendForwardToGroup(extra, upd.forwardNodes);
+                  }
+                } else if (sent) {
+                  const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
+                  for (const extra of notifyIds) {
+                    if (gid && extra === gid) continue;
+                    await onebot.sendTextToGroup(extra, report);
+                  }
+                }
+                if (sent) {
                   db.insertMessage({
                     id: newId("msg"),
                     channel: msg.channel,
-                    chatId: msg.chatId,
+                    chatId: gid ? `group:${gid}` : msg.chatId,
                     userId: "nexus",
                     role: "assistant",
-                    content: upd.reportText,
+                    content: report,
                     createdAt: nowIso(),
                   });
                   replies = [];
                 }
               } catch (e) {
                 log.warn(
-                  `更新转发发送失败：${e instanceof Error ? e.message : String(e)}`,
+                  `更新回执发送失败：${e instanceof Error ? e.message : String(e)}`,
                 );
               }
             }
-            for (const line of (upd.reportText || upd.message).split(/\n/)) {
+            for (const line of report.split(/\n/)) {
               if (line.trim()) log.info(`[更新] ${line}`);
             }
           }
@@ -1657,31 +1692,39 @@ async function bootstrap(): Promise<void> {
     });
 
     if (pending.channel === "onebot11") {
+      const gid =
+        pending.groupId ||
+        (pending.chatId.startsWith("group:") ? pending.chatId.slice(6) : undefined);
+      const mt = pending.messageType || (gid ? "group" : "private");
       const ctx = {
         id: newId("msg"),
         channel: "onebot11" as const,
-        chatId: pending.chatId,
+        chatId: gid ? `group:${gid}` : pending.chatId,
         userId: pending.userId,
         type: "text" as const,
         content: text,
         meta: {
-          messageType: pending.messageType,
-          groupId: pending.groupId,
+          messageType: mt,
+          groupId: gid,
         },
         createdAt: nowIso(),
       };
       for (let i = 0; i < 45; i++) {
         if (onebot.status().connected) {
-          const ok = await onebot.sendText(text, ctx);
+          let ok = await onebot.sendText(text, ctx);
+          if (!ok && gid) {
+            ok = await onebot.sendTextToGroup(gid, text);
+          }
           if (ok) {
+            log.ok(
+              `重启成功已发回原${mt === "group" ? `群 ${gid}` : "会话"}`,
+            );
             const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
-            const originGid = pending.groupId ? String(pending.groupId) : "";
-            for (const gid of notifyIds) {
-              if (originGid && gid === originGid) continue;
-              await onebot.sendTextToGroup(gid, text);
+            for (const extra of notifyIds) {
+              if (gid && extra === gid) continue;
+              await onebot.sendTextToGroup(extra, text);
             }
             clearRestartNotify(ROOT);
-            log.ok("已向原会话回复：重启成功 + 插件列表");
             return;
           }
         }

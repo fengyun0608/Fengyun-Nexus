@@ -84,3 +84,28 @@ export function buildRestartOkMessage(
   lines.push(`共 ${plugins.length} 个`);
   return lines.join("\n");
 }
+
+/** 从入站消息解析群号：主人在哪个群发的，回执就回哪个群 */
+export function originGroupId(msg: {
+  chatId?: string;
+  meta?: { groupId?: unknown; messageType?: unknown };
+}): string | undefined {
+  if (msg.meta?.groupId != null && String(msg.meta.groupId)) {
+    return String(msg.meta.groupId);
+  }
+  const chat = String(msg.chatId ?? "");
+  if (chat.startsWith("group:")) {
+    const id = chat.slice("group:".length);
+    return id || undefined;
+  }
+  return undefined;
+}
+
+export function originMessageType(msg: {
+  chatId?: string;
+  meta?: { messageType?: unknown };
+}): "group" | "private" | string {
+  if (msg.meta?.messageType) return String(msg.meta.messageType);
+  return String(msg.chatId ?? "").startsWith("group:") ? "group" : "private";
+}
+

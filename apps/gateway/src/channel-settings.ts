@@ -12,7 +12,7 @@ export type ChannelSettings = {
    * 仅对 messageType=group 生效。
    */
   replyGroupIds: string[];
-  /** #更新 / 重启成功时额外通报的群号 */
+  /** #更新 / 重启成功时额外抄送的群（发指令的原群一定发，不必填这里） */
   notifyGroupIds: string[];
   /** 本通道 AI 人设（注入 system prompt） */
   systemPrompt: string;
