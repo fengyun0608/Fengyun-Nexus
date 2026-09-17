@@ -1,0 +1,13 @@
+{
+  "baseUrl": "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus",
+  "tokenEnv": "NEXUS_REGISTRY_TOKEN",
+  "categories": {
+    "demo": { "path": "plugins/demo", "label": "示例插件" },
+    "basic": { "path": "plugins/basic", "label": "基础插件" },
+    "standard": { "path": "plugins/standard", "label": "标准插件" }
+  },
+  "update": {
+    "enabled": true,
+    "checkOnStart": false
+  }
+}

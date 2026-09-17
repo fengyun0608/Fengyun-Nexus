@@ -1,0 +1,9 @@
+{
+  "id": "template.ts-plugin",
+  "name": "TS Plugin Template",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "hooks": ["onMessage", "onReady"],
+  "permissions": ["channel.send"],
+  "category": "demo"
+}

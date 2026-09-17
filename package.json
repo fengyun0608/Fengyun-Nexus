@@ -1,0 +1,20 @@
+{
+  "name": "fengyun-nexus",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fengyun Nexus — AI conversation and automation hub",
+  "license": "MIT",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @fengyun/nexus-gateway dev",
+    "dev:web": "pnpm --filter @fengyun/nexus-web dev",
+    "dev:all": "pnpm -r --parallel --filter @fengyun/nexus-gateway --filter @fengyun/nexus-web dev",
+    "build": "pnpm -r build",
+    "start": "pnpm --filter @fengyun/nexus-gateway start",
+    "nexus": "pnpm --filter @fengyun/nexus-cli start",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

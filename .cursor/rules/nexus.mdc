@@ -1,0 +1,13 @@
+---
+description: Fengyun Nexus 仓库边界与开发约定。改本框架时必须遵守。
+globs:
+  - "**/*"
+---
+
+# Fengyun Nexus 规则
+
+- 只修改 `Fengyun-Nexus/` 本仓库内容。
+- 禁止修改工作区内 `AI-MultiUser-Core`、`XRK-plugin`、`USB-Portable-Workbench` 等其它项目。
+- 对外文档保持产品语气；不要在 README 堆砌技术栈清单或冗长更新日志。
+- 密钥只进环境变量或 `*.local.json`，不要提交。
+- UI 避免蓝紫渐变套路；沿用墨色 + 琥珀/鼠尾草绿视觉。

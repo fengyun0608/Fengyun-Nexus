@@ -1,0 +1,6 @@
+{
+  "username": "admin",
+  "passwordEnv": "NEXUS_ADMIN_PASSWORD",
+  "defaultPassword": "nexus-admin-change-me",
+  "sessionHours": 24
+}

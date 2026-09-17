@@ -1,0 +1,20 @@
+{
+  "name": "@fengyun/nexus-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "nexus": "./src/index.ts",
+    "nx": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
