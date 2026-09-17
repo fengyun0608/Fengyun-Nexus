@@ -4,6 +4,11 @@ build/
 .turbo/
 *.log
 
+# Cursor / IDE — never commit
+.cursor/
+.vscode/
+*.code-workspace
+
 # Personal / runtime secrets — never commit or push
 .env
 .env.*
@@ -24,3 +29,4 @@ workers/go-pump/bin/
 __pycache__/
 *.pyc
 .tmp-ref/
+tmp-*.mjs

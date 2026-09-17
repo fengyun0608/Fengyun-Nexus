@@ -37,7 +37,19 @@ export const ADMIN_HASH = new Set([
 ]);
 
 export function isAdminHash(cmd: string): boolean {
-  return ADMIN_HASH.has(cmd);
+  return Boolean(resolveAdminHash(cmd));
+}
+
+/** 从首词解析管理指令（支持 #更新框架 → #更新） */
+export function resolveAdminHash(rawToken: string): string | null {
+  const token = rawToken.trim().split(/\s+/)[0] ?? "";
+  if (!token.startsWith("#")) return null;
+  if (ADMIN_HASH.has(token)) return token;
+  let best: string | null = null;
+  for (const c of ADMIN_HASH) {
+    if (token.startsWith(c) && (!best || c.length > best.length)) best = c;
+  }
+  return best;
 }
 
 const HELP = [
@@ -60,8 +72,8 @@ export function parseHashCommand(
     return { handled: false, replies: [] };
   }
 
-  const cmd = text.split(/\s+/)[0] ?? "";
-  if (!isAdminHash(cmd)) {
+  const cmd = resolveAdminHash(text);
+  if (!cmd) {
     return { handled: false, replies: [] };
   }
 
@@ -78,6 +90,7 @@ export function parseHashCommand(
     ctx.powerOff &&
     cmd !== "#开机" &&
     cmd !== "#帮助" &&
+    cmd !== "#help" &&
     cmd !== "#状态" &&
     cmd !== "#重启" &&
     cmd !== "#更新" &&
@@ -119,7 +132,7 @@ export function parseHashCommand(
     case "#重启":
       return {
         handled: true,
-        replies: [], // filled by gateway with uptime
+        replies: [],
         powerOff: false,
         systemRestart: true,
       };

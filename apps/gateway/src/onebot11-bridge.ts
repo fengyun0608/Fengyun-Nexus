@@ -129,6 +129,10 @@ export class OneBot11Bridge {
       }
       return;
     }
+    // 自己发出的消息回传（NapCat message_sent）→ 绝不能再当入站，否则会 AI 复读刷屏
+    if (data.post_type === "message_sent" || data.post_type === "notice") {
+      return;
+    }
     if (data.post_type === "message" || data.message_type) {
       await this.handleEvent(data as Ob11MessageEvent, ws);
     }
@@ -138,6 +142,9 @@ export class OneBot11Bridge {
     const ev = (raw ?? {}) as Ob11MessageEvent;
     if (ev.post_type === "meta_event") {
       if (ev.self_id != null) this.selfId = String(ev.self_id);
+      return { ok: true, replied: 0 };
+    }
+    if (ev.post_type === "message_sent" || ev.post_type === "notice") {
       return { ok: true, replied: 0 };
     }
     if (ev.post_type !== "message" && !ev.message_type) {
@@ -155,12 +162,40 @@ export class OneBot11Bridge {
     return [];
   }
 
+  private recentMsgIds = new Set<string>();
+
   private async handleEvent(ev: Ob11MessageEvent, prefer?: WebSocket): Promise<number> {
     this.lastEventAt = new Date().toISOString();
     if (ev.self_id != null) this.selfId = String(ev.self_id);
+
+    const uid = String(ev.user_id ?? ev.sender?.user_id ?? "");
+    const sid = this.selfId || (ev.self_id != null ? String(ev.self_id) : "");
+    // 机器人自己的号发的内容（含群里回显）一律忽略
+    if (sid && uid && uid === sid) {
+      log.debug(`忽略自身消息 user=${uid}`);
+      return 0;
+    }
+
+    // 同 message_id 短时去重，防止 WS/HTTP 双推
+    const mid = ev.message_id != null ? String(ev.message_id) : "";
+    if (mid) {
+      if (this.recentMsgIds.has(mid)) {
+        log.debug(`忽略重复消息 id=${mid}`);
+        return 0;
+      }
+      this.recentMsgIds.add(mid);
+      if (this.recentMsgIds.size > 400) {
+        const first = this.recentMsgIds.values().next().value;
+        if (first) this.recentMsgIds.delete(first);
+      }
+    }
+
     const msg = this.channel.normalizeInbound(ev);
     if (!msg.content.trim()) return 0;
     if (!this.onInbound) return 0;
+    log.info(
+      `OneBot 入站  ${msg.meta?.messageType ?? "?"}  user=${msg.userId}  ${msg.content.slice(0, 80)}`,
+    );
     const texts = await this.onInbound(msg);
     let n = 0;
     for (const text of texts) {

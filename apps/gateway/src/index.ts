@@ -37,7 +37,7 @@ import {
 } from "./channel-settings.js";
 import { loadDbConfig, resolveDbOpenOpts, saveDbConfig } from "./db-config.js";
 import { formatErrorForClient, translateError } from "./errors-zh.js";
-import { isAdminHash, parseHashCommand } from "./hash-commands.js";
+import { isAdminHash, parseHashCommand, resolveAdminHash } from "./hash-commands.js";
 import {
   createInstallTask,
   autoQueueMissing,
@@ -443,7 +443,9 @@ async function bootstrap(): Promise<void> {
     const isAdminConsole = Boolean(opts?.isAdminConsole);
     const trimmed = msg.content.trim();
     const isHash = trimmed.startsWith("#");
-    const hashCmd = isHash ? trimmed.split(/\s+/)[0] ?? "" : "";
+    const hashCmd = isHash
+      ? resolveAdminHash(trimmed) ?? (trimmed.split(/\s+/)[0] ?? "")
+      : "";
 
     if (powerOff && !isHash) {
       return [];
