@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "accessToken": "",
+  "reverseWsPath": "/onebot/v11/ws",
+  "httpPath": "/onebot/v11/http",
+  "docsUrl": "https://napneko.github.io"
+}

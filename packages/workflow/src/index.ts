@@ -5,7 +5,9 @@ export type WorkflowNodeType =
   | "http"
   | "branch"
   | "delay"
-  | "worker";
+  | "worker"
+  | "memory"
+  | "tool";
 
 export interface WorkflowNode {
   id: string;
@@ -26,10 +28,12 @@ export interface WorkflowRunResult {
   visited: string[];
   ok: boolean;
   detail?: string;
+  memory?: Record<string, unknown>;
 }
 
 export class WorkflowRunner {
   private defs = new Map<string, WorkflowDef>();
+  private memoryStore = new Map<string, Record<string, unknown>>();
 
   register(def: WorkflowDef): void {
     this.defs.set(def.id, def);
@@ -39,10 +43,16 @@ export class WorkflowRunner {
     return [...this.defs.values()];
   }
 
+  getMemory(key: string): Record<string, unknown> {
+    return { ...(this.memoryStore.get(key) ?? {}) };
+  }
+
   async run(id: string, payload: Record<string, unknown> = {}): Promise<WorkflowRunResult> {
     const def = this.defs.get(id);
     if (!def) return { workflowId: id, visited: [], ok: false, detail: "not found" };
 
+    const memKey = String(payload.memoryKey ?? id);
+    const memory = { ...(this.memoryStore.get(memKey) ?? {}) };
     const byId = new Map(def.nodes.map((n) => [n.id, n]));
     const visited: string[] = [];
     let cur: string | undefined = def.entry;
@@ -55,6 +65,15 @@ export class WorkflowRunner {
         const ms = Number(node.config?.ms ?? 0);
         if (ms > 0) await new Promise((r) => setTimeout(r, Math.min(ms, 5000)));
       }
+      if (node.type === "memory") {
+        const op = String(node.config?.op ?? "set");
+        const key = String(node.config?.key ?? "value");
+        if (op === "set") memory[key] = payload[key] ?? node.config?.value;
+        if (op === "get") payload[key] = memory[key];
+      }
+      if (node.type === "tool") {
+        payload._lastTool = String(node.config?.name ?? "tool");
+      }
       if (node.type === "branch") {
         const flag = Boolean(payload.branch ?? node.config?.default);
         cur = flag ? node.next?.[0] : node.next?.[1];
@@ -62,6 +81,7 @@ export class WorkflowRunner {
       }
       cur = node.next?.[0];
     }
-    return { workflowId: id, visited, ok: true };
+    this.memoryStore.set(memKey, memory);
+    return { workflowId: id, visited, ok: true, memory };
   }
 }

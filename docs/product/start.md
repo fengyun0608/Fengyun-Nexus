@@ -23,17 +23,23 @@ cd Fengyun-Nexus
 chmod +x boot.sh && ./boot.sh
 ```
 
-### Termux
+### Termux（Android）
+
+**推荐：远程脚本（环境与安装可分开）**
 
 ```bash
-pkg update && pkg install nodejs git
-npm install -g pnpm
-git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
-cd Fengyun-Nexus
-chmod +x boot.sh && ./boot.sh
+# 1) 只装环境（Node / Git / pnpm@9）— 可单独反复跑，按 Y/n 选择
+curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-env.sh | bash
+
+# 2) 环境 + 克隆 + 启动 — 逐步确认
+curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-setup.sh | bash
 ```
 
-已有仓库时：`pnpm boot` 或双击 `start.bat` / 执行 `./boot.sh`。
+全自动：`NEXUS_INSTALL_YES=1 bash` 接在管道后。
+
+**说明：** Termux 上不要用会拉取 `@pnpm/exe` 的版本切换；仓库 `.npmrc` 已关闭。请用 `pnpm@9.15.0`。
+
+已有仓库时：`cd Fengyun-Nexus && ./boot.sh`。
 
 ## 常用指令（不用改文件）
 

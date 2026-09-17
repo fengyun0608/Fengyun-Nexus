@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">Fengyun Nexus</h1>
-  <p align="center"><strong>风云枢纽</strong> — 可扩展的 AI 对话与自动化枢纽</p>
+  <p align="center">可扩展的 AI 对话与自动化枢纽</p>
 </p>
 
 <p align="center">
@@ -23,10 +23,14 @@
 
 ## 产品简介
 
-Fengyun Nexus（风云枢纽）提供**唯一控制台**：对话、适配器状态、配置与管理都在同一网页里完成。  
+**Fengyun Nexus** 提供唯一控制台：对话、适配器状态、配置与管理都在同一网页里完成。  
 支持电脑、服务器、手机浏览器与 Termux，本地配置不会上传。
 
-## 一键部署（远程拉取）
+框架名称固定为英文 **Fengyun Nexus**；控制台默认中文，可在「系统设置 → 配置」切换 English。
+
+插件放在 `plugins/`（推荐 `z.*` id），支持目录扫描、`NexusEvent`（`e`）、数据库与可插拔适配器。
+
+## 一键部署
 
 **必备：** Node.js ≥ 20、pnpm、Git。
 
@@ -47,22 +51,34 @@ chmod +x boot.sh
 ./boot.sh
 ```
 
-### 手机 Termux
+### 手机 Termux（推荐远程脚本）
+
+**只装环境（可反复跑，逐步 Y/n）：**
 
 ```bash
-pkg update && pkg install nodejs git
-npm install -g pnpm
-git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
-cd Fengyun-Nexus
-chmod +x boot.sh
-./boot.sh
+curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-env.sh | bash
 ```
 
-启动成功后，浏览器只打开这一个地址：
+**环境 + 克隆 + 启动（逐步 Y/n）：**
+
+```bash
+curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-setup.sh | bash
+```
+
+少提问（默认全选 Y）：
+
+```bash
+curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-setup.sh | NEXUS_INSTALL_YES=1 bash
+```
+
+> Android 没有 `@pnpm/exe` 原生包。请用 `pnpm@9`，仓库已带 `.npmrc` 关闭版本切换。  
+> 若仍报 `ERR_PNPM_PNPM_ENGINE_NO_NATIVE_BINARY`：`npm i -g pnpm@9.15.0` 后重跑 `./boot.sh`。
+
+启动时会自动检测依赖、编译包与 Vite 控制台，然后拉起网关。
+
+浏览器只打开：
 
 **http://127.0.0.1:8787/**
-
-这就是唯一控制台（左侧可展开目录：对话 / 适配器 / 配置 / 管理）。
 
 ## 初次使用
 
@@ -71,10 +87,9 @@ chmod +x boot.sh
 | 初始账号 | `console` / `console` |
 | 正式用户名 | 4–8 位英文字母 |
 | 正式密码 | 至少 4 位，须含大小写、数字、特殊字符 |
-| 改密 | 登录后「账号」或 `pnpm nexus setup` |
-| 会话 | 刷新即失效；12 小时过期；改密后全部失效 |
-
-可选指令（不用手改文件）：
+| 改密 | 控制台「管理」或 `pnpm nexus setup` |
+| 会话 | 刷新保持登录；12 小时过期；改密后全部失效 |
+| 语言 | 默认中文；「配置」里可切 English（产品名始终 Fengyun Nexus） |
 
 ```bash
 pnpm nexus setup
@@ -85,22 +100,25 @@ pnpm nexus boot
 
 ## 能力一览
 
-- 框架内对话  
-- 消息通道适配与状态  
-- 管理与配置（同一控制台）  
-- 工作流与工具扩展  
-- 插件生态（远程安装与更新，细节不对公开展示）
+- 框架内对话（Vite React 控制台）
+- 可插拔消息通道（内置 OneBot 11 / NapCat）
+- 插件目录扫描与加载提示（`z.*`）
+- 嵌入式数据库（`data/nexus.db.json`）
+- 工作流（memory / tool / branch / delay）
+- 管理与配置（同一控制台）
+- AI 供应商配置；未配置时不自动回复（无本地回声）
 
 ## 文档
 
 - [如何运作](docs/product/how-it-works.md)
 - [环境要求](docs/product/environment.md)
 - [各平台启动](docs/product/start.md)
-- [规划 / 鱼骨 / 目录](docs/product/README.md)
+- [规划](docs/product/README.md)
+- [通道插件写法基准](docs/ecosystem/channel-plugins.md)
 
-进入文档页后，用页顶 **中文 | English** 切换语言。
+文档页可用 **中文 | English** 切换。
 
 ## 开源协议
 
 MIT License — 见 [LICENSE](LICENSE)。  
-Copyright (c) 2026 风云科技 / Fengyun
+Copyright (c) 2026 Fengyun

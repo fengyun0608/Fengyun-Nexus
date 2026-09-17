@@ -12,15 +12,29 @@ export interface LlmRouterOptions {
 export class LlmRouter {
   constructor(private opts: LlmRouterOptions = {}) {}
 
-  /** Offline-friendly reply when no key is configured. */
-  async chat(messages: LlmMessage[]): Promise<string> {
-    const last = [...messages].reverse().find((m) => m.role === "user");
-    const text = last?.content?.trim() ?? "";
+  configure(next: Partial<LlmRouterOptions>): void {
+    this.opts = { ...this.opts, ...next };
+  }
 
+  snapshot(): {
+    hasKey: boolean;
+    apiKeyMasked: string;
+    baseUrl: string;
+    model: string;
+  } {
+    const key = this.opts.apiKey ?? "";
+    return {
+      hasKey: Boolean(key),
+      apiKeyMasked: key ? `${key.slice(0, 4)}${"*".repeat(Math.min(8, Math.max(0, key.length - 4)))}` : "",
+      baseUrl: this.opts.baseUrl ?? "",
+      model: this.opts.model ?? "",
+    };
+  }
+
+  /** Chat via configured provider. Returns empty string when no API key (no local echo). */
+  async chat(messages: LlmMessage[]): Promise<string> {
     if (!this.opts.apiKey) {
-      return text
-        ? `【风云枢纽 · 本地回复】已收到：${text}\n（未配置模型密钥时使用本地回声。可用 pnpm nexus set llm-key 配置。）`
-        : "你好，我是风云枢纽。在控制台对话、管理适配器与插件，从这里开始。";
+      return "";
     }
 
     const base = (this.opts.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");

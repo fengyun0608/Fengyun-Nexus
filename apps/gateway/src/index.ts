@@ -9,10 +9,12 @@ import {
   WebChannel,
   WebhookChannel,
 } from "@fengyun/nexus-channel";
-import { MessageRouter, SessionManager, createEchoHandler } from "@fengyun/nexus-core";
+import { MessageRouter, SessionManager } from "@fengyun/nexus-core";
+import { NexusDatabase } from "@fengyun/nexus-db";
 import { LlmRouter } from "@fengyun/nexus-llm";
 import { McpHost } from "@fengyun/nexus-mcp-host";
-import { PluginHost, definePlugin } from "@fengyun/nexus-plugin-sdk";
+import { loadPluginsFromDir } from "@fengyun/nexus-plugin-loader";
+import { PluginHost } from "@fengyun/nexus-plugin-sdk";
 import {
   newId,
   nowIso,
@@ -23,13 +25,50 @@ import {
   type RegistryConfig,
 } from "@fengyun/nexus-shared";
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
-import { log } from "./log.js";
+import { bootStep, printBootBanner, printBootSuccess } from "./boot-banner.js";
+import { loadDbConfig, resolveDbOpenOpts, saveDbConfig } from "./db-config.js";
+import { formatErrorForClient, translateError } from "./errors-zh.js";
+import { getLogEntries, log } from "./log.js";
+import {
+  activeProvider,
+  loadProvidersFile,
+  publicProviders,
+  saveProvidersFile,
+  type LlmProvider,
+} from "./llm-store.js";
+import { OneBot11Bridge, type OneBotConfig } from "./onebot11-bridge.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../../..");
 const ADMIN_LOCAL = join(ROOT, "configs/admin.local.json");
 const RUNTIME_LOCAL = join(ROOT, "configs/runtime.local.json");
-const PUBLIC_DIR = join(__dirname, "../public");
+const ONEBOT_LOCAL = join(ROOT, "configs/onebot.local.json");
+const WEB_DIST = join(ROOT, "apps/web/dist");
+const PUBLIC_FALLBACK = join(__dirname, "../public");
+const PLUGINS_DIR = join(ROOT, "plugins");
+
+function loadOneBotConfig(): OneBotConfig {
+  const base = loadJson<OneBotConfig>("configs/onebot.default.json");
+  if (!existsSync(ONEBOT_LOCAL)) return base;
+  try {
+    const local = JSON.parse(readFileSync(ONEBOT_LOCAL, "utf8")) as Partial<OneBotConfig>;
+    return { ...base, ...local };
+  } catch {
+    return base;
+  }
+}
+
+function persistOneBotConfig(cfg: OneBotConfig): void {
+  writeFileSync(ONEBOT_LOCAL, `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
+}
+
+function applyProviderToLlm(llm: LlmRouter, p: LlmProvider | undefined): void {
+  llm.configure({
+    apiKey: p?.apiKey || process.env.NEXUS_LLM_API_KEY,
+    baseUrl: p?.baseUrl || process.env.NEXUS_LLM_BASE_URL,
+    model: p?.model || process.env.NEXUS_LLM_MODEL,
+  });
+}
 
 function loadDotEnv(): void {
   for (const name of [".env", ".env.local"]) {
@@ -77,7 +116,11 @@ function loadJson<T>(rel: string): T {
 }
 
 function resolveEnvId(): NexusEnvId {
-  const raw = (process.env.NEXUS_ENV || loadRuntimeEnvHint() || (isTermuxHost() ? "termux" : "desktop")).toLowerCase();
+  const raw = (
+    process.env.NEXUS_ENV ||
+    loadRuntimeEnvHint() ||
+    (isTermuxHost() ? "termux" : "desktop")
+  ).toLowerCase();
   if (raw === "mobile" || raw === "desktop" || raw === "server" || raw === "termux") return raw;
   return "desktop";
 }
@@ -139,9 +182,7 @@ function validateUsername(username: string): string | null {
   return null;
 }
 
-/**
- * Password: ≥4 chars; complexity check (upper + lower + digit + special).
- */
+/** Password: ≥4 chars; complexity (upper + lower + digit + special). */
 function validatePassword(password: string): string | null {
   if (password.length < 4) return "密码至少 4 位";
   const checks = [
@@ -158,310 +199,342 @@ function validatePassword(password: string): string | null {
   return null;
 }
 
-loadDotEnv();
+async function bootstrap(): Promise<void> {
+  printBootBanner();
+  loadDotEnv();
 
-const envId = resolveEnvId();
-const profile = loadEnvProfile(envId);
-let adminCfg = loadAdmin();
-adminCfg.sessionHours = adminCfg.sessionHours || 12;
-const registry = loadRegistry();
+  await bootStep("初始化：加载环境变量与运行姿态…");
+  const envId = resolveEnvId();
+  const profile = loadEnvProfile(envId);
+  let adminCfg = loadAdmin();
+  adminCfg.sessionHours = adminCfg.sessionHours || 12;
+  const registry = loadRegistry();
+  await bootStep(`运行姿态 → ${profile.id}（${profile.label}）`);
 
-function currentPassword(): string {
-  return process.env[adminCfg.passwordEnv] || adminCfg.defaultPassword;
-}
-
-const sessions = new SessionManager();
-const router = new MessageRouter();
-const channels = new ChannelRegistry();
-channels.register(new WebChannel());
-channels.register(new WebhookChannel());
-
-const llm = new LlmRouter({
-  apiKey: process.env.NEXUS_LLM_API_KEY,
-  baseUrl: process.env.NEXUS_LLM_BASE_URL,
-  model: process.env.NEXUS_LLM_MODEL,
-});
-
-const plugins = new PluginHost();
-plugins.register(
-  definePlugin({
-    manifest: {
-      id: "built-in.echo",
-      name: "Echo",
-      version: "0.1.0",
-      category: "demo",
-      hooks: ["onMessage", "onReady"],
-      permissions: ["channel.send"],
-    },
-    onReady(ctx) {
-      ctx.log("内置回声插件已就绪");
-    },
-    onMessage(msg) {
-      if (!msg.content.startsWith("/echo ")) return null;
-      return {
-        id: newId("msg"),
-        channel: msg.channel,
-        chatId: msg.chatId,
-        userId: "plugin:echo",
-        type: "text",
-        content: msg.content.slice(6),
-        meta: { replyTo: msg.id },
-        createdAt: nowIso(),
-      };
-    },
-  }),
-);
-
-const workflows = new WorkflowRunner();
-workflows.register({
-  id: "starter",
-  name: "Starter Flow",
-  entry: "t1",
-  nodes: [
-    { id: "t1", type: "trigger", next: ["l1"] },
-    { id: "l1", type: "llm", next: ["d1"] },
-    { id: "d1", type: "delay", config: { ms: 10 }, next: [] },
-  ],
-});
-
-const mcp = new McpHost();
-mcp.register({
-  name: "nexus.status",
-  description: "Return Nexus runtime status",
-  handler: () => ({
-    env: envId,
-    plugins: plugins.list().length,
-    channels: channels.list().map((c) => c.id),
-  }),
-});
-
-router.use(createEchoHandler());
-
-const tokens = new Map<string, { user: string; exp: number }>();
-
-function invalidateAllSessions(): void {
-  tokens.clear();
-}
-
-function issueToken(user: string): string {
-  const hours = adminCfg.sessionHours || 12;
-  const token = randomBytes(24).toString("hex");
-  const exp = Date.now() + hours * 3600_000;
-  tokens.set(hashToken(token), { user, exp });
-  return token;
-}
-
-function authMiddleware(
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction,
-): void {
-  const header = req.headers.authorization ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!token) {
-    res.status(401).json({ error: "未授权，请先登录" });
-    return;
+  function currentPassword(): string {
+    return process.env[adminCfg.passwordEnv] || adminCfg.defaultPassword;
   }
-  const rec = tokens.get(hashToken(token));
-  if (!rec || rec.exp < Date.now()) {
-    if (rec) tokens.delete(hashToken(token));
-    res.status(401).json({ error: "登录已过期，请重新登录" });
-    return;
-  }
-  (req as express.Request & { adminUser?: string }).adminUser = rec.user;
-  next();
-}
 
-async function handleChat(raw: unknown): Promise<{ replies: unknown[]; assistant: string }> {
-  const web = channels.get("web")!;
-  const msg = web.normalizeInbound(raw);
-  const session = sessions.getOrCreate({
-    channel: msg.channel,
-    chatId: msg.chatId,
-    userId: msg.userId,
+  await bootStep("连接数据库…");
+  let dbCfg = loadDbConfig(ROOT);
+  const dbOpen = resolveDbOpenOpts(ROOT, dbCfg);
+  let db = new NexusDatabase({ driver: dbOpen.driver, filePath: dbOpen.filePath });
+  await db.open();
+  log.ok(`数据库已连接  驱动=${dbOpen.driver}  ${dbOpen.label}`);
+  await bootStep(`数据库统计 ${JSON.stringify(db.stats())}`);
+
+  await bootStep("初始化：会话管理器…");
+  const sessions = new SessionManager();
+  const router = new MessageRouter();
+
+  await bootStep("初始化：消息通道适配器…");
+  const channels = new ChannelRegistry();
+  channels.register(new WebChannel());
+  await bootStep("  · 注册通道 web");
+  channels.register(new WebhookChannel());
+  await bootStep("  · 注册通道 webhook");
+  const onebotCfg = loadOneBotConfig();
+  const onebot = new OneBot11Bridge(onebotCfg);
+  channels.register(onebot.channel);
+  await bootStep(
+    onebotCfg.enabled
+      ? `  · 注册通道 onebot11（反向 WS ${onebotCfg.reverseWsPath}）`
+      : "  · 注册通道 onebot11（未启用）",
+  );
+
+  await bootStep("初始化：AI 供应商（LLM）…");
+  let llmStore = loadProvidersFile(ROOT);
+  const llm = new LlmRouter();
+  applyProviderToLlm(llm, activeProvider(llmStore));
+  const ap = activeProvider(llmStore);
+  await bootStep(
+    ap?.apiKey || process.env.NEXUS_LLM_API_KEY
+      ? `  · 当前供应商 ${ap?.name ?? ap?.id}  model=${ap?.model || "default"}`
+      : "  · 未配置密钥：无 AI 时不自动回复（插件仍可响应）",
+  );
+
+  const plugins = new PluginHost();
+  await bootStep("初始化：扫描插件目录 plugins/ …");
+  const scan = await loadPluginsFromDir(PLUGINS_DIR, (tip) => {
+    if (tip.level === "ok") log.ok(`[插件] ${tip.id}  ${tip.message}`);
+    else if (tip.level === "warn") log.warn(`[插件] ${tip.id}  ${tip.message}`);
+    else if (tip.level === "error") log.error(`[插件] ${tip.id}  ${tip.message}`);
+    else log.info(`[插件] ${tip.id}  ${tip.message}`);
   });
-  sessions.append(session, "user", msg.content);
-
-  const pluginReplies = await plugins.onMessage(msg, (id) => ({
+  for (const p of scan.host.values()) {
+    plugins.register(p);
+    db.upsertPlugin({
+      id: p.manifest.id,
+      name: p.manifest.name,
+      version: p.manifest.version,
+      enabled: true,
+      loadedAt: nowIso(),
+    });
+    await bootStep(`  · 挂载插件 ${p.manifest.id}@${p.manifest.version}`, 18);
+  }
+  await plugins.emitReady((id) => ({
     pluginId: id,
     reply: async () => undefined,
     log: (m) => log.plugin(id, m),
   }));
+  await bootStep(`插件就绪：${plugins.list().length} 个`);
 
-  let assistant: string;
-  if (pluginReplies.length) {
-    assistant = pluginReplies.map((r) => r.content).join("\n");
-  } else {
+  await bootStep("初始化：工作流引擎…");
+  const workflows = new WorkflowRunner();
+  workflows.register({
+    id: "starter",
+    name: "Starter Flow",
+    entry: "t1",
+    nodes: [
+      { id: "t1", type: "trigger", next: ["m1"] },
+      { id: "m1", type: "memory", config: { op: "set", key: "boot", value: true }, next: ["l1"] },
+      { id: "l1", type: "llm", next: ["tool1"] },
+      { id: "tool1", type: "tool", config: { name: "status" }, next: ["d1"] },
+      { id: "d1", type: "delay", config: { ms: 10 }, next: [] },
+    ],
+  });
+  await bootStep("  · 注册工作流 starter");
+
+  await bootStep("初始化：MCP Host…");
+  const mcp = new McpHost();
+  mcp.register({
+    name: "nexus.status",
+    description: "Return Fengyun Nexus runtime status",
+    handler: () => ({
+      env: envId,
+      plugins: plugins.list().length,
+      channels: channels.list().map((c) => c.id),
+      db: db.stats(),
+    }),
+  });
+  await bootStep("  · 注册工具 nexus.status");
+
+  await bootStep("初始化：HTTP 网关路由…");
+
+  const tokens = new Map<string, { user: string; exp: number }>();
+
+  function invalidateAllSessions(): void {
+    tokens.clear();
+  }
+
+  function issueToken(user: string): string {
+    const hours = adminCfg.sessionHours || 12;
+    const token = randomBytes(24).toString("hex");
+    const exp = Date.now() + hours * 3600_000;
+    tokens.set(hashToken(token), { user, exp });
+    return token;
+  }
+
+  function authMiddleware(
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ): void {
+    const header = req.headers.authorization ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    if (!token) {
+      res.status(401).json({ error: "未授权，请先登录" });
+      return;
+    }
+    const rec = tokens.get(hashToken(token));
+    if (!rec || rec.exp < Date.now()) {
+      if (rec) tokens.delete(hashToken(token));
+      res.status(401).json({ error: "登录已过期，请重新登录" });
+      return;
+    }
+    (req as express.Request & { adminUser?: string }).adminUser = rec.user;
+    next();
+  }
+
+  /** Process inbound message: plugins first; LLM only if configured; never local-echo. */
+  async function processInbound(msg: NexusMessage): Promise<string[]> {
+    const session = sessions.getOrCreate({
+      channel: msg.channel,
+      chatId: msg.chatId,
+      userId: msg.userId,
+    });
+    sessions.append(session, "user", msg.content);
+    db.insertMessage({
+      id: msg.id,
+      channel: msg.channel,
+      chatId: msg.chatId,
+      userId: msg.userId,
+      role: "user",
+      content: msg.content,
+      createdAt: msg.createdAt,
+    });
+
+    const pluginReplies = await plugins.onMessage(msg, (id) => ({
+      pluginId: id,
+      reply: async () => undefined,
+      log: (m) => log.plugin(id, m),
+    }));
+
+    if (pluginReplies.length) {
+      const texts = pluginReplies.map((r) => r.content).filter(Boolean);
+      for (const content of texts) {
+        sessions.append(session, "assistant", content);
+        db.insertMessage({
+          id: newId("msg"),
+          channel: msg.channel,
+          chatId: msg.chatId,
+          userId: "nexus",
+          role: "assistant",
+          content,
+          createdAt: nowIso(),
+        });
+      }
+      return texts;
+    }
+
+    if (!llm.snapshot().hasKey) {
+      return [];
+    }
+
     const history = session.turns.slice(-12).map((t) => ({
       role: t.role as "user" | "assistant" | "system",
       content: t.content,
     }));
-    assistant = await llm.chat(history);
+    const assistant = (await llm.chat(history)).trim();
+    if (!assistant) return [];
+
+    sessions.append(session, "assistant", assistant);
+    db.insertMessage({
+      id: newId("msg"),
+      channel: msg.channel,
+      chatId: msg.chatId,
+      userId: "nexus",
+      role: "assistant",
+      content: assistant,
+      createdAt: nowIso(),
+    });
+    return [assistant];
   }
 
-  sessions.append(session, "assistant", assistant);
-  const outMsg: NexusMessage = {
-    id: newId("msg"),
-    channel: msg.channel,
-    chatId: msg.chatId,
-    userId: "nexus",
-    type: "text",
-    content: assistant,
-    meta: { replyTo: msg.id },
-    createdAt: nowIso(),
-  };
-  return {
-    replies: [web.formatOutbound(outMsg), ...pluginReplies.map((r) => web.formatOutbound(r))],
-    assistant,
-  };
-}
+  async function handleChat(raw: unknown): Promise<{ replies: unknown[]; assistant: string }> {
+    const web = channels.get("web")!;
+    const msg = web.normalizeInbound(raw);
+    const texts = await processInbound(msg);
+    const assistant = texts.join("\n");
+    const replies = texts.map((content) =>
+      web.formatOutbound({
+        id: newId("msg"),
+        channel: msg.channel,
+        chatId: msg.chatId,
+        userId: "nexus",
+        type: "text",
+        content,
+        meta: { replyTo: msg.id },
+        createdAt: nowIso(),
+      }),
+    );
+    return { replies, assistant };
+  }
 
-const app = express();
-if (profile.gateway.cors) app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+  onebot.setInboundHandler(async (msg) => processInbound(msg));
 
-app.get("/health", (_req, res) => {
-  res.json({
-    ok: true,
-    product: "Fengyun Nexus",
-    env: profile.id,
-    label: profile.label,
-    time: nowIso(),
+  const app = express();
+  if (profile.gateway.cors) app.use(cors());
+  app.use(express.json({ limit: "2mb" }));
+
+  app.get("/health", (_req, res) => {
+    res.json({
+      ok: true,
+      product: "Fengyun Nexus",
+      env: profile.id,
+      label: profile.label,
+      plugins: plugins.list().length,
+      db: db.stats(),
+      time: nowIso(),
+    });
   });
-});
 
-app.get("/v1/meta", (_req, res) => {
-  res.json({
-    product: "Fengyun Nexus",
-    version: "0.1.0",
-    env: profile,
-    features: profile.features,
-    admin: {
+  app.get("/v1/meta", (_req, res) => {
+    res.json({
+      product: "Fengyun Nexus",
+      version: "0.1.0",
+      env: profile,
+      features: profile.features,
+      admin: {
+        setupCompleted: adminCfg.setupCompleted,
+        sessionHours: adminCfg.sessionHours || 12,
+        refreshInvalidatesSession: false,
+      },
+      plugins: {
+        available: true,
+        loaded: plugins.list().length,
+        tips: scan.tips,
+      },
+      db: db.stats(),
+    });
+  });
+
+  app.post("/v1/admin/login", (req, res) => {
+    const { username, password } = req.body ?? {};
+    const expectUser = adminCfg.username;
+    const expectPass = currentPassword();
+    if (
+      typeof username !== "string" ||
+      typeof password !== "string" ||
+      !safeEqual(username, expectUser) ||
+      !safeEqual(password, expectPass)
+    ) {
+      res.status(401).json({ error: "用户名或密码错误" });
+      log.warn(`管理登录失败  用户=${typeof username === "string" ? username : "?"}`);
+      return;
+    }
+    const token = issueToken(expectUser);
+    const mustReconfigure = !adminCfg.setupCompleted;
+    log.info(`管理登录成功  用户=${expectUser}  需重设账号=${mustReconfigure ? "是" : "否"}`);
+    res.json({
+      token,
+      username: expectUser,
+      expiresInHours: adminCfg.sessionHours || 12,
+      mustReconfigure,
+      message: mustReconfigure
+        ? "首次登录：请立即设置正式用户名与密码，然后重新登录。"
+        : undefined,
+    });
+  });
+
+  app.get("/v1/admin/me", authMiddleware, (req, res) => {
+    res.json({
+      user: (req as express.Request & { adminUser?: string }).adminUser,
+      env: profile.id,
       setupCompleted: adminCfg.setupCompleted,
-      sessionHours: adminCfg.sessionHours || 12,
-      refreshInvalidatesSession: true,
-    },
-    plugins: {
-      available: true,
-      loaded: plugins.list().length,
-    },
+      mustReconfigure: !adminCfg.setupCompleted,
+      expiresInHours: adminCfg.sessionHours || 12,
+    });
   });
-});
 
-app.post("/v1/admin/login", (req, res) => {
-  const { username, password } = req.body ?? {};
-  const expectUser = adminCfg.username;
-  const expectPass = currentPassword();
-  if (
-    typeof username !== "string" ||
-    typeof password !== "string" ||
-    !safeEqual(username, expectUser) ||
-    !safeEqual(password, expectPass)
-  ) {
-    res.status(401).json({ error: "用户名或密码错误" });
-    log.warn(`管理登录失败  用户=${typeof username === "string" ? username : "?"}`);
-    return;
-  }
-  const token = issueToken(expectUser);
-  const mustReconfigure = !adminCfg.setupCompleted;
-  log.info(`管理登录成功  用户=${expectUser}  需重设账号=${mustReconfigure ? "是" : "否"}`);
-  res.json({
-    token,
-    username: expectUser,
-    expiresInHours: adminCfg.sessionHours || 12,
-    mustReconfigure,
-    message: mustReconfigure
-      ? "首次登录：请立即设置正式用户名与密码，然后重新登录。"
-      : undefined,
+  app.get("/v1/admin/overview", authMiddleware, (req, res) => {
+    if (!adminCfg.setupCompleted) {
+      res.status(403).json({ error: "请先完成账号设置" });
+      return;
+    }
+    res.json({
+      env: profile,
+      plugins: plugins.list(),
+      channels: channels.list().map((c) => ({ id: c.id, label: c.label ?? c.id })),
+      workflows: workflows.list().map((w) => ({ id: w.id, name: w.name })),
+      sessions: sessions.list().length,
+      mcpTools: mcp.list(),
+      db: db.stats(),
+      adminUser: (req as express.Request & { adminUser?: string }).adminUser,
+    });
   });
-});
 
-app.get("/v1/admin/me", authMiddleware, (req, res) => {
-  res.json({
-    user: (req as express.Request & { adminUser?: string }).adminUser,
-    env: profile.id,
-    setupCompleted: adminCfg.setupCompleted,
-    mustReconfigure: !adminCfg.setupCompleted,
-    expiresInHours: adminCfg.sessionHours || 12,
-  });
-});
-
-app.get("/v1/admin/overview", authMiddleware, (req, res) => {
-  if (!adminCfg.setupCompleted) {
-    res.status(403).json({ error: "请先完成账号设置", message: "请先完成用户名与密码配置。" });
-    return;
-  }
-  res.json({
-    env: profile,
-    plugins: plugins.list(),
-    channels: channels.list().map((c) => c.id),
-    workflows: workflows.list().map((w) => ({ id: w.id, name: w.name })),
-    sessions: sessions.list().length,
-    mcpTools: mcp.list(),
-    adminUser: (req as express.Request & { adminUser?: string }).adminUser,
-  });
-});
-
-/** First-time or forced console reconfiguration of username + password. */
-app.post("/v1/admin/setup-credentials", authMiddleware, (req, res) => {
-  const { username, password, confirmPassword } = req.body ?? {};
-  if (typeof username !== "string" || typeof password !== "string") {
-    res.status(400).json({ error: "请求参数无效" });
-    return;
-  }
-  const uErr = validateUsername(username.trim());
-  if (uErr) {
-    res.status(400).json({ error: uErr });
-    return;
-  }
-  const pErr = validatePassword(password);
-  if (pErr) {
-    res.status(400).json({ error: pErr });
-    return;
-  }
-  if (password !== confirmPassword) {
-    res.status(400).json({ error: "两次密码不一致" });
-    return;
-  }
-
-  adminCfg = {
-    ...adminCfg,
-    username: username.trim(),
-    defaultPassword: password,
-    setupCompleted: true,
-    sessionHours: 12,
-  };
-  delete process.env[adminCfg.passwordEnv];
-  persistAdmin(adminCfg);
-  invalidateAllSessions();
-  res.json({
-    ok: true,
-    message: "凭据已更新，所有登录态已失效，请使用新用户名与密码重新登录。",
-  });
-});
-
-/** Update username and/or password after setup; invalidates all sessions. */
-app.post("/v1/admin/credentials", authMiddleware, (req, res) => {
-  if (!adminCfg.setupCompleted) {
-    res.status(403).json({ error: "请先完成账号设置" });
-    return;
-  }
-  const { currentPassword: cur, username, password, confirmPassword } = req.body ?? {};
-  if (typeof cur !== "string" || !safeEqual(cur, currentPassword())) {
-    res.status(401).json({ error: "当前密码不正确" });
-    return;
-  }
-  let nextUser = adminCfg.username;
-  if (typeof username === "string" && username.trim()) {
+  app.post("/v1/admin/setup-credentials", authMiddleware, (req, res) => {
+    const { username, password, confirmPassword } = req.body ?? {};
+    if (typeof username !== "string" || typeof password !== "string") {
+      res.status(400).json({ error: "请求参数无效" });
+      return;
+    }
     const uErr = validateUsername(username.trim());
     if (uErr) {
       res.status(400).json({ error: uErr });
       return;
     }
-    nextUser = username.trim();
-  }
-  let nextPass = currentPassword();
-  if (typeof password === "string" && password.length > 0) {
     const pErr = validatePassword(password);
     if (pErr) {
       res.status(400).json({ error: pErr });
@@ -471,132 +544,510 @@ app.post("/v1/admin/credentials", authMiddleware, (req, res) => {
       res.status(400).json({ error: "两次密码不一致" });
       return;
     }
-    nextPass = password;
-  }
 
-  adminCfg = {
-    ...adminCfg,
-    username: nextUser,
-    defaultPassword: nextPass,
-    setupCompleted: true,
-    sessionHours: 12,
-  };
-  delete process.env[adminCfg.passwordEnv];
-  persistAdmin(adminCfg);
-  invalidateAllSessions();
-  res.json({
-    ok: true,
-    message: "用户名/密码已更新，所有登录态已失效，请重新登录。",
+    adminCfg = {
+      ...adminCfg,
+      username: username.trim(),
+      defaultPassword: password,
+      setupCompleted: true,
+      sessionHours: 12,
+    };
+    delete process.env[adminCfg.passwordEnv];
+    persistAdmin(adminCfg);
+    invalidateAllSessions();
+    res.json({
+      ok: true,
+      message: "凭据已更新，所有登录态已失效，请使用新用户名与密码重新登录。",
+    });
   });
-});
 
-app.get("/v1/plugins", (_req, res) => {
-  res.json({ items: plugins.list() });
-});
-
-app.get("/v1/channels", (_req, res) => {
-  res.json({ items: channels.list().map((c) => c.id) });
-});
-
-app.get("/v1/workflows", (_req, res) => {
-  res.json({ items: workflows.list() });
-});
-
-app.post("/v1/workflows/:id/run", authMiddleware, async (req, res) => {
-  const result = await workflows.run(req.params.id, req.body ?? {});
-  res.json(result);
-});
-
-app.get("/v1/mcp/tools", (_req, res) => {
-  res.json({ items: mcp.list() });
-});
-
-app.post("/v1/mcp/call", authMiddleware, async (req, res) => {
-  try {
-    const name = String(req.body?.name ?? "");
-    const args = (req.body?.args ?? {}) as Record<string, unknown>;
-    const result = await mcp.call(name, args);
-    res.json({ ok: true, result });
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
-  }
-});
-
-app.post("/v1/chat", async (req, res) => {
-  try {
-    const result = await handleChat(req.body);
-    res.json({ ok: true, ...result });
-  } catch (e) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
-  }
-});
-
-app.post("/v1/chat/stream", async (req, res) => {
-  res.setHeader("content-type", "text/event-stream");
-  res.setHeader("cache-control", "no-cache");
-  res.setHeader("connection", "keep-alive");
-  try {
-    const result = await handleChat(req.body);
-    const chunk = result.assistant;
-    const size = Math.max(8, Math.ceil(chunk.length / 12));
-    for (let i = 0; i < chunk.length; i += size) {
-      const part = chunk.slice(i, i + size);
-      res.write(`data: ${JSON.stringify({ delta: part })}\n\n`);
-      await new Promise((r) => setTimeout(r, 16));
+  app.post("/v1/admin/credentials", authMiddleware, (req, res) => {
+    if (!adminCfg.setupCompleted) {
+      res.status(403).json({ error: "请先完成账号设置" });
+      return;
     }
-    res.write(`data: ${JSON.stringify({ done: true, replies: result.replies })}\n\n`);
-    res.end();
-  } catch (e) {
-    res.write(`data: ${JSON.stringify({ error: e instanceof Error ? e.message : String(e) })}\n\n`);
-    res.end();
-  }
-});
+    const { currentPassword: cur, username, password, confirmPassword } = req.body ?? {};
+    if (typeof cur !== "string" || !safeEqual(cur, currentPassword())) {
+      res.status(401).json({ error: "当前密码不正确" });
+      return;
+    }
+    let nextUser = adminCfg.username;
+    if (typeof username === "string" && username.trim()) {
+      const uErr = validateUsername(username.trim());
+      if (uErr) {
+        res.status(400).json({ error: uErr });
+        return;
+      }
+      nextUser = username.trim();
+    }
+    let nextPass = currentPassword();
+    if (typeof password === "string" && password.length > 0) {
+      const pErr = validatePassword(password);
+      if (pErr) {
+        res.status(400).json({ error: pErr });
+        return;
+      }
+      if (password !== confirmPassword) {
+        res.status(400).json({ error: "两次密码不一致" });
+        return;
+      }
+      nextPass = password;
+    }
 
-app.post("/v1/channels/webhook", async (req, res) => {
-  const adapter = channels.get("webhook")!;
-  const msg = adapter.normalizeInbound(req.body);
-  const pluginReplies = await plugins.onMessage(msg, (id) => ({
-    pluginId: id,
-    reply: async () => undefined,
-    log: (m) => log.plugin(id, m),
-  }));
-  const assistant = pluginReplies[0]?.content
-    ?? (await llm.chat([{ role: "user", content: msg.content }]));
-  res.json(
-    adapter.formatOutbound({
-      id: newId("msg"),
-      channel: "webhook",
-      chatId: msg.chatId,
-      userId: "nexus",
-      type: "text",
-      content: assistant,
-      createdAt: nowIso(),
-    }),
-  );
-});
-
-app.get("/v1/registry", authMiddleware, (_req, res) => {
-  res.json({
-    ok: true,
-    categories: Object.keys(registry.categories),
-    tokenConfigured: Boolean(process.env[registry.tokenEnv]),
+    adminCfg = {
+      ...adminCfg,
+      username: nextUser,
+      defaultPassword: nextPass,
+      setupCompleted: true,
+      sessionHours: 12,
+    };
+    delete process.env[adminCfg.passwordEnv];
+    persistAdmin(adminCfg);
+    invalidateAllSessions();
+    res.json({
+      ok: true,
+      message: "用户名/密码已更新，所有登录态已失效，请重新登录。",
+    });
   });
-});
 
-if (existsSync(PUBLIC_DIR)) {
-  app.use(express.static(PUBLIC_DIR));
-  app.get(["/", "/console"], (_req, res) => {
-    res.sendFile(join(PUBLIC_DIR, "index.html"));
+  app.get("/v1/plugins", (_req, res) => {
+    res.json({
+      items: plugins.values().map((p) => ({
+        ...p.manifest,
+        configSupported: Boolean(p.configSchema?.length),
+      })),
+      tips: scan.tips,
+    });
+  });
+
+  app.get("/v1/plugins/:id/config", authMiddleware, async (req, res) => {
+    const id = String(req.params.id);
+    const p = plugins.get(id);
+    if (!p) {
+      res.status(404).json({ error: "插件未找到", errorType: "not_found" });
+      return;
+    }
+    if (!p.configSchema?.length) {
+      res.json({
+        ok: true,
+        id,
+        supported: false,
+        message: "该插件暂未支持配置",
+        schema: [],
+        values: {},
+      });
+      return;
+    }
+    const values = (await p.getConfig?.()) ?? {};
+    res.json({
+      ok: true,
+      id,
+      supported: true,
+      schema: p.configSchema,
+      values,
+    });
+  });
+
+  app.put("/v1/plugins/:id/config", authMiddleware, async (req, res) => {
+    const id = String(req.params.id);
+    const p = plugins.get(id);
+    if (!p) {
+      res.status(404).json({ error: "插件未找到", errorType: "not_found" });
+      return;
+    }
+    if (!p.configSchema?.length || !p.setConfig) {
+      res.status(400).json({
+        error: "该插件暂未支持配置",
+        errorType: "unsupported",
+      });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const next: Record<string, unknown> = {};
+    for (const field of p.configSchema) {
+      if (Object.prototype.hasOwnProperty.call(body, field.key)) {
+        next[field.key] = body[field.key];
+      } else if (field.default !== undefined) {
+        next[field.key] = field.default;
+      }
+    }
+    await p.setConfig(next);
+    const values = (await p.getConfig?.()) ?? next;
+    res.json({ ok: true, message: "插件配置已保存", id, values });
+  });
+
+  app.get("/v1/channels", (_req, res) => {
+    res.json({
+      items: channels.list().map((c) => ({ id: c.id, label: c.label ?? c.id })),
+    });
+  });
+
+  app.get("/v1/workflows", (_req, res) => {
+    res.json({ items: workflows.list() });
+  });
+
+  app.post("/v1/workflows/:id/run", authMiddleware, async (req, res) => {
+    const result = await workflows.run(String(req.params.id), req.body ?? {});
+    res.json(result);
+  });
+
+  app.get("/v1/db/stats", authMiddleware, (_req, res) => {
+    res.json({ ok: true, ...db.stats() });
+  });
+
+  app.get("/v1/mcp/tools", (_req, res) => {
+    res.json({ items: mcp.list() });
+  });
+
+  app.post("/v1/mcp/call", authMiddleware, async (req, res) => {
+    try {
+      const name = String(req.body?.name ?? "");
+      const args = (req.body?.args ?? {}) as Record<string, unknown>;
+      const result = await mcp.call(name, args);
+      res.json({ ok: true, result });
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.post("/v1/chat", async (req, res) => {
+    try {
+      const result = await handleChat(req.body);
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      const t = formatErrorForClient(e);
+      log.error(`${t.errorType}  ${t.raw ?? ""}`);
+      res.status(500).json(t);
+    }
+  });
+
+  app.post("/v1/chat/stream", async (req, res) => {
+    res.setHeader("content-type", "text/event-stream");
+    res.setHeader("cache-control", "no-cache");
+    res.setHeader("connection", "keep-alive");
+    try {
+      const result = await handleChat(req.body);
+      const chunk = result.assistant;
+      const size = Math.max(8, Math.ceil(chunk.length / 12));
+      for (let i = 0; i < chunk.length; i += size) {
+        const part = chunk.slice(i, i + size);
+        res.write(`data: ${JSON.stringify({ delta: part })}\n\n`);
+        await new Promise((r) => setTimeout(r, 16));
+      }
+      res.write(`data: ${JSON.stringify({ done: true, replies: result.replies })}\n\n`);
+      res.end();
+    } catch (e) {
+      res.write(`data: ${JSON.stringify({ error: e instanceof Error ? e.message : String(e) })}\n\n`);
+      res.end();
+    }
+  });
+
+  app.post("/v1/channels/webhook", async (req, res) => {
+    const adapter = channels.get("webhook")!;
+    const msg = adapter.normalizeInbound(req.body);
+    const texts = await processInbound(msg);
+    const assistant = texts[0] ?? "";
+    res.json(
+      adapter.formatOutbound({
+        id: newId("msg"),
+        channel: "webhook",
+        chatId: msg.chatId,
+        userId: "nexus",
+        type: "text",
+        content: assistant,
+        createdAt: nowIso(),
+      }),
+    );
+  });
+
+  /** OneBot 11 HTTP 上报（NapCat HTTP 客户端） */
+  app.post(onebotCfg.httpPath, async (req, res) => {
+    const q = typeof req.query.access_token === "string" ? req.query.access_token : null;
+    if (!onebot.checkHttpAuth(req.headers.authorization, q)) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    const result = await onebot.handleHttpEvent(req.body);
+    res.json(result);
+  });
+
+  app.get("/v1/channels/onebot11", authMiddleware, (_req, res) => {
+    res.json({ ok: true, ...onebot.status(), config: onebot.getConfig() });
+  });
+
+  app.post("/v1/channels/onebot11/config", authMiddleware, (req, res) => {
+    const body = (req.body ?? {}) as Partial<OneBotConfig>;
+    const next: OneBotConfig = {
+      ...onebot.getConfig(),
+      enabled: typeof body.enabled === "boolean" ? body.enabled : onebot.getConfig().enabled,
+      accessToken:
+        typeof body.accessToken === "string" ? body.accessToken : onebot.getConfig().accessToken,
+      reverseWsPath:
+        typeof body.reverseWsPath === "string" && body.reverseWsPath
+          ? body.reverseWsPath
+          : onebot.getConfig().reverseWsPath,
+      httpPath:
+        typeof body.httpPath === "string" && body.httpPath
+          ? body.httpPath
+          : onebot.getConfig().httpPath,
+      docsUrl: onebot.getConfig().docsUrl,
+    };
+    persistOneBotConfig(next);
+    onebot.updateConfig(next);
+    log.info(`OneBot 11 配置已保存  enabled=${next.enabled}`);
+    res.json({
+      ok: true,
+      message: "已保存。反向 WS 路径变更需重启网关后生效。",
+      ...onebot.status(),
+      config: next,
+    });
+  });
+
+  app.get("/v1/registry", authMiddleware, (_req, res) => {
+    res.json({
+      ok: true,
+      baseUrl: registry.baseUrl,
+      tokenConfigured: Boolean(process.env[registry.tokenEnv]),
+      tokenEnv: registry.tokenEnv,
+      update: registry.update,
+      categories: Object.entries(registry.categories).map(([id, c]) => ({
+        id,
+        label: c.label,
+        path: c.path,
+      })),
+    });
+  });
+
+  app.post("/v1/registry/publish", authMiddleware, (req, res) => {
+    const pluginId = String(req.body?.pluginId ?? "");
+    const category = String(req.body?.category ?? "demo");
+    if (!pluginId) {
+      res.status(400).json({ error: "请指定 pluginId" });
+      return;
+    }
+    if (!registry.categories[category]) {
+      res.status(400).json({ error: `未知分类：${category}` });
+      return;
+    }
+    const tokenOk = Boolean(process.env[registry.tokenEnv]);
+    db.setKv(
+      `registry:lastPublish`,
+      JSON.stringify({ pluginId, category, at: nowIso(), tokenOk }),
+    );
+    res.json({
+      ok: true,
+      queued: true,
+      tokenConfigured: tokenOk,
+      message: tokenOk
+        ? `已登记上传意图：${pluginId} → ${category}（远端推送由维护者流水线处理，细节不对公开展示）`
+        : `已本地登记 ${pluginId} → ${category}。请先配置 ${registry.tokenEnv}（pnpm nexus set registry-token）后再推送。`,
+    });
+  });
+
+  app.get("/v1/admin/llm", authMiddleware, (_req, res) => {
+    const snap = llm.snapshot();
+    res.json({
+      ok: true,
+      ...snap,
+      ...publicProviders(llmStore),
+    });
+  });
+
+  /** Realtime switch active provider (no restart). */
+  app.post("/v1/admin/llm/switch", authMiddleware, (req, res) => {
+    const id = String(req.body?.id ?? "");
+    const hit = llmStore.providers.find((p) => p.id === id);
+    if (!hit) {
+      res.status(404).json({ error: "未找到该供应商", errorType: "not_found" });
+      return;
+    }
+    llmStore = { ...llmStore, activeId: id };
+    saveProvidersFile(ROOT, llmStore);
+    applyProviderToLlm(llm, hit);
+    log.ok(`AI 供应商已切换 → ${hit.name}（${hit.category}）`);
+    res.json({
+      ok: true,
+      message: `已切换到 ${hit.name}，立即生效。`,
+      ...llm.snapshot(),
+      ...publicProviders(llmStore),
+    });
+  });
+
+  app.post("/v1/admin/llm", authMiddleware, (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const targetId = String(body.id ?? llmStore.activeId);
+    const providers = llmStore.providers.map((p) => {
+      if (p.id !== targetId) return p;
+      const next = { ...p };
+      if (typeof body.name === "string" && body.name) next.name = body.name;
+      if (typeof body.category === "string" && body.category) {
+        next.category = body.category as LlmProvider["category"];
+      }
+      if (typeof body.baseUrl === "string") next.baseUrl = body.baseUrl;
+      if (typeof body.model === "string") next.model = body.model;
+      if (typeof body.apiKey === "string" && body.apiKey.length > 0) next.apiKey = body.apiKey;
+      if (body.clearKey === true) next.apiKey = "";
+      return next;
+    });
+    let activeId = llmStore.activeId;
+    if (body.activate === true) activeId = targetId;
+    llmStore = { activeId, providers };
+    saveProvidersFile(ROOT, llmStore);
+    applyProviderToLlm(llm, activeProvider(llmStore));
+    log.info(`AI 供应商已更新  id=${targetId}  active=${activeId}`);
+    res.json({
+      ok: true,
+      message: "供应商已保存并即时生效（本地 llm.local.json）。",
+      ...llm.snapshot(),
+      ...publicProviders(llmStore),
+    });
+  });
+
+  app.get("/v1/logs", authMiddleware, (req, res) => {
+    const limit = Number(req.query.limit ?? 120);
+    res.json({ ok: true, items: getLogEntries(limit) });
+  });
+
+  app.get("/v1/admin/db", authMiddleware, (_req, res) => {
+    res.json({
+      ok: true,
+      active: dbCfg.active,
+      info: db.info(),
+      stats: db.stats(),
+      backends: Object.entries(dbCfg.backends).map(([id, b]) => ({
+        id,
+        ...b,
+      })),
+    });
+  });
+
+  app.get("/v1/admin/db/detect", authMiddleware, (_req, res) => {
+    const items = NexusDatabase.detect();
+    res.json({
+      ok: true,
+      items,
+      active: dbCfg.active,
+      info: db.info(),
+      backends: Object.entries(dbCfg.backends).map(([id, b]) => ({
+        id,
+        ...b,
+      })),
+    });
+  });
+
+  app.post("/v1/admin/db/switch", authMiddleware, async (req, res) => {
+    const id = String(req.body?.id ?? "") as "json" | "memory" | "sqlite";
+    const pathOverride =
+      typeof req.body?.path === "string" && req.body.path.trim()
+        ? String(req.body.path).trim()
+        : undefined;
+    let b = dbCfg.backends[id];
+    if (!b) {
+      res.status(404).json({ error: "未知数据库驱动", errorType: "not_found" });
+      return;
+    }
+    const detected = NexusDatabase.detect().find((d) => d.id === id);
+    if (detected && !detected.available) {
+      res.status(400).json({
+        error: detected.reason || "当前环境无法使用该数据库",
+        errorType: "unavailable",
+      });
+      return;
+    }
+    if (pathOverride) {
+      b = { ...b, enabled: true, path: pathOverride };
+      dbCfg = {
+        ...dbCfg,
+        backends: { ...dbCfg.backends, [id]: b },
+      };
+    }
+    if (!b.enabled) {
+      res.status(400).json({
+        error: "该数据库未启用。请先在配置中开启，或换已启用的驱动。",
+        errorType: "disabled",
+      });
+      return;
+    }
+    dbCfg = { ...dbCfg, active: id };
+    saveDbConfig(ROOT, dbCfg);
+    const open = resolveDbOpenOpts(ROOT, dbCfg);
+    try {
+      db.close();
+    } catch {
+      /* ignore */
+    }
+    db = new NexusDatabase({ driver: open.driver, filePath: open.filePath });
+    await db.open();
+    log.ok(`数据库已切换 → ${open.driver}  ${open.label}`);
+    res.json({
+      ok: true,
+      message: `已切换到 ${open.label}，立即生效。`,
+      active: open.active,
+      info: db.info(),
+      stats: db.stats(),
+      backends: Object.entries(dbCfg.backends).map(([bid, bb]) => ({
+        id: bid,
+        ...bb,
+      })),
+    });
+  });
+
+  const staticRoot = existsSync(join(WEB_DIST, "index.html"))
+    ? WEB_DIST
+    : existsSync(join(PUBLIC_FALLBACK, "index.html"))
+      ? PUBLIC_FALLBACK
+      : null;
+
+  if (staticRoot) {
+    app.use(express.static(staticRoot));
+    app.get(["/", "/console", "/index.html"], (_req, res) => {
+      res.sendFile(join(staticRoot, "index.html"));
+    });
+  } else {
+    app.get("/", (_req, res) => {
+      res
+        .status(503)
+        .type("text")
+        .send("Fengyun Nexus console not built. Run: pnpm --filter @fengyun/nexus-web build");
+    });
+  }
+
+  const port = Number(process.env.PORT ?? profile.gateway.port);
+  const host = process.env.HOST ?? profile.gateway.host;
+
+  await bootStep("初始化：监听端口…");
+  const server = app.listen(port, host, () => {
+    onebot.attach(server);
+    void printBootSuccess({
+      url: `http://127.0.0.1:${port}/`,
+      env: profile.id,
+      plugins: plugins.list().length,
+      channels: channels.list().length,
+    });
+    log.info(
+      `管理账号=${adminCfg.username}  首次设置完成=${adminCfg.setupCompleted ? "是" : "否"}  会话=${adminCfg.sessionHours}小时`,
+    );
+    if (onebotCfg.enabled) {
+      log.info(
+        `OneBot 11 对接：NapCat 反向 WS → ws://127.0.0.1:${port}${onebotCfg.reverseWsPath}  |  HTTP → ${onebotCfg.httpPath}`,
+      );
+      log.info(`文档 https://napneko.github.io`);
+    }
+  });
+
+  server.on("error", (err) => {
+    const t = translateError(err);
+    log.error(`${t.title}（${t.type}）`);
+    log.error(t.hint);
+    log.error(`原始信息：${t.raw}`);
+    process.exit(1);
   });
 }
 
-const port = Number(process.env.PORT ?? profile.gateway.port);
-const host = process.env.HOST ?? profile.gateway.host;
-
-app.listen(port, host, () => {
-  log.ok(`网关已启动  环境=${profile.id}  地址=http://${host}:${port}`);
-  log.info(
-    `管理账号=${adminCfg.username}  首次设置完成=${adminCfg.setupCompleted ? "是" : "否"}  会话=${adminCfg.sessionHours}小时`,
-  );
-  log.info(`控制台 http://127.0.0.1:${port}/`);
+bootstrap().catch((e) => {
+  const t = translateError(e);
+  log.error(`${t.title}（${t.type}）`);
+  log.error(t.hint);
+  log.error(`原始信息：${t.raw}`);
+  process.exit(1);
 });

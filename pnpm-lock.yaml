@@ -29,12 +29,18 @@ importers:
       '@fengyun/nexus-core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@fengyun/nexus-db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@fengyun/nexus-llm':
         specifier: workspace:*
         version: link:../../packages/llm
       '@fengyun/nexus-mcp-host':
         specifier: workspace:*
         version: link:../../packages/mcp-host
+      '@fengyun/nexus-plugin-loader':
+        specifier: workspace:*
+        version: link:../../packages/plugin-loader
       '@fengyun/nexus-plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
@@ -53,6 +59,9 @@ importers:
       nanoid:
         specifier: ^5.0.9
         version: 5.1.16
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
     devDependencies:
       '@types/cors':
         specifier: ^2.8.17
@@ -63,6 +72,9 @@ importers:
       '@types/node':
         specifier: ^22.10.2
         version: 22.20.3
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       tsx:
         specifier: ^4.19.2
         version: 4.23.13
@@ -115,6 +127,15 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  packages/db:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.3
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   packages/llm:
     dependencies:
       '@fengyun/nexus-shared':
@@ -127,6 +148,19 @@ importers:
 
   packages/mcp-host:
     devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  packages/plugin-loader:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.3
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -154,6 +188,12 @@ importers:
         version: 5.9.3
 
   plugins/templates/ts-plugin: {}
+
+  plugins/z-echo:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
 
 packages:
 
@@ -772,6 +812,9 @@ packages:
   '@types/serve-static@2.2.0':
     resolution: {integrity: sha512-8mam4H1NHLtu7nmtalF7eyBH14QyOASmcxHhSfEoRyr0nP/YdoesEtU+uSRvMe96TW/HPTtkoKqQLl53N7UXMQ==}
 
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
+
   '@vitejs/plugin-react@4.7.0':
     resolution: {integrity: sha512-gUu9hwfWvvEDBBmgtAowQCojwZmJ5mcLn3aufeCsitijs3+f2NsrPtlAWIR6OPiqljl96GVCUbLe0HyqIpVaoA==}
     engines: {node: ^14.18.0 || >=16.0.0}
@@ -1246,6 +1289,18 @@ packages:
       yaml:
         optional: true
 
+  ws@8.21.3:
+    resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
@@ -1692,6 +1747,10 @@ snapshots:
   '@types/serve-static@2.2.0':
     dependencies:
       '@types/http-errors': 2.0.5
+      '@types/node': 22.20.3
+
+  '@types/ws@8.18.1':
+    dependencies:
       '@types/node': 22.20.3
 
   '@vitejs/plugin-react@4.7.0(vite@6.4.3(@types/node@22.20.3)(tsx@4.23.13))':
@@ -2209,5 +2268,7 @@ snapshots:
       '@types/node': 22.20.3
       fsevents: 2.3.3
       tsx: 4.23.13
+
+  ws@8.21.3: {}
 
   yallist@3.1.1: {}

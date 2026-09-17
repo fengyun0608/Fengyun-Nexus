@@ -12,7 +12,7 @@
                          ├─ 工作流
                          └─ 工具桥接
                                     │
-  Fengyun Nexus ════════════════════╪════ 风云枢纽
+  Fengyun Nexus ════════════════════╪════ product brand (English)
                                     │
                          ┌─ 示例插件
            开源生态 ─────┼─ 基础插件  ──► GitCode 远程仓

@@ -10,8 +10,9 @@
     "dev": "pnpm --filter @fengyun/nexus-gateway dev",
     "dev:web": "pnpm --filter @fengyun/nexus-web dev",
     "dev:all": "pnpm -r --parallel --filter @fengyun/nexus-gateway --filter @fengyun/nexus-web dev",
-    "build:packages": "pnpm --filter @fengyun/nexus-shared --filter @fengyun/nexus-core --filter @fengyun/nexus-channel --filter @fengyun/nexus-plugin-sdk --filter @fengyun/nexus-llm --filter @fengyun/nexus-workflow --filter @fengyun/nexus-mcp-host build",
-    "build": "pnpm run build:packages && pnpm -r --filter @fengyun/nexus-web build",
+    "build:packages": "pnpm --filter @fengyun/nexus-shared --filter @fengyun/nexus-core --filter @fengyun/nexus-channel --filter @fengyun/nexus-plugin-sdk --filter @fengyun/nexus-db --filter @fengyun/nexus-plugin-loader --filter @fengyun/nexus-llm --filter @fengyun/nexus-workflow --filter @fengyun/nexus-mcp-host build",
+    "build": "pnpm run build:packages && pnpm --filter @fengyun/nexus-web build",
+    "build:web": "pnpm --filter @fengyun/nexus-web build",
     "start": "pnpm --filter @fengyun/nexus-gateway start",
     "nexus": "pnpm --filter @fengyun/nexus-cli start",
     "typecheck": "pnpm -r typecheck"

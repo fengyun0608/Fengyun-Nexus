@@ -11,19 +11,23 @@
   "dependencies": {
     "@fengyun/nexus-channel": "workspace:*",
     "@fengyun/nexus-core": "workspace:*",
+    "@fengyun/nexus-db": "workspace:*",
     "@fengyun/nexus-llm": "workspace:*",
     "@fengyun/nexus-mcp-host": "workspace:*",
+    "@fengyun/nexus-plugin-loader": "workspace:*",
     "@fengyun/nexus-plugin-sdk": "workspace:*",
     "@fengyun/nexus-shared": "workspace:*",
     "@fengyun/nexus-workflow": "workspace:*",
     "cors": "^2.8.5",
     "express": "^4.21.2",
-    "nanoid": "^5.0.9"
+    "nanoid": "^5.0.9",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.2",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

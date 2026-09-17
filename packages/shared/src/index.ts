@@ -14,6 +14,10 @@ export interface NexusMessage {
     tenantId?: string;
     personaId?: string;
     replyTo?: string;
+    /** OneBot 11 */
+    messageType?: "private" | "group" | string;
+    groupId?: string;
+    selfId?: string;
   };
   createdAt: string;
 }

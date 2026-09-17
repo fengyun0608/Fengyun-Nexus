@@ -139,8 +139,17 @@ Termux 专用步骤见 [各平台启动](start.md)。
 
 ## 常见问题
 
-**`pnpm` 找不到**  
-先装 Node 20+，再用 Corepack 或 `npm i -g pnpm`。
+**`ERR_PNPM_PNPM_ENGINE_NO_NATIVE_BINARY` / android-arm64**  
+Termux 没有 pnpm 原生二进制。请：
+
+```bash
+npm install -g pnpm@9.15.0
+# 仓库根目录应有 .npmrc：manage-package-manager-versions=false
+./boot.sh
+```
+
+或重跑环境脚本：  
+`curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-env.sh | bash`
 
 **网关起不来 / 端口占用**  
 换端口：`set PORT=8788` 后重启；或结束占用 8787 的进程。

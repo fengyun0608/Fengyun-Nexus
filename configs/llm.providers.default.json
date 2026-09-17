@@ -1,0 +1,29 @@
+{
+  "activeId": "openai-compat",
+  "providers": [
+    {
+      "id": "openai-compat",
+      "name": "OpenAI 兼容",
+      "category": "cloud",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini",
+      "apiKey": ""
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "category": "cloud",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat",
+      "apiKey": ""
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama 本地",
+      "category": "local",
+      "baseUrl": "http://127.0.0.1:11434/v1",
+      "model": "llama3.2",
+      "apiKey": "ollama"
+    }
+  ]
+}

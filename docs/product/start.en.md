@@ -10,7 +10,16 @@
 git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
 cd Fengyun-Nexus
 # Windows: start.bat
-# Linux/macOS/Termux:
+### Termux (Android)
+
+Preferred remote scripts (env and install are separate; answer Y/n):
+
+```bash
+curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-env.sh | bash
+curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-setup.sh | bash
+```
+
+Use `NEXUS_INSTALL_YES=1` for non-interactive. Install `pnpm@9.15.0` on Termux (no `@pnpm/exe` for android-arm64).
 chmod +x boot.sh && ./boot.sh
 ```
 

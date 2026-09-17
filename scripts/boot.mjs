@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * One console only: gateway serves the unique control UI at :8787
+ * Fengyun Nexus boot — detect deps, build packages + Vite console, start gateway.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,10 +19,13 @@ const ANSI = {
   yellow: "\x1b[33m",
   red: "\x1b[31m",
   gray: "\x1b[90m",
+  magenta: "\x1b[35m",
 };
 
 function bootLog(level, color, msg) {
-  console.log(`${ANSI.gray}${new Date().toISOString().replace("T", " ").slice(0, 19)}${ANSI.reset} ${color}${ANSI.bold}${level.padEnd(5)}${ANSI.reset} ${msg}`);
+  console.log(
+    `${ANSI.gray}${new Date().toISOString().replace("T", " ").slice(0, 19)}${ANSI.reset} ${color}${ANSI.bold}${level.padEnd(5)}${ANSI.reset} ${msg}`,
+  );
 }
 
 function loadDotEnv() {
@@ -65,13 +68,32 @@ function runtimeEnv() {
   }
 }
 
+function which(bin) {
+  try {
+    execSync(isWin ? `where ${bin}` : `command -v ${bin}`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function nodeMajor() {
+  const m = process.versions.node.split(".")[0];
+  return Number(m);
+}
+
 function run(args) {
   return new Promise((resolve, reject) => {
+    const env = {
+      ...process.env,
+      // Termux/android-arm64: never fetch @pnpm/exe native binary
+      NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS: "false",
+    };
     const child = spawn(pnpmCmd, args, {
       cwd: root,
       stdio: "inherit",
       shell: isWin,
-      env: process.env,
+      env,
     });
     child.on("exit", (code) => {
       if (code === 0) resolve();
@@ -80,8 +102,64 @@ function run(args) {
   });
 }
 
+async function detectDeps() {
+  bootLog("INFO", ANSI.cyan, "── dependency check ──");
+  if (nodeMajor() < 20) {
+    throw new Error(`Node.js >= 20 required (got ${process.versions.node})`);
+  }
+  bootLog("OK", ANSI.green, `node ${process.versions.node}`);
+
+  if (isTermux()) {
+    process.env.NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS = "false";
+    bootLog("OK", ANSI.green, "Termux: skip pnpm native binary switch");
+  }
+
+  if (!which("pnpm") && !which("pnpm.cmd")) {
+    bootLog("WARN", ANSI.yellow, "pnpm not found — try: npm i -g pnpm@9.15.0");
+    throw new Error("pnpm is required");
+  }
+  bootLog("OK", ANSI.green, "pnpm available");
+
+  if (!which("git") && !which("git.exe")) {
+    bootLog("WARN", ANSI.yellow, "git not found (optional for plugin updates)");
+  } else {
+    bootLog("OK", ANSI.green, "git available");
+  }
+
+  if (!existsSync(join(root, "node_modules"))) {
+    bootLog("INFO", ANSI.cyan, "installing workspace dependencies…");
+    await run(["install"]);
+    bootLog("OK", ANSI.green, "dependencies installed");
+  } else {
+    bootLog("OK", ANSI.green, "node_modules present");
+  }
+}
+
+async function ensureBuild() {
+  const sharedDist = join(root, "packages/shared/dist/index.js");
+  const dbDist = join(root, "packages/db/dist/index.js");
+  const loaderDist = join(root, "packages/plugin-loader/dist/index.js");
+  if (!existsSync(sharedDist) || !existsSync(dbDist) || !existsSync(loaderDist)) {
+    bootLog("INFO", ANSI.cyan, "building internal packages…");
+    await run(["run", "build:packages"]);
+    bootLog("OK", ANSI.green, "packages built");
+  } else {
+    bootLog("OK", ANSI.green, "packages ready");
+  }
+
+  const webDist = join(root, "apps/web/dist/index.html");
+  if (!existsSync(webDist)) {
+    bootLog("INFO", ANSI.cyan, "building Vite console…");
+    await run(["--filter", "@fengyun/nexus-web", "build"]);
+    bootLog("OK", ANSI.green, "console built → apps/web/dist");
+  } else {
+    bootLog("OK", ANSI.green, "Vite console dist ready");
+  }
+}
+
 async function main() {
   loadDotEnv();
+  bootLog("INFO", ANSI.magenta, "Fengyun Nexus 启动器");
 
   if (!process.env.NEXUS_ENV) {
     const hint = runtimeEnv();
@@ -90,26 +168,35 @@ async function main() {
     else process.env.NEXUS_ENV = "desktop";
   }
 
-  if (!existsSync(join(root, "node_modules"))) {
-    bootLog("INFO", ANSI.cyan, "首次启动：安装依赖…");
-    await run(["install"]);
-  }
-
-  const sharedDist = join(root, "packages/shared/dist/index.js");
-  if (!existsSync(sharedDist)) {
-    bootLog("INFO", ANSI.cyan, "编译内部包…");
-    await run(["run", "build:packages"]);
-  }
+  await detectDeps();
+  await ensureBuild();
 
   const port = process.env.PORT || "8787";
   bootLog("OK", ANSI.green, `姿态=${process.env.NEXUS_ENV}`);
-  bootLog("INFO", ANSI.cyan, `控制台（唯一） http://127.0.0.1:${port}/`);
+  bootLog("INFO", ANSI.cyan, `即将拉起网关 → 先连数据库，再刷初始化日志`);
+  bootLog("INFO", ANSI.cyan, `控制台 http://127.0.0.1:${port}/`);
   bootLog("INFO", ANSI.cyan, "初始账号 console / console  |  或: pnpm nexus setup");
 
   await run(["--filter", "@fengyun/nexus-gateway", "dev"]);
 }
 
 main().catch((e) => {
-  bootLog("ERROR", ANSI.red, e.message || String(e));
+  const msg = e.message || String(e);
+  bootLog("ERROR", ANSI.red, msg);
+  if (/PNPM_ENGINE_NO_NATIVE_BINARY|android-arm64|@pnpm\/exe/i.test(msg)) {
+    bootLog(
+      "INFO",
+      ANSI.cyan,
+      "Termux 提示：这是 pnpm 去拉原生二进制失败。请执行：",
+    );
+    bootLog("INFO", ANSI.cyan, "  npm install -g pnpm@9.15.0");
+    bootLog("INFO", ANSI.cyan, "  echo manage-package-manager-versions=false >> .npmrc");
+    bootLog("INFO", ANSI.cyan, "  ./boot.sh");
+    bootLog(
+      "INFO",
+      ANSI.cyan,
+      "或一键重装环境：curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/termux-env.sh | bash",
+    );
+  }
   process.exit(1);
 });

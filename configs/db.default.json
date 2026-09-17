@@ -1,0 +1,19 @@
+{
+  "active": "sqlite",
+  "backends": {
+    "sqlite": {
+      "enabled": true,
+      "label": "SQLite",
+      "path": "data/nexus.sqlite"
+    },
+    "json": {
+      "enabled": true,
+      "label": "JSON 文件库",
+      "path": "data/nexus.db.json"
+    },
+    "memory": {
+      "enabled": true,
+      "label": "内存库（重启清空）"
+    }
+  }
+}

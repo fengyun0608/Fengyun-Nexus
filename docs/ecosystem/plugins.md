@@ -2,8 +2,12 @@
 
 中文 | [English](plugins.en.md)
 
-Fengyun Nexus 支持示例、基础、标准等插件能力，可在控制台中管理与扩展。  
-远程安装与更新的内部细节不对公开展示；维护者请查阅仓库内对内说明。
+Fengyun Nexus 从 `plugins/` 目录扫描加载插件。插件 id 优先 **`z.*`**（示例：`z.echo`）。
+
+能力：`Plugin` 基类、`NexusEvent`（`e`）、rule 匹配、启动加载提示、权限声明。
+
+**消息通道对应插件写法基准：** [channel-plugins.md](channel-plugins.md)  
+**OneBot 11：** [onebot11.md](onebot11.md)
 
 本地脚手架：
 
@@ -11,4 +15,4 @@ Fengyun Nexus 支持示例、基础、标准等插件能力，可在控制台中
 pnpm nexus create plugin my-bot
 ```
 
-插件建议使用与主仓兼容的开源许可（推荐 MIT）。
+推荐 MIT。

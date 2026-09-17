@@ -1,10 +1,16 @@
-# Plugin ecosystem
+# Plugins
 
 [中文](plugins.md) | English
 
-Nexus supports demo / basic / standard style plugins via the single console.  
-Remote install internals are not documented publicly; maintainers see internal notes in-repo.
+Fengyun Nexus loads plugins from `plugins/` via directory scan. Prefer **`z.*`** plugin ids (example: `z.echo`).
+
+Stack: `Plugin` base class, `NexusEvent` (`e`), rule matching, boot load tips, optional permissions.
+
+**Channel + plugin baseline:** [channel-plugins.en.md](channel-plugins.en.md)  
+**OneBot 11:** [onebot11.en.md](onebot11.en.md)
 
 ```bash
 pnpm nexus create plugin my-bot
 ```
+
+Recommended license: MIT.
