@@ -25,7 +25,15 @@
 
 **Fengyun Nexus（风云枢纽）** 把「框架内对话、消息通道、工作流、插件生态」收进同一套独立产品：手机端、电脑端、服务器三环境可用，管理端有独立密码，示例 / 基础 / 标准插件走开源平台远程仓安装与更新。
 
-> 运作说明（主中文）：[docs/product/how-it-works.md](docs/product/how-it-works.md) · [English](docs/product/how-it-works.en.md)
+> 运作说明（主中文）：[docs/product/how-it-works.md](docs/product/how-it-works.md) · [English](docs/product/how-it-works.en.md)  
+> 环境安装（主中文）：[docs/product/environment.md](docs/product/environment.md) · [English](docs/product/environment.en.md)
+
+## 环境要求（摘要）
+
+**必备：** Node.js ≥ 20、pnpm ≥ 9、Git、现代浏览器。  
+**可选：** Go（并发 worker）、Python 3.10+（UIA）、模型密钥、远程插件 Token。  
+
+完整清单、安装命令与验证步骤见 [环境要求与安装说明](docs/product/environment.md)。
 
 ## 你能做什么
 
@@ -38,9 +46,12 @@
 
 ## 快速开始
 
+先确认已安装 [必备环境](docs/product/environment.md)，再执行：
+
 ```bash
 cd Fengyun-Nexus
 pnpm install
+pnpm run build:packages
 # 终端 1
 pnpm dev
 # 终端 2

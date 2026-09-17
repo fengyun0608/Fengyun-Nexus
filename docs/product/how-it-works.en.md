@@ -64,4 +64,5 @@ Set `NEXUS_ENV` to `mobile`, `desktop` (default), or `server`. See `configs/env.
 
 ## Related
 
+- [Environment & install](environment.en.md) · [中文](environment.md)  
 - [Planning](planning.md) · [Fishbone](fishbone.md) · [Directory](directory.md) · [Ecosystem](../ecosystem/plugins.md)

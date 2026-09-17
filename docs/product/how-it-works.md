@@ -73,6 +73,7 @@
 
 ## 相关文档
 
+- [环境要求与安装](environment.md) · [English](environment.en.md)  
 - [产品规划总图](planning.md)  
 - [能力鱼骨](fishbone.md)  
 - [目录鱼骨](directory.md)  
