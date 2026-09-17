@@ -17,5 +17,5 @@ chmod +x boot.sh && ./boot.sh
 Or: `pnpm boot`
 
 Bootstrap login: `console` / `console` on a dedicated login page.  
-Username: 4–8 English letters. Password: ≥10 with upper/lower/digit/special.  
+Username: 4–8 English letters. Password: ≥4 chars with upper/lower/digit/special.  
 Console sidebar appears only after login. Top-left hamburger toggles the tree.

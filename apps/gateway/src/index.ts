@@ -140,14 +140,20 @@ function validateUsername(username: string): string | null {
 }
 
 /**
- * Strong password: ≥10 chars, upper, lower, digit, special.
+ * Password: ≥4 chars; complexity check (upper + lower + digit + special).
  */
 function validatePassword(password: string): string | null {
-  if (password.length < 10) return "密码至少 10 位";
-  if (!/[a-z]/.test(password)) return "密码须含小写字母";
-  if (!/[A-Z]/.test(password)) return "密码须含大写字母";
-  if (!/[0-9]/.test(password)) return "密码须含数字";
-  if (!/[^A-Za-z0-9]/.test(password)) return "密码须含特殊字符";
+  if (password.length < 4) return "密码至少 4 位";
+  const checks = [
+    { ok: /[a-z]/.test(password), tip: "小写字母" },
+    { ok: /[A-Z]/.test(password), tip: "大写字母" },
+    { ok: /[0-9]/.test(password), tip: "数字" },
+    { ok: /[^A-Za-z0-9]/.test(password), tip: "特殊字符" },
+  ];
+  const missing = checks.filter((c) => !c.ok).map((c) => c.tip);
+  if (missing.length) {
+    return `密码复杂度不足，还缺：${missing.join("、")}`;
+  }
   if (password === "console") return "请勿使用初始密码";
   return null;
 }
