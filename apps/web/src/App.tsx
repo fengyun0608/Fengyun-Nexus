@@ -201,9 +201,11 @@ function resolveAdapterScope(p: PluginItem): "all" | "channel" | "specified" {
   return chs.length === 1 ? "channel" : "specified";
 }
 
-function channelScopedPlugins(items: PluginItem[], channelId?: string): PluginItem[] {
+/** 本通道可见：专用/指定通道插件 + 框架通用（all）插件，两边同时显示 */
+function pluginsVisibleOnChannel(items: PluginItem[], channelId?: string): PluginItem[] {
   return items.filter((p) => {
     const scope = resolveAdapterScope(p);
+    if (scope === "all") return true;
     if (scope !== "channel" && scope !== "specified") return false;
     if (!channelId) return true;
     return (p.channels ?? []).includes(channelId);
@@ -385,6 +387,8 @@ export default function App() {
   const [dbInfo, setDbInfo] = useState<DbInfo | null>(null);
   const [dbDetect, setDbDetect] = useState<DbDetectItem[]>([]);
   const [uiModal, setUiModal] = useState<UiModal>(null);
+  /** 弹窗返回栈：如 本通道插件 → 配置主人，关闭后回到本通道插件，不进插件管理首页 */
+  const [modalBack, setModalBack] = useState<UiModal>(null);
   const [modalStatus, setModalStatus] = useState("");
   const [modalTone, setModalTone] = useState<"muted" | "ok" | "error">("muted");
   const [dbDetecting, setDbDetecting] = useState(false);
@@ -564,7 +568,7 @@ export default function App() {
     if (pluginLayer.kind === "framework") {
       return plugins.filter((p) => resolveAdapterScope(p) === "all");
     }
-    return channelScopedPlugins(plugins, pluginLayer.channelId);
+    return pluginsVisibleOnChannel(plugins, pluginLayer.channelId);
   })();
 
   const refreshEnv = async () => {
@@ -614,11 +618,19 @@ export default function App() {
     setPanel("plugins");
   };
 
-  /** 返回：通道插件列表 → 通道选择 → 插件首页 */
+  /** 返回：通道插件列表 → 通道选择 → 插件首页；框架列表/文档 → 插件首页 */
   const backPluginLayer = () => {
     if (pluginLayer.step === "list" && pluginLayer.kind === "channel" && pluginLayer.channelId) {
       setPluginLayer({ step: "channels" });
       setActionMsg("");
+      return;
+    }
+    if (pluginLayer.step === "list" && pluginLayer.kind === "framework") {
+      openPluginHome();
+      return;
+    }
+    if (pluginLayer.step === "docs") {
+      openPluginHome();
       return;
     }
     if (pluginLayer.step === "channels") {
@@ -631,6 +643,12 @@ export default function App() {
   const openChannelMastersFromPlugins = (channelId: string) => {
     setActiveChannelId(channelId);
     setModalStatus("");
+    // 从本通道插件弹窗进「配置主人」→ 返回仍回本通道插件弹窗
+    if (uiModal?.kind === "channel-plugins") {
+      setModalBack({ kind: "channel-plugins" });
+    } else {
+      setModalBack(null);
+    }
     setUiModal({ kind: "channel-settings" });
     void loadChannelSettings(channelId);
   };
@@ -686,9 +704,33 @@ export default function App() {
 
   const closeModal = () => {
     setUiModal(null);
+    setModalBack(null);
     setModalStatus("");
     setModalTone("muted");
     setPwConfirmStep(false);
+  };
+
+  /** 关闭当前弹窗；若有返回栈则回到上一层弹窗 */
+  const popModal = () => {
+    setModalStatus("");
+    setModalTone("muted");
+    setPwConfirmStep(false);
+    if (modalBack) {
+      const back = modalBack;
+      setModalBack(null);
+      setUiModal(back);
+      return;
+    }
+    setUiModal(null);
+  };
+
+  /** 本通道插件弹窗「返回上一层」→ 始终回到通道中枢，绝不进全局插件管理 */
+  const closeChannelPluginsModal = () => {
+    setModalBack(null);
+    setModalStatus("");
+    setModalTone("muted");
+    setUiModal(null);
+    if (activeChannelId) setPanel("channel-detail");
   };
 
   const openChannel = (id: string) => {
@@ -1523,6 +1565,7 @@ export default function App() {
                 className="layer-card"
                 onClick={() => {
                   setModalStatus("");
+                  setModalBack(null);
                   setUiModal({ kind: "channel-settings" });
                   void loadChannelSettings(activeChannel.id);
                 }}
@@ -1535,6 +1578,7 @@ export default function App() {
                 className="layer-card"
                 onClick={() => {
                   setModalStatus("");
+                  setModalBack(null);
                   setUiModal({ kind: "channel-plugins" });
                 }}
               >
@@ -1546,6 +1590,7 @@ export default function App() {
                 className="layer-card"
                 onClick={() => {
                   setModalStatus("");
+                  setModalBack(null);
                   setUiModal({ kind: "channel-docs" });
                 }}
               >
@@ -1558,6 +1603,7 @@ export default function App() {
                   className="layer-card"
                   onClick={() => {
                     setModalStatus("");
+                    setModalBack(null);
                     setUiModal({ kind: "onebot-conn" });
                     void refreshOnebot();
                   }}
@@ -2407,7 +2453,7 @@ export default function App() {
                 <div className="list">
                   {channels.length === 0 && <p className="muted pad">{tr("noChannels")}</p>}
                   {channels.map((c) => {
-                    const count = channelScopedPlugins(plugins, c.id).length;
+                    const count = pluginsVisibleOnChannel(plugins, c.id).length;
                     return (
                       <div className="list-row" key={c.id}>
                         <div>
@@ -2453,7 +2499,7 @@ export default function App() {
                   <p className="crumb">
                     <button type="button" className="linkish" onClick={() => backPluginLayer()}>
                       {pluginLayer.kind === "channel" && pluginLayer.channelId
-                        ? tr("channelPluginManage")
+                        ? tr("pluginKindChannel")
                         : tr("pluginManage")}
                     </button>
                     <span> / </span>
@@ -2773,7 +2819,8 @@ async menu(e) {
 
       <FloatModal
         open={uiModal?.kind === "channel-settings"}
-        onClose={closeModal}
+        onClose={popModal}
+        closeLabel={tr("backLayer")}
         title={tr("channelSettings")}
         subtitle={tr("channelSettingsHint")}
         status={modalStatus}
@@ -2810,7 +2857,7 @@ async menu(e) {
 
       <FloatModal
         open={uiModal?.kind === "channel-plugins"}
-        onClose={closeModal}
+        onClose={closeChannelPluginsModal}
         closeLabel={tr("backLayer")}
         title={tr("channelPluginManage")}
         subtitle={tr("channelPluginManageHint")}
@@ -2830,10 +2877,10 @@ async menu(e) {
           <p className="muted">{tr("channelSettingsHint")}</p>
         </div>
         <div className="list compact">
-          {channelScopedPlugins(plugins, activeChannelId).length === 0 && (
+          {pluginsVisibleOnChannel(plugins, activeChannelId).length === 0 && (
             <p className="muted">{tr("noPlugins")}</p>
           )}
-          {channelScopedPlugins(plugins, activeChannelId).map((p) => (
+          {pluginsVisibleOnChannel(plugins, activeChannelId).map((p) => (
             <div className="list-row" key={p.id}>
               <div>
                 <strong>{p.name}</strong>
@@ -2945,6 +2992,7 @@ async menu(e) {
           setModalStatus("");
           // 从本通道插件弹窗进入 → 回到本通道插件管理
           if (panel === "channel-detail") {
+            setModalBack(null);
             setUiModal({ kind: "channel-plugins" });
             return;
           }
