@@ -1,6 +1,6 @@
 # Fengyun Nexus 如何运作
 
-[English →](how-it-works.en.md)
+中文 | [English](how-it-works.en.md)
 
 ## 仓库是否已连接？
 
@@ -73,8 +73,9 @@
 
 ## 相关文档
 
-- [环境要求与安装](environment.md) · [English](environment.en.md)  
-- [产品规划总图](planning.md)  
-- [能力鱼骨](fishbone.md)  
-- [目录鱼骨](directory.md)  
-- [插件生态](../ecosystem/plugins.md)  
+- [环境要求与安装](environment.md)
+- [各平台启动](start.md)
+- [产品规划总图](planning.md)
+- [能力鱼骨](fishbone.md)
+- [目录鱼骨](directory.md)
+- [插件生态](../ecosystem/plugins.md)

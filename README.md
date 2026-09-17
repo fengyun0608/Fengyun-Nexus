@@ -91,10 +91,12 @@ pnpm nexus boot
 
 ## 文档
 
-- [如何运作](docs/product/how-it-works.md) · [English](docs/product/how-it-works.en.md)  
-- [环境要求](docs/product/environment.md) · [English](docs/product/environment.en.md)  
-- [各平台启动](docs/product/start.md) · [English](docs/product/start.en.md)  
+- [如何运作](docs/product/how-it-works.md)
+- [环境要求](docs/product/environment.md)
+- [各平台启动](docs/product/start.md)
 - [规划 / 鱼骨 / 目录](docs/product/README.md)
+
+进入文档页后，用页顶 **中文 | English** 切换语言。
 
 ## 开源协议
 

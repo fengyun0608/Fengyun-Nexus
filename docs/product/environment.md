@@ -1,6 +1,6 @@
 # 环境要求与安装说明
 
-[English →](environment.en.md)
+中文 | [English](environment.en.md)
 
 本文说明跑 Fengyun Nexus **需要装什么**、**可选装什么**、以及怎么验证。
 
@@ -158,6 +158,7 @@ Termux 专用步骤见 [各平台启动](start.md)。
 
 ## 相关文档
 
-- [如何运作](how-it-works.md) · [English](how-it-works.en.md)  
-- [产品文档首页](README.md)  
-- [插件生态](../ecosystem/plugins.md)  
+- [如何运作](how-it-works.md)
+- [各平台启动](start.md)
+- [产品文档首页](README.md)
+- [插件生态](../ecosystem/plugins.md)

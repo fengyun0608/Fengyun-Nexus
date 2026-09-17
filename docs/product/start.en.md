@@ -1,6 +1,6 @@
 # Start on each platform
 
-[← 中文](start.md)
+[中文](start.md) | English
 
 **One console only:** open http://127.0.0.1:8787/ after boot.
 

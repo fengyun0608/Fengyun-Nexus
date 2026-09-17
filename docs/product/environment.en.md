@@ -1,6 +1,6 @@
 # Environment & Installation
 
-[← 中文](environment.md)
+[中文](environment.md) | English
 
 **Required:** Node.js ≥ 20, pnpm, Git, browser.  
 **Platforms:** Windows / Linux / macOS / Termux.

@@ -1,8 +1,10 @@
 # 产品文档
 
-- [各平台启动](start.md) · [Start (English)](start.en.md)
-- [环境要求与安装](environment.md) · [Environment (English)](environment.en.md)
-- [如何运作（中文）](how-it-works.md) · [How it works (English)](how-it-works.en.md)
+进入各页后，用页顶 **中文 | English** 切换语言。
+
+- [如何运作](how-it-works.md)
+- [环境要求](environment.md)
+- [各平台启动](start.md)
 - [规划总图](planning.md)
 - [能力鱼骨](fishbone.md)
 - [目录鱼骨](directory.md)

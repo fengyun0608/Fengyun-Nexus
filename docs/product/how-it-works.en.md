@@ -1,6 +1,6 @@
 # How Fengyun Nexus Works
 
-[← 中文](how-it-works.md)
+[中文](how-it-works.md) | English
 
 ## Is the repository connected?
 
@@ -64,5 +64,6 @@ Set `NEXUS_ENV` to `mobile`, `desktop` (default), or `server`. See `configs/env.
 
 ## Related
 
-- [Environment & install](environment.en.md) · [中文](environment.md)  
-- [Planning](planning.md) · [Fishbone](fishbone.md) · [Directory](directory.md) · [Ecosystem](../ecosystem/plugins.md)
+- [Environment & install](environment.en.md)
+- [Start](start.en.md)
+- [Planning](planning.md) · [Fishbone](fishbone.md) · [Directory](directory.md) · [Ecosystem](../ecosystem/plugins.en.md)
