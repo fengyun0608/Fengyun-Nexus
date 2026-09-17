@@ -400,23 +400,63 @@ async function executeInstall(task: EnvTask): Promise<void> {
 }
 
 async function installBrowser(task: EnvTask): Promise<void> {
-  setProgress(task, 15);
+  setProgress(task, 12);
   appendLog(task, "准备 Playwright Chromium（生图 / 截菜单用）");
-  const npx = which("npx") || which("npx.cmd");
-  if (npx) {
-    setProgress(task, 35);
-    const code = await runCmd(task, npx, ["--yes", "playwright", "install", "chromium"], {
-      cwd: rootDir,
-    });
-    setProgress(task, 85);
-    if (code !== 0) {
-      appendLog(task, "playwright install 非零退出，写入本地就绪标记供后续重试");
+  mkdirSync(runtimeHome("browser"), { recursive: true });
+
+  const pnpmBin = which("pnpm") || which("pnpm.cmd");
+  const nodeBin = which("node") || which("node.exe") || process.execPath;
+
+  // 1) 确保工作区装有 playwright 包（挂在 z-draw）
+  if (pnpmBin) {
+    setProgress(task, 28);
+    appendLog(task, "安装 npm 包 playwright（@fengyun/z-draw）");
+    const addCode = await runCmd(
+      task,
+      pnpmBin,
+      ["--filter", "@fengyun/z-draw", "add", "playwright@^1.49.0"],
+      { cwd: rootDir },
+    );
+    if (addCode !== 0) {
+      appendLog(task, "pnpm add playwright 失败，继续尝试已有包");
     }
-  } else {
-    appendLog(task, "未找到 npx，跳过下载；写入就绪标记（可稍后在有 Node 的环境补装）");
-    setProgress(task, 70);
   }
+
+  // 2) 下载 Chromium 浏览器本体
+  setProgress(task, 45);
+  let code = 1;
+  if (pnpmBin) {
+    appendLog(task, "下载 Chromium：pnpm exec playwright install chromium");
+    code = await runCmd(
+      task,
+      pnpmBin,
+      ["exec", "playwright", "install", "chromium"],
+      { cwd: rootDir },
+    );
+  }
+  if (code !== 0) {
+    // 回退：node node_modules/playwright/cli.js
+    const cli = [
+      join(rootDir, "node_modules", "playwright", "cli.js"),
+      join(rootDir, "plugins", "z-draw", "node_modules", "playwright", "cli.js"),
+    ].find((p) => existsSync(p));
+    if (cli && nodeBin) {
+      appendLog(task, `回退：node ${cli} install chromium`);
+      code = await runCmd(task, nodeBin, [cli, "install", "chromium"], {
+        cwd: rootDir,
+      });
+    }
+  }
+
+  setProgress(task, 88);
+  if (code !== 0) {
+    throw new Error(
+      "playwright install chromium 失败。可手动：pnpm exec playwright install chromium",
+    );
+  }
+
   writeFileSync(join(runtimeHome("browser"), "ready"), `${now()}\n`, "utf8");
+  appendLog(task, "Chromium 已就绪");
   setProgress(task, 95);
 }
 

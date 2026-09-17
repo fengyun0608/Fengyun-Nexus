@@ -2,6 +2,7 @@
  * Render HTML with the framework browser runtime and take a screenshot.
  * Prefer Playwright Chromium when installed via 环境配置 → 浏览器.
  */
+import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,6 +15,44 @@ function projectRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   // plugins/z-draw → repo root
   return resolve(join(here, "..", ".."));
+}
+
+async function loadPlaywright(): Promise<{
+  chromium: {
+    launch: (opts?: Record<string, unknown>) => Promise<{
+      newPage: (opts?: Record<string, unknown>) => Promise<{
+        setDefaultTimeout: (ms: number) => void;
+        goto: (url: string, opts?: Record<string, unknown>) => Promise<unknown>;
+        locator: (sel: string) => {
+          screenshot: (opts: Record<string, unknown>) => Promise<unknown>;
+        };
+      }>;
+      close: () => Promise<void>;
+    }>;
+  };
+} | null> {
+  const root = projectRoot();
+  try {
+    const req = createRequire(join(root, "plugins/z-draw/package.json"));
+    const mod = req("playwright") as { chromium?: unknown };
+    if (mod?.chromium) return mod as never;
+  } catch {
+    /* fall through */
+  }
+  try {
+    const req = createRequire(join(root, "package.json"));
+    const mod = req("playwright") as { chromium?: unknown };
+    if (mod?.chromium) return mod as never;
+  } catch {
+    /* fall through */
+  }
+  try {
+    const mod = await import("playwright");
+    if (mod?.chromium) return mod as never;
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 export function menuHtml(title: string, lines: string[]): string {
@@ -98,32 +137,32 @@ export async function renderMenuShot(opts: {
   writeFileSync(htmlPath, menuHtml(opts.title, opts.lines), "utf8");
 
   try {
-    // Optional dependency — install via 环境配置 / npm i playwright
-    const pw = await import("playwright").catch(() => null);
+    const pw = await loadPlaywright();
     if (!pw?.chromium) {
       return {
         ok: false,
         htmlPath,
-        message: "未装浏览器运行时。请在「环境配置」安装浏览器，或 npm i playwright",
+        message:
+          "未装 Playwright。请在控制台「环境配置」安装浏览器，或在项目根执行：pnpm --filter @fengyun/z-draw add playwright && pnpm exec playwright install chromium",
       };
     }
     const browser = await pw.chromium.launch({
       headless: true,
       executablePath: process.env.NEXUS_BROWSER_BIN || undefined,
-      timeout: 20_000,
+      timeout: 60_000,
     });
     try {
       const page = await browser.newPage({
         viewport: { width: 800, height: 1000 },
         deviceScaleFactor: 2,
       });
-      page.setDefaultTimeout(15_000);
+      page.setDefaultTimeout(20_000);
       await page.goto(pathToFileURL(htmlPath).href, {
         waitUntil: "domcontentloaded",
-        timeout: 15_000,
+        timeout: 20_000,
       });
       const el = page.locator("#shot");
-      await el.screenshot({ path: pngPath, type: "png", timeout: 10_000 });
+      await el.screenshot({ path: pngPath, type: "png", timeout: 15_000 });
     } finally {
       await browser.close();
     }
@@ -132,10 +171,14 @@ export async function renderMenuShot(opts: {
     }
     return { ok: true, htmlPath, pngPath };
   } catch (e) {
+    const tip = e instanceof Error ? e.message : String(e);
+    const hint = /Executable doesn't exist|browserType\.launch/i.test(tip)
+      ? `${tip}\n请执行：pnpm exec playwright install chromium`
+      : tip;
     return {
       ok: false,
       htmlPath,
-      message: e instanceof Error ? e.message : String(e),
+      message: hint,
     };
   }
 }

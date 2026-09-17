@@ -4,9 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@fengyun/nexus-plugin-sdk": "workspace:*"
-  },
-  "optionalDependencies": {
-    "playwright": "^1.49.0"
+    "@fengyun/nexus-plugin-sdk": "workspace:*",
+    "playwright": "^1.63.0"
   }
 }
