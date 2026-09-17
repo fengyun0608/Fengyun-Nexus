@@ -19,8 +19,8 @@ export class LlmRouter {
 
     if (!this.opts.apiKey) {
       return text
-        ? `【Nexus 本地回复】已收到：${text}\n（未配置模型密钥时使用本地回声。设置 NEXUS_LLM_API_KEY 可接入兼容接口。）`
-        : "你好，我是 Fengyun Nexus。在框架内对话、管理插件与通道，从这里开始。";
+        ? `【风云枢纽 · 本地回复】已收到：${text}\n（未配置模型密钥时使用本地回声。可用 pnpm nexus set llm-key 配置。）`
+        : "你好，我是风云枢纽。在控制台对话、管理适配器与插件，从这里开始。";
     }
 
     const base = (this.opts.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");

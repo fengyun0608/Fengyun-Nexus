@@ -88,9 +88,9 @@ async function main() {
   }
 
   const port = process.env.PORT || "8787";
-  console.log(`[Nexus] env=${process.env.NEXUS_ENV}`);
-  console.log(`[Nexus] Console (only)  http://127.0.0.1:${port}/`);
-  console.log("[Nexus] Login bootstrap: console / console  |  or: pnpm nexus setup");
+  console.log(`[风云枢纽] 姿态=${process.env.NEXUS_ENV}`);
+  console.log(`[风云枢纽] 控制台（唯一） http://127.0.0.1:${port}/`);
+  console.log("[风云枢纽] 初始账号 console / console  |  或执行: pnpm nexus setup");
 
   await run(["--filter", "@fengyun/nexus-gateway", "dev"]);
 }

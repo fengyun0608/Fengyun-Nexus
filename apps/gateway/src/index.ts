@@ -187,7 +187,7 @@ plugins.register(
       permissions: ["channel.send"],
     },
     onReady(ctx) {
-      ctx.log("echo ready");
+      ctx.log("内置回声插件已就绪");
     },
     onMessage(msg) {
       if (!msg.content.startsWith("/echo ")) return null;
@@ -252,13 +252,13 @@ function authMiddleware(
   const header = req.headers.authorization ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
   if (!token) {
-    res.status(401).json({ error: "unauthorized" });
+    res.status(401).json({ error: "未授权，请先登录" });
     return;
   }
   const rec = tokens.get(hashToken(token));
   if (!rec || rec.exp < Date.now()) {
     if (rec) tokens.delete(hashToken(token));
-    res.status(401).json({ error: "session expired" });
+    res.status(401).json({ error: "登录已过期，请重新登录" });
     return;
   }
   (req as express.Request & { adminUser?: string }).adminUser = rec.user;
@@ -278,7 +278,7 @@ async function handleChat(raw: unknown): Promise<{ replies: unknown[]; assistant
   const pluginReplies = await plugins.onMessage(msg, (id) => ({
     pluginId: id,
     reply: async () => undefined,
-    log: (m) => console.log(`[plugin:${id}]`, m),
+    log: (m) => console.log(`[插件:${id}]`, m),
   }));
 
   let assistant: string;
@@ -351,7 +351,7 @@ app.post("/v1/admin/login", (req, res) => {
     !safeEqual(username, expectUser) ||
     !safeEqual(password, expectPass)
   ) {
-    res.status(401).json({ error: "invalid credentials" });
+    res.status(401).json({ error: "用户名或密码错误" });
     return;
   }
   const token = issueToken(expectUser);
@@ -362,7 +362,7 @@ app.post("/v1/admin/login", (req, res) => {
     expiresInHours: adminCfg.sessionHours || 12,
     mustReconfigure,
     message: mustReconfigure
-      ? "首次登录：请立即在控制台重新配置用户名与密码，然后重新登录。"
+      ? "首次登录：请立即设置正式用户名与密码，然后重新登录。"
       : undefined,
   });
 });
@@ -379,7 +379,7 @@ app.get("/v1/admin/me", authMiddleware, (req, res) => {
 
 app.get("/v1/admin/overview", authMiddleware, (req, res) => {
   if (!adminCfg.setupCompleted) {
-    res.status(403).json({ error: "setup_required", message: "请先完成用户名与密码配置。" });
+    res.status(403).json({ error: "请先完成账号设置", message: "请先完成用户名与密码配置。" });
     return;
   }
   res.json({
@@ -397,7 +397,7 @@ app.get("/v1/admin/overview", authMiddleware, (req, res) => {
 app.post("/v1/admin/setup-credentials", authMiddleware, (req, res) => {
   const { username, password, confirmPassword } = req.body ?? {};
   if (typeof username !== "string" || typeof password !== "string") {
-    res.status(400).json({ error: "invalid payload" });
+    res.status(400).json({ error: "请求参数无效" });
     return;
   }
   const uErr = validateUsername(username.trim());
@@ -434,12 +434,12 @@ app.post("/v1/admin/setup-credentials", authMiddleware, (req, res) => {
 /** Update username and/or password after setup; invalidates all sessions. */
 app.post("/v1/admin/credentials", authMiddleware, (req, res) => {
   if (!adminCfg.setupCompleted) {
-    res.status(403).json({ error: "setup_required" });
+    res.status(403).json({ error: "请先完成账号设置" });
     return;
   }
   const { currentPassword: cur, username, password, confirmPassword } = req.body ?? {};
   if (typeof cur !== "string" || !safeEqual(cur, currentPassword())) {
-    res.status(401).json({ error: "current password mismatch" });
+    res.status(401).json({ error: "当前密码不正确" });
     return;
   }
   let nextUser = adminCfg.username;
@@ -549,7 +549,7 @@ app.post("/v1/channels/webhook", async (req, res) => {
   const pluginReplies = await plugins.onMessage(msg, (id) => ({
     pluginId: id,
     reply: async () => undefined,
-    log: (m) => console.log(`[plugin:${id}]`, m),
+    log: (m) => console.log(`[插件:${id}]`, m),
   }));
   const assistant = pluginReplies[0]?.content
     ?? (await llm.chat([{ role: "user", content: msg.content }]));
@@ -585,9 +585,9 @@ const port = Number(process.env.PORT ?? profile.gateway.port);
 const host = process.env.HOST ?? profile.gateway.host;
 
 app.listen(port, host, () => {
-  console.log(`[Nexus] env=${profile.id} http://${host}:${port}`);
+  console.log(`[风云枢纽] 环境=${profile.id}  http://${host}:${port}`);
   console.log(
-    `[Nexus] admin user=${adminCfg.username} setupCompleted=${adminCfg.setupCompleted} sessionHours=${adminCfg.sessionHours}`,
+    `[风云枢纽] 管理账号=${adminCfg.username} 已完成首次设置=${adminCfg.setupCompleted ? "是" : "否"} 会话小时=${adminCfg.sessionHours}`,
   );
-  console.log(`[Nexus] Console http://127.0.0.1:${port}/`);
+  console.log(`[风云枢纽] 控制台 http://127.0.0.1:${port}/`);
 });

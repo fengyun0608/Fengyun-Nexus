@@ -3,136 +3,319 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#121410" />
-  <title>Fengyun Nexus</title>
+  <meta name="theme-color" content="#0e1410" />
+  <title>风云枢纽 · Fengyun Nexus</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg0:#121410; --bg1:#1a1f18; --ink:#f2efe6; --muted:#a7b0a0;
-      --line:rgba(232,165,75,.22); --amber:#e8a54b; --amber2:#c4842f; --sage:#8fad7a; --danger:#d4644a;
-      --side:248px;
+      --bg0: #0e1410;
+      --bg1: #152019;
+      --bg2: #1c2a22;
+      --card: rgba(28, 42, 34, 0.88);
+      --ink: #f4f1e8;
+      --muted: #9aab9c;
+      --line: rgba(232, 165, 75, 0.28);
+      --amber: #f0b45a;
+      --amber2: #d4892e;
+      --sage: #7ec98a;
+      --teal: #4ec4b0;
+      --coral: #e07a5f;
+      --sky: #6eb5d0;
+      --danger: #e06b5c;
+      --side: 260px;
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
+      --font: "DM Sans", "Segoe UI", sans-serif;
+      --display: "ZCOOL XiaoWei", "DM Sans", serif;
     }
-    *{box-sizing:border-box}
-    html,body{height:100%;margin:0}
-    body{
-      font-family:system-ui,sans-serif;color:var(--ink);
-      background:radial-gradient(800px 400px at 10% -10%,rgba(143,173,122,.14),transparent 55%),
-        radial-gradient(700px 360px at 100% 0%,rgba(232,165,75,.1),transparent 50%),
-        linear-gradient(165deg,#121410,#1a1f18);
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: var(--font);
+      color: var(--ink);
+      background:
+        radial-gradient(900px 520px at -10% -20%, rgba(78, 196, 176, 0.18), transparent 55%),
+        radial-gradient(800px 480px at 110% 0%, rgba(240, 180, 90, 0.2), transparent 50%),
+        radial-gradient(600px 400px at 50% 110%, rgba(126, 201, 138, 0.12), transparent 55%),
+        linear-gradient(160deg, var(--bg0), var(--bg1) 40%, #101816);
+      overflow: hidden;
     }
-    .hide{display:none!important}
-    .err{color:var(--danger);font-size:.9rem}
-    .muted{color:var(--muted);font-size:.88rem;line-height:1.45}
-    input,textarea{width:100%;border-radius:10px;border:1px solid var(--line);background:#121410;color:var(--ink);padding:11px;font:inherit}
-    textarea{min-height:64px;resize:vertical}
-    .btn{border:0;border-radius:10px;padding:11px 14px;background:linear-gradient(180deg,var(--amber),var(--amber2));color:#1a1208;font-weight:700;cursor:pointer}
-    .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
-    .btn.block{width:100%}
+    .hide { display: none !important; }
+    .err { color: var(--danger); font-size: 0.9rem; min-height: 1.2em; }
+    .ok-tip { color: var(--sage); font-size: 0.9rem; }
+    .muted { color: var(--muted); font-size: 0.88rem; line-height: 1.5; }
+    input, textarea {
+      width: 100%; border-radius: 12px; border: 1px solid var(--line);
+      background: rgba(14, 20, 16, 0.85); color: var(--ink); padding: 12px 14px;
+      font: inherit; transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+    }
+    input:focus, textarea:focus {
+      outline: none; border-color: rgba(240, 180, 90, 0.55);
+      box-shadow: 0 0 0 3px rgba(240, 180, 90, 0.15);
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    .btn {
+      border: 0; border-radius: 12px; padding: 12px 16px; cursor: pointer; font: inherit; font-weight: 700;
+      background: linear-gradient(135deg, var(--amber), var(--amber2));
+      color: #1a1208; transition: transform 0.18s var(--ease), filter 0.18s, box-shadow 0.18s;
+      box-shadow: 0 8px 24px rgba(212, 137, 46, 0.25);
+    }
+    .btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn.ghost {
+      background: transparent; color: var(--ink); border: 1px solid var(--line);
+      box-shadow: none; font-weight: 600;
+    }
+    .btn.ghost:hover { background: rgba(240, 180, 90, 0.08); }
+    .btn.teal {
+      background: linear-gradient(135deg, var(--teal), #2a9d8f);
+      color: #06241f; box-shadow: 0 8px 24px rgba(78, 196, 176, 0.22);
+    }
+    .btn.block { width: 100%; }
+    .btn:disabled { opacity: 0.55; cursor: wait; transform: none; }
 
-    /* —— login / setup pages —— */
-    .gate{
-      min-height:100%;display:grid;place-items:center;padding:20px;
+    .gate {
+      height: 100%; display: grid; place-items: center; padding: 20px;
+      animation: fadeIn 0.45s var(--ease);
     }
-    .gate-card{
-      width:min(100%,400px);background:rgba(26,31,24,.92);border:1px solid var(--line);
-      border-radius:16px;padding:28px 22px;box-shadow:0 18px 50px rgba(0,0,0,.35);
+    .gate-card {
+      width: min(100%, 420px); background: var(--card);
+      border: 1px solid var(--line); border-radius: 20px; padding: 32px 26px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(12px);
+      animation: rise 0.5s var(--ease);
     }
-    .gate-card h1{margin:0 0 6px;font-size:1.45rem;color:var(--amber)}
-    .gate-card .lead{margin:0 0 18px}
-    .gate-form{display:grid;gap:12px}
+    .gate-card .badge {
+      display: inline-block; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--teal); border: 1px solid rgba(78, 196, 176, 0.35); border-radius: 999px;
+      padding: 4px 10px; margin-bottom: 12px;
+    }
+    .gate-card h1 {
+      margin: 0 0 8px; font-family: var(--display); font-size: 1.85rem; font-weight: 400;
+      background: linear-gradient(90deg, var(--amber), var(--sage));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .gate-form { display: grid; gap: 12px; margin-top: 8px; }
 
-    /* —— app shell —— */
-    #appShell{height:100%;display:grid;grid-template-columns:var(--side) 1fr}
-    #appShell.collapsed{grid-template-columns:0 1fr}
-    .topbar{
-      position:fixed;left:0;top:0;z-index:40;display:flex;align-items:center;gap:10px;
-      padding:10px 12px;pointer-events:none;
+    #appShell {
+      height: 100%; display: grid; grid-template-columns: var(--side) 1fr;
+      transition: grid-template-columns 0.35s var(--ease);
+      animation: fadeIn 0.4s var(--ease);
     }
-    .hamburger{
-      pointer-events:auto;width:40px;height:40px;border:1px solid var(--line);
-      border-radius:10px;background:rgba(26,31,24,.95);cursor:pointer;
-      display:flex;flex-direction:column;justify-content:center;align-items:center;gap:5px;
+    #appShell.collapsed { grid-template-columns: 0 1fr; }
+    .topbar {
+      position: fixed; left: 12px; top: 12px; z-index: 50;
     }
-    .hamburger span{display:block;width:18px;height:2px;background:var(--ink);border-radius:1px}
-    aside{
-      border-right:1px solid var(--line);background:rgba(18,20,16,.96);
-      overflow:auto;display:flex;flex-direction:column;padding-top:52px;
+    .hamburger {
+      width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 12px;
+      background: rgba(28, 42, 34, 0.95); cursor: pointer;
+      display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 5px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      transition: background 0.2s, transform 0.2s var(--ease);
     }
-    #appShell.collapsed aside{display:none}
-    .brand{padding:4px 14px 12px;border-bottom:1px solid var(--line)}
-    .brand strong{color:var(--amber)}
-    .brand span{display:block;color:var(--muted);font-size:.78rem;margin-top:2px}
-    .g-btn{width:100%;text-align:left;background:0;border:0;color:var(--ink);padding:10px 12px;font-weight:700;cursor:pointer}
-    .g-btn:hover{background:rgba(232,165,75,.06)}
-    .items{padding:0 8px 8px 16px;display:none;gap:2px}
-    .open .items{display:grid}
-    .item{background:0;border:0;color:var(--muted);text-align:left;padding:8px 10px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between}
-    .item.on,.item:hover{background:rgba(232,165,75,.12);color:var(--ink)}
-    .item em{font-style:normal;font-size:.7rem;color:var(--sage);border:1px solid rgba(143,173,122,.35);border-radius:999px;padding:1px 6px}
-    .side-foot{margin-top:auto;padding:12px;border-top:1px solid var(--line);display:grid;gap:8px}
-    main{min-width:0;overflow:auto;padding:56px 12px 12px}
-    .panel{background:rgba(26,31,24,.9);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-height:calc(100vh - 68px);display:flex;flex-direction:column}
-    .hero{padding:14px;border-bottom:1px solid var(--line)}
-    .hero h1{margin:0 0 4px;font-size:1.2rem}
-    .hero p{margin:0;color:var(--muted);font-size:.9rem}
-    .log{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px;min-height:40vh}
-    .b{max-width:92%;padding:10px 12px;border-radius:12px;white-space:pre-wrap;line-height:1.45}
-    .u{align-self:flex-end;background:rgba(232,165,75,.18);border:1px solid rgba(232,165,75,.35)}
-    .a{align-self:flex-start;background:rgba(143,173,122,.12);border:1px solid rgba(143,173,122,.28)}
-    .composer,.form{display:grid;gap:8px;padding:12px}
-    .composer{border-top:1px solid var(--line)}
-    .row{display:flex;justify-content:space-between;align-items:center;padding:10px;border:1px solid var(--line);border-radius:10px;margin:8px 12px}
-    @media(max-width:720px){
-      #appShell{grid-template-columns:1fr}
-      aside{position:fixed;inset:0 auto 0 0;width:min(86vw,280px);z-index:30;box-shadow:8px 0 30px rgba(0,0,0,.4)}
-      #appShell.collapsed aside{display:none}
+    .hamburger:hover { background: rgba(240, 180, 90, 0.12); transform: scale(1.04); }
+    .hamburger span {
+      display: block; width: 18px; height: 2px; background: var(--ink); border-radius: 2px;
+      transition: transform 0.25s var(--ease), opacity 0.2s;
+    }
+    #appShell:not(.collapsed) .hamburger span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    #appShell:not(.collapsed) .hamburger span:nth-child(2) { opacity: 0; }
+    #appShell:not(.collapsed) .hamburger span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+    aside {
+      border-right: 1px solid var(--line); background: rgba(14, 20, 16, 0.92);
+      overflow: auto; display: flex; flex-direction: column; padding-top: 64px;
+      backdrop-filter: blur(10px);
+      transition: opacity 0.3s var(--ease), transform 0.35s var(--ease);
+    }
+    #appShell.collapsed aside {
+      opacity: 0; pointer-events: none; transform: translateX(-12px);
+    }
+    .brand { padding: 4px 16px 14px; border-bottom: 1px solid var(--line); }
+    .brand strong {
+      font-family: var(--display); font-size: 1.25rem; font-weight: 400;
+      color: var(--amber);
+    }
+    .brand span { display: block; color: var(--muted); font-size: 0.78rem; margin-top: 4px; }
+    .g-btn {
+      width: 100%; text-align: left; background: 0; border: 0; color: var(--ink);
+      padding: 11px 14px; font-weight: 700; cursor: pointer; transition: background 0.15s;
+    }
+    .g-btn:hover { background: rgba(78, 196, 176, 0.08); }
+    .items { padding: 0 10px 10px 14px; display: none; gap: 3px; }
+    .open .items { display: grid; animation: rise 0.25s var(--ease); }
+    .item {
+      background: 0; border: 0; color: var(--muted); text-align: left; padding: 9px 11px;
+      border-radius: 10px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+      transition: background 0.15s, color 0.15s, transform 0.15s var(--ease);
+    }
+    .item:hover { background: rgba(240, 180, 90, 0.1); color: var(--ink); transform: translateX(2px); }
+    .item.on {
+      background: linear-gradient(90deg, rgba(240, 180, 90, 0.18), rgba(78, 196, 176, 0.08));
+      color: var(--ink); border: 1px solid rgba(240, 180, 90, 0.2);
+    }
+    .item em {
+      font-style: normal; font-size: 0.68rem; color: var(--sage);
+      border: 1px solid rgba(126, 201, 138, 0.4); border-radius: 999px; padding: 2px 7px;
+      background: rgba(126, 201, 138, 0.08);
+    }
+    .side-foot { margin-top: auto; padding: 14px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+
+    main {
+      min-width: 0; overflow: auto; padding: 64px 16px 16px;
+      scroll-behavior: smooth;
+    }
+    .panel {
+      background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+      overflow: hidden; min-height: calc(100vh - 80px); display: flex; flex-direction: column;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+      animation: rise 0.4s var(--ease);
+    }
+    .hero {
+      padding: 18px 18px 14px; border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(120deg, rgba(240, 180, 90, 0.14), transparent 45%),
+        linear-gradient(0deg, transparent, rgba(78, 196, 176, 0.06));
+    }
+    .hero h1 { margin: 0 0 6px; font-family: var(--display); font-size: 1.45rem; font-weight: 400; }
+    .hero p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+
+    .log {
+      flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-height: 42vh;
+    }
+    .b {
+      max-width: min(92%, 640px); padding: 12px 14px; border-radius: 16px;
+      white-space: pre-wrap; line-height: 1.55;
+      animation: bubble 0.3s var(--ease);
+    }
+    .u {
+      align-self: flex-end;
+      background: linear-gradient(135deg, rgba(240, 180, 90, 0.28), rgba(212, 137, 46, 0.16));
+      border: 1px solid rgba(240, 180, 90, 0.4);
+    }
+    .a {
+      align-self: flex-start;
+      background: linear-gradient(135deg, rgba(78, 196, 176, 0.16), rgba(126, 201, 138, 0.1));
+      border: 1px solid rgba(78, 196, 176, 0.32);
+    }
+    .composer { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 14px; border-top: 1px solid var(--line); }
+    .form { display: grid; gap: 10px; padding: 16px; }
+
+    .grid-cards {
+      display: grid; gap: 12px; padding: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    }
+    .card {
+      border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+      background: rgba(14, 20, 16, 0.55);
+      transition: transform 0.2s var(--ease), border-color 0.2s, box-shadow 0.2s;
+      animation: rise 0.35s var(--ease) both;
+    }
+    .card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(78, 196, 176, 0.4);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
+    }
+    .card h3 { margin: 0 0 4px; font-size: 1rem; }
+    .card .tag {
+      display: inline-flex; align-items: center; gap: 6px; font-size: 0.72rem;
+      padding: 3px 8px; border-radius: 999px; margin-top: 10px;
+    }
+    .tag.on { color: var(--sage); background: rgba(126, 201, 138, 0.12); border: 1px solid rgba(126, 201, 138, 0.35); }
+    .tag.load { color: var(--sky); background: rgba(110, 181, 208, 0.12); border: 1px solid rgba(110, 181, 208, 0.35); }
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%; background: var(--sage);
+      box-shadow: 0 0 0 0 rgba(126, 201, 138, 0.5);
+      animation: pulse 1.6s infinite;
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }
+    .chip {
+      border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; font-size: 0.82rem; color: var(--muted);
+      background: rgba(14, 20, 16, 0.4);
+    }
+    .chip strong { color: var(--amber); }
+    .chip.teal strong { color: var(--teal); }
+    .chip.sage strong { color: var(--sage); }
+    .code-block {
+      margin: 0 16px 16px; padding: 14px; overflow: auto; font-size: 12px; color: var(--muted);
+      background: rgba(0, 0, 0, 0.28); border-radius: 12px; border: 1px solid var(--line); max-height: 50vh;
+    }
+    .loading {
+      display: flex; align-items: center; gap: 10px; padding: 24px 16px; color: var(--muted);
+    }
+    .spinner {
+      width: 18px; height: 18px; border: 2px solid rgba(240, 180, 90, 0.2);
+      border-top-color: var(--amber); border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    @keyframes bubble { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(126, 201, 138, 0.45); }
+      70% { box-shadow: 0 0 0 8px rgba(126, 201, 138, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(126, 201, 138, 0); }
+    }
+
+    @media (max-width: 800px) {
+      #appShell { grid-template-columns: 1fr; }
+      aside {
+        position: fixed; inset: 0 auto 0 0; width: min(88vw, 300px); z-index: 40;
+        box-shadow: 12px 0 40px rgba(0, 0, 0, 0.45);
+      }
+      #appShell.collapsed aside { display: none; }
+      .composer { grid-template-columns: 1fr; }
+      .composer .btn { width: 100%; }
     }
   </style>
 </head>
 <body>
-  <!-- Independent login page -->
   <section id="pageLogin" class="gate">
     <div class="gate-card">
-      <h1>Fengyun Nexus</h1>
-      <p class="lead muted">请登录后进入控制台</p>
+      <div class="badge">控制台</div>
+      <h1>风云枢纽</h1>
+      <p class="muted">请登录后进入控制台</p>
       <div class="gate-form">
         <input id="loginUser" placeholder="用户名" autocomplete="username" />
         <input id="loginPass" type="password" placeholder="密码" autocomplete="current-password" />
         <div class="err" id="loginErr"></div>
+        <div class="ok-tip" id="loginTip"></div>
         <button class="btn block" id="loginBtn" type="button">登录</button>
         <p class="muted">初始账号 console / console。首次登录后须设置正式账号。</p>
       </div>
     </div>
   </section>
 
-  <!-- First-time credential setup (still not console) -->
   <section id="pageSetup" class="gate hide">
     <div class="gate-card">
+      <div class="badge">首次设置</div>
       <h1>设置账号</h1>
-      <p class="lead muted">用户名：4–8 位英文字母。密码：≥10 位，含大小写、数字与特殊字符。</p>
+      <p class="muted">用户名：4–8 位英文字母。密码：≥10 位，含大小写、数字与特殊字符。</p>
       <div class="gate-form">
         <input id="su" placeholder="新用户名（英文 4–8 位）" />
         <input id="sp" type="password" placeholder="新密码" />
         <input id="sp2" type="password" placeholder="确认密码" />
         <div class="err" id="setupErr"></div>
-        <button class="btn block" id="setupBtn" type="button">保存并重新登录</button>
+        <button class="btn teal block" id="setupBtn" type="button">保存并重新登录</button>
       </div>
     </div>
   </section>
 
-  <!-- Console (only after login + setup done) -->
-  <div id="appShell" class="hide">
+  <div id="appShell" class="hide collapsed">
     <div class="topbar">
       <button class="hamburger" id="hamburger" type="button" aria-label="菜单" title="展开/收起">
         <span></span><span></span><span></span>
       </button>
     </div>
-    <aside id="aside">
-      <div class="brand"><strong>Fengyun Nexus</strong><span id="envLabel">…</span></div>
+    <aside>
+      <div class="brand"><strong>风云枢纽</strong><span id="envLabel">…</span></div>
       <div class="group open">
         <button class="g-btn" type="button" data-toggle>▾ 工作区</button>
         <div class="items">
           <button class="item on" data-panel="chat" type="button">对话</button>
-          <button class="item" data-panel="status" type="button">运行状态 <em id="hBadge">…</em></button>
+          <button class="item" data-panel="status" type="button">运行状态</button>
           <button class="item" data-panel="config" type="button">配置</button>
         </div>
       </div>
@@ -145,8 +328,8 @@
       <div class="group open">
         <button class="g-btn" type="button" data-toggle>▾ 系统</button>
         <div class="items">
+          <button class="item" data-panel="plugins" type="button">已加载插件</button>
           <button class="item" data-panel="account" type="button">账号</button>
-          <button class="item" data-panel="plugins" type="button">插件</button>
         </div>
       </div>
       <div class="side-foot">
@@ -155,7 +338,7 @@
     </aside>
     <main>
       <section class="panel" id="viewChat">
-        <div class="hero"><h1>对话</h1><p>框架内聊天。</p></div>
+        <div class="hero"><h1>对话</h1><p>框架内聊天。可试 /echo 你好</p></div>
         <div class="log" id="log"></div>
         <div class="composer">
           <textarea id="input" placeholder="输入消息…"></textarea>
@@ -163,31 +346,34 @@
         </div>
       </section>
       <section class="panel hide" id="viewAdapters">
-        <div class="hero"><h1>适配器</h1><p>通道状态。</p></div>
-        <div id="adapterList"></div>
+        <div class="hero"><h1>适配器</h1><p>消息通道实时状态</p></div>
+        <div class="grid-cards" id="adapterList"></div>
       </section>
       <section class="panel hide" id="viewStatus">
-        <div class="hero"><h1>运行状态</h1></div>
-        <pre class="muted" id="statusPre" style="padding:12px;overflow:auto"></pre>
+        <div class="hero"><h1>运行状态</h1><p>网关与环境概览</p></div>
+        <div class="chips" id="statusChips"></div>
+        <pre class="code-block" id="statusPre"></pre>
       </section>
       <section class="panel hide" id="viewConfig">
-        <div class="hero"><h1>配置</h1><p>可用指令配置，不必改文件：pnpm nexus setup / env / set</p></div>
-        <p class="muted" style="padding:12px" id="configText"></p>
+        <div class="hero"><h1>配置</h1><p>可用指令配置：pnpm nexus setup / env / set</p></div>
+        <div class="chips" id="configChips"></div>
+        <p class="muted" style="padding:0 16px 16px" id="configText"></p>
+      </section>
+      <section class="panel hide" id="viewPlugins">
+        <div class="hero"><h1>已加载插件</h1><p>当前运行时已挂载的插件</p></div>
+        <div id="pluginLoading" class="loading hide"><div class="spinner"></div>正在加载插件列表…</div>
+        <div class="grid-cards" id="pluginList"></div>
       </section>
       <section class="panel hide" id="viewAccount">
-        <div class="hero"><h1>账号</h1><p>修改后全部登录态失效，需重新登录。</p></div>
+        <div class="hero"><h1>账号</h1><p>修改后全部登录态失效，需重新登录</p></div>
         <div class="form">
           <input id="curPass" type="password" placeholder="当前密码" />
           <input id="newUser" placeholder="新用户名（可空，英文 4–8）" />
           <input id="newPass" type="password" placeholder="新密码（可空，须高强度）" />
           <input id="newPass2" type="password" placeholder="确认新密码" />
           <div class="err" id="accErr"></div>
-          <button class="btn" id="accBtn" type="button">更新凭据</button>
+          <button class="btn teal" id="accBtn" type="button">更新凭据</button>
         </div>
-      </section>
-      <section class="panel hide" id="viewPlugins">
-        <div class="hero"><h1>插件</h1><p>已加载插件。</p></div>
-        <div id="pluginList"></div>
       </section>
     </main>
   </div>
@@ -195,13 +381,14 @@
   <script>
     let token = "";
     let mustReconfigure = false;
+    let busy = false;
 
     async function api(path, opts = {}) {
       const headers = { "content-type": "application/json", ...(opts.headers || {}) };
       if (opts.token) headers.authorization = "Bearer " + opts.token;
       const res = await fetch(path, { ...opts, headers });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || res.statusText);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.message || "请求失败");
       return data;
     }
 
@@ -209,13 +396,17 @@
       document.getElementById("pageLogin").classList.toggle("hide", which !== "login");
       document.getElementById("pageSetup").classList.toggle("hide", which !== "setup");
       document.getElementById("appShell").classList.toggle("hide", which !== "app");
+      if (which === "app") {
+        document.getElementById("appShell").classList.remove("collapsed");
+      }
     }
 
     function logout(msg) {
       token = "";
       mustReconfigure = false;
       show("login");
-      if (msg) document.getElementById("loginErr").textContent = msg;
+      document.getElementById("loginTip").textContent = msg || "";
+      document.getElementById("loginErr").textContent = "";
     }
 
     const log = document.getElementById("log");
@@ -226,7 +417,7 @@
       log.appendChild(d);
       log.scrollTop = log.scrollHeight;
     }
-    bubble("assistant", "欢迎使用 Fengyun Nexus。");
+    bubble("assistant", "欢迎使用风云枢纽。登录后即可在左侧展开目录。");
 
     document.getElementById("hamburger").onclick = () => {
       document.getElementById("appShell").classList.toggle("collapsed");
@@ -251,57 +442,94 @@
         plugins: "viewPlugins",
       };
       Object.values(map).forEach((vid) => document.getElementById(vid).classList.add("hide"));
-      document.getElementById(map[id]).classList.remove("hide");
-      document.querySelectorAll(".item").forEach((el) => el.classList.toggle("on", el.dataset.panel === id));
+      const el = document.getElementById(map[id]);
+      el.classList.remove("hide");
+      document.querySelectorAll(".item").forEach((x) => x.classList.toggle("on", x.dataset.panel === id));
+      if (id === "plugins") void loadPlugins();
     }
     document.querySelectorAll(".item").forEach((el) => {
       el.onclick = () => showPanel(el.dataset.panel);
     });
 
+    function card(title, sub, tagHtml, delay) {
+      const d = document.createElement("div");
+      d.className = "card";
+      d.style.animationDelay = (delay || 0) + "ms";
+      d.innerHTML = "<h3>" + title + "</h3><div class='muted'>" + sub + "</div>" + tagHtml;
+      return d;
+    }
+
     async function refreshConsole() {
+      const [m, ch, h] = await Promise.all([api("/v1/meta"), api("/v1/channels"), api("/health")]);
+      document.getElementById("envLabel").textContent = (m.env && (m.env.label || m.env.id)) || "未知环境";
+      document.getElementById("statusChips").innerHTML =
+        '<div class="chip sage">健康 <strong>' + (h.ok ? "正常" : "异常") + "</strong></div>" +
+        '<div class="chip">环境 <strong>' + (m.env?.id || "—") + "</strong></div>" +
+        '<div class="chip teal">通道 <strong>' + (ch.items || []).length + "</strong></div>" +
+        '<div class="chip">插件 <strong>' + (m.plugins?.loaded ?? "—") + "</strong></div>";
+      document.getElementById("statusPre").textContent = JSON.stringify({ 健康: h, 元信息: m }, null, 2);
+      document.getElementById("configChips").innerHTML =
+        '<div class="chip">姿态 <strong>' + (m.env?.id || "—") + "</strong></div>" +
+        '<div class="chip teal">插件数 <strong>' + (m.plugins?.loaded ?? 0) + "</strong></div>";
+      document.getElementById("configText").textContent = "本页为唯一控制台。本地配置不会上传。";
+
+      const box = document.getElementById("adapterList");
+      box.innerHTML = "";
+      const items = document.getElementById("chItems");
+      items.querySelectorAll("[data-ch]").forEach((n) => n.remove());
+      (ch.items || []).forEach((id, i) => {
+        box.appendChild(
+          card(id, "消息通道适配器", '<div class="tag on"><span class="dot"></span>运行中</div>', i * 60),
+        );
+        const b = document.createElement("button");
+        b.className = "item";
+        b.dataset.panel = "adapters";
+        b.dataset.ch = "1";
+        b.type = "button";
+        b.innerHTML = id + " <em>开</em>";
+        b.onclick = () => showPanel("adapters");
+        items.appendChild(b);
+      });
+      if (!(ch.items || []).length) {
+        box.innerHTML = '<p class="muted" style="padding:8px">暂无适配器</p>';
+      }
+    }
+
+    async function loadPlugins() {
+      const loading = document.getElementById("pluginLoading");
+      const list = document.getElementById("pluginList");
+      loading.classList.remove("hide");
+      list.innerHTML = "";
       try {
-        const [m, ch, h, pl] = await Promise.all([
-          api("/v1/meta"),
-          api("/v1/channels"),
-          api("/health"),
-          api("/v1/plugins"),
-        ]);
-        document.getElementById("envLabel").textContent = m.env?.label || m.env?.id || "";
-        document.getElementById("hBadge").textContent = h.ok ? "OK" : "?";
-        document.getElementById("statusPre").textContent = JSON.stringify({ health: h, meta: m }, null, 2);
-        document.getElementById("configText").textContent =
-          "姿态 " + (m.env?.id || "") + " · 已加载插件 " + (m.plugins?.loaded ?? (pl.items || []).length);
-        const box = document.getElementById("adapterList");
-        box.innerHTML = "";
-        const items = document.getElementById("chItems");
-        items.querySelectorAll("[data-ch]").forEach((n) => n.remove());
-        (ch.items || []).forEach((id) => {
-          const row = document.createElement("div");
-          row.className = "row";
-          row.innerHTML = "<div><strong>" + id + "</strong><div class='muted'>通道</div></div><em style='color:var(--sage)'>运行中</em>";
-          box.appendChild(row);
-          const b = document.createElement("button");
-          b.className = "item";
-          b.dataset.panel = "adapters";
-          b.dataset.ch = "1";
-          b.type = "button";
-          b.innerHTML = id + " <em>on</em>";
-          b.onclick = () => showPanel("adapters");
-          items.appendChild(b);
+        const pl = await api("/v1/plugins");
+        loading.classList.add("hide");
+        const arr = pl.items || [];
+        if (!arr.length) {
+          list.innerHTML = '<p class="muted">暂无已加载插件</p>';
+          return;
+        }
+        arr.forEach((p, i) => {
+          list.appendChild(
+            card(
+              p.name || p.id,
+              p.id + (p.version ? " · v" + p.version : ""),
+              '<div class="tag load"><span class="dot"></span>已加载</div>',
+              i * 70,
+            ),
+          );
         });
-        const plist = document.getElementById("pluginList");
-        plist.innerHTML = "";
-        (pl.items || []).forEach((p) => {
-          const row = document.createElement("div");
-          row.className = "row";
-          row.innerHTML = "<div><strong>" + p.name + "</strong><div class='muted'>" + p.id + "</div></div><em style='color:var(--sage)'>已加载</em>";
-          plist.appendChild(row);
-        });
-      } catch (_) {}
+      } catch (e) {
+        loading.classList.add("hide");
+        list.innerHTML = '<p class="err">加载失败：' + e.message + "</p>";
+      }
     }
 
     document.getElementById("loginBtn").onclick = async () => {
       document.getElementById("loginErr").textContent = "";
+      document.getElementById("loginTip").textContent = "";
+      const btn = document.getElementById("loginBtn");
+      btn.disabled = true;
+      btn.textContent = "登录中…";
       try {
         const r = await api("/v1/admin/login", {
           method: "POST",
@@ -322,8 +550,15 @@
         }
       } catch (e) {
         document.getElementById("loginErr").textContent = e.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "登录";
       }
     };
+
+    document.getElementById("loginPass").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") document.getElementById("loginBtn").click();
+    });
 
     document.getElementById("setupBtn").onclick = async () => {
       document.getElementById("setupErr").textContent = "";
@@ -343,7 +578,7 @@
       }
     };
 
-    document.getElementById("logoutBtn").onclick = () => logout();
+    document.getElementById("logoutBtn").onclick = () => logout("已退出登录");
 
     document.getElementById("accBtn").onclick = async () => {
       document.getElementById("accErr").textContent = "";
@@ -364,11 +599,15 @@
     };
 
     async function send() {
+      if (busy) return;
       const el = document.getElementById("input");
       const content = el.value.trim();
       if (!content) return;
       el.value = "";
       bubble("user", content);
+      busy = true;
+      const btn = document.getElementById("send");
+      btn.disabled = true;
       try {
         const r = await api("/v1/chat", {
           method: "POST",
@@ -376,7 +615,10 @@
         });
         bubble("assistant", r.assistant);
       } catch (e) {
-        bubble("assistant", "失败：" + e.message);
+        bubble("assistant", "发送失败：" + e.message);
+      } finally {
+        busy = false;
+        btn.disabled = false;
       }
     }
     document.getElementById("send").onclick = send;
