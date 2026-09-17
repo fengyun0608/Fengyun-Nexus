@@ -1,18 +1,29 @@
 #!/usr/bin/env bash
 # Fengyun Nexus — Termux / 手机端 唯一安装脚本
 #
-# 首次：不提问，直接装环境 + 克隆 + 启动
-# 已装：只问「重装环境」还是「重装框架」
+# 首次 / 残缺目录：不问，自动修环境 + 拉齐框架 + 启动
+# 完整已装：只问 1 重装环境 / 2 重装框架
 #
+# 推荐：
 #   pkg install git -y
 #   git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
 #   cd ~/Fengyun-Nexus && bash scripts/termux-setup.sh
 #
+# 目录已在但缺脚本（旧残缺仓）先拉齐再跑：
+#   cd ~/Fengyun-Nexus
+#   git fetch --depth 1 origin main
+#   git reset --hard origin/main
+#   bash scripts/termux-setup.sh
+#
 # 不要 curl GitCode /raw/… | bash
 set -euo pipefail
 
+# 兼容旧命令里的 NEXUS_INSTALL_YES=1，不再多问
+: "${NEXUS_INSTALL_YES:=0}"
+
 REPO_URL="${NEXUS_REPO_URL:-https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git}"
 INSTALL_DIR="${NEXUS_INSTALL_DIR:-$HOME/Fengyun-Nexus}"
+BRANCH="${NEXUS_BRANCH:-main}"
 
 is_termux() {
   [ -n "${TERMUX_VERSION:-}" ] || echo "${PREFIX:-}" | grep -q com.termux
@@ -29,6 +40,12 @@ ensure_git() {
     echo "未找到 git"
     exit 1
   fi
+}
+
+framework_ok() {
+  [ -f "$INSTALL_DIR/boot.sh" ] &&
+    [ -f "$INSTALL_DIR/package.json" ] &&
+    [ -f "$INSTALL_DIR/scripts/termux-setup.sh" ]
 }
 
 # 装 / 重装运行环境（无提问）
@@ -61,7 +78,20 @@ install_env() {
   echo "环境就绪  node=$(node -v)  pnpm=$(pnpm -v)"
 }
 
-# 克隆或强制重装框架（无提问）
+sync_git_tree() {
+  ensure_git
+  git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL" 2>/dev/null || \
+    git -C "$INSTALL_DIR" remote add origin "$REPO_URL" 2>/dev/null || true
+  git -C "$INSTALL_DIR" fetch --depth 1 origin "$BRANCH" || git -C "$INSTALL_DIR" fetch --depth 1 origin
+  if git -C "$INSTALL_DIR" rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
+    git -C "$INSTALL_DIR" reset --hard "origin/$BRANCH"
+  else
+    git -C "$INSTALL_DIR" reset --hard FETCH_HEAD
+  fi
+  git -C "$INSTALL_DIR" clean -fd
+}
+
+# 克隆 / 拉齐 / 强制重装框架（无提问）
 install_framework() {
   local force="${1:-0}"
   echo ">>> 安装框架 → $INSTALL_DIR"
@@ -75,25 +105,32 @@ install_framework() {
   fi
 
   if [ -d "$INSTALL_DIR/.git" ]; then
-    git -C "$INSTALL_DIR" fetch --all --prune || true
-    git -C "$INSTALL_DIR" pull --ff-only || git -C "$INSTALL_DIR" pull || true
+    echo "拉齐远程 $BRANCH…"
+    sync_git_tree
   else
-    if [ -d "$INSTALL_DIR" ] && [ ! -d "$INSTALL_DIR/.git" ]; then
-      echo "目录存在但不是 git 仓库，已改名为备份"
+    if [ -d "$INSTALL_DIR" ]; then
+      echo "目录存在但不是完整 git 仓，已改名备份"
       mv "$INSTALL_DIR" "${INSTALL_DIR}.bak.$(date +%s)"
     fi
-    git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" || \
+      git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+  fi
+
+  if ! framework_ok; then
+    echo "框架文件仍不完整，强制重装…"
+    rm -rf "$INSTALL_DIR"
+    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" || \
+      git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
   fi
 
   cd "$INSTALL_DIR"
-  chmod +x boot.sh restart.sh scripts/termux-setup.sh 2>/dev/null || true
+  chmod +x boot.sh restart.sh scripts/termux-setup.sh termux-install.sh 2>/dev/null || true
   export NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false
   export NEXUS_ENV="${NEXUS_ENV:-termux}"
   export NEXUS_BOOT_MODE="${NEXUS_BOOT_MODE:-lite}"
   if [ ! -f .npmrc ]; then
     printf 'manage-package-manager-versions=false\npackage-manager-strict=false\n' > .npmrc
   fi
-  # 标记已安装
   date -u +%Y-%m-%dT%H:%M:%SZ > "$INSTALL_DIR/.nexus-installed"
   echo "框架就绪  $INSTALL_DIR"
 }
@@ -105,16 +142,21 @@ boot_now() {
   exec ./boot.sh
 }
 
-already_installed() {
-  [ -d "$INSTALL_DIR/.git" ] || [ -f "$INSTALL_DIR/.nexus-installed" ]
-}
-
 echo ""
 echo "=== Fengyun Nexus · 手机端安装 ==="
 echo "目录: $INSTALL_DIR"
 echo ""
 
-if already_installed; then
+# 残缺仓：有目录但缺关键文件 → 不问，直接修
+if [ -d "$INSTALL_DIR" ] && ! framework_ok; then
+  echo "检测到残缺安装，自动修复…"
+  install_env
+  install_framework 0
+  boot_now
+fi
+
+# 完整已装：只问一次
+if framework_ok && { [ -d "$INSTALL_DIR/.git" ] || [ -f "$INSTALL_DIR/.nexus-installed" ]; }; then
   echo "检测到已安装。"
   echo "1) 重装环境"
   echo "2) 重装框架"
@@ -124,7 +166,7 @@ if already_installed; then
   case "$CHOICE" in
     1)
       install_env
-      echo "环境已重装。启动请执行：cd $INSTALL_DIR && ./boot.sh"
+      echo "环境已重装。启动：cd $INSTALL_DIR && ./boot.sh"
       ;;
     2)
       install_env
@@ -136,9 +178,10 @@ if already_installed; then
       exit 0
       ;;
   esac
-else
-  # 首次：全程不问
-  install_env
-  install_framework 0
-  boot_now
+  exit 0
 fi
+
+# 首次：全程不问
+install_env
+install_framework 0
+boot_now

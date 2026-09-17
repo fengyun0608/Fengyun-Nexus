@@ -24,12 +24,10 @@ chmod +x boot.sh && ./boot.sh
 
 ### Termux (Android)
 
-GitCode `/raw/` URLs often return HTML — **do not** `curl …/raw/… | bash`.
+One script: `scripts/termux-setup.sh` (alias `termux-install.sh`).
 
-One script only: `scripts/termux-setup.sh`
-
-- Not installed: no prompts — env + framework + boot
-- Already installed: only ask reinstall env or reinstall framework
+- Missing / broken tree: no prompts — repair env + sync + boot
+- Healthy install: ask once — `1` reinstall env / `2` reinstall framework
 
 ```bash
 pkg install git -y
@@ -38,7 +36,16 @@ cd ~/Fengyun-Nexus
 bash scripts/termux-setup.sh
 ```
 
-Use `pnpm@9` on Termux (no `@pnpm/exe` for android-arm64).
+If the folder already exists but the script is missing:
+
+```bash
+cd ~/Fengyun-Nexus
+git fetch --depth 1 origin main
+git reset --hard origin/main
+bash scripts/termux-setup.sh
+```
+
+Do **not** `curl` GitCode `/raw/` URLs. Use `pnpm@9` on Termux.
 
 ## Bootstrap login
 

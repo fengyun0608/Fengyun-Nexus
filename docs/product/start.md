@@ -27,10 +27,10 @@ chmod +x boot.sh && ./boot.sh
 
 GitCode 的 `raw` 链接常返回网页，**不要**再用 `curl …/raw/… | bash`。
 
-手机端**只保留一个脚本** `scripts/termux-setup.sh`：
+手机端**只保留一个脚本** `scripts/termux-setup.sh`（根目录 `termux-install.sh` 同入口）：
 
-- 未安装：不问，直接装环境 + 框架 + 启动
-- 已安装：只问「重装环境」或「重装框架」
+- 未安装 / 残缺目录：不问，自动修环境 + 拉齐框架 + 启动
+- 完整已装：只问一次「1 重装环境 / 2 重装框架」
 
 ```bash
 pkg install git -y
@@ -39,9 +39,16 @@ cd ~/Fengyun-Nexus
 bash scripts/termux-setup.sh
 ```
 
-已有仓库时再跑同一脚本即可，或直接 `./boot.sh` 启动。
+旧目录已在但缺脚本：
 
-**说明：** Termux 请用 `pnpm@9`；仓库 `.npmrc` 已关闭原生二进制切换。
+```bash
+cd ~/Fengyun-Nexus
+git fetch --depth 1 origin main
+git reset --hard origin/main
+bash scripts/termux-setup.sh
+```
+
+**说明：** Termux 请用 `pnpm@9`；仓库 `.npmrc` 已关闭原生二进制切换。不要 `curl …/raw/… | bash`。
 
 ## 常用指令（不用改文件）
 

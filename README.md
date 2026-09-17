@@ -60,7 +60,17 @@ cd ~/Fengyun-Nexus
 bash scripts/termux-setup.sh
 ```
 
-（不要用 GitCode `raw` 的 `curl | bash`，会下到 HTML。已安装时脚本只问：重装环境 / 重装框架。）
+目录已存在但报 `No such file` / 旧残缺仓，先拉齐再装（不问一堆题）：
+
+```bash
+cd ~/Fengyun-Nexus
+git fetch --depth 1 origin main
+git reset --hard origin/main
+bash scripts/termux-setup.sh
+```
+
+也可：`bash termux-install.sh`  
+完整已装时脚本只问一次：`1` 重装环境 / `2` 重装框架。不要用 GitCode `raw` 的 `curl | bash`。
 
 浏览器打开：**http://127.0.0.1:8787/**  
 初始账号：`console` / `console`（首次登录后请改成自己的账号密码）
