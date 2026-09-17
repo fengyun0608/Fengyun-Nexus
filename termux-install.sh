@@ -2,7 +2,7 @@
 # Fengyun Nexus — 手机端 / Termux 唯一安装入口（自动检测，不问选择题）
 #
 # 用法（推荐始终在家目录执行，避免删仓时 cwd 失效）：
-#   pkg install git -y
+#   pkg install -y openssl ca-certificates git
 #   bash -c 'git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus 2>/dev/null; bash ~/Fengyun-Nexus/termux-install.sh'
 #
 # 或仓已在：
@@ -30,17 +30,35 @@ log() { echo ">>> $*"; }
 ok() { echo "OK  $*"; }
 warn() { echo "!!  $*"; }
 
+# Termux 的 git 会带上 openssh；openssh 安装脚本会调 ssh-keygen，
+# 缺 openssl 时出现 libcrypto.so.3 not found。HTTPS 克隆不需要 ssh，但必须先装 openssl。
+pkg_fix_termux_base() {
+  if ! command -v pkg >/dev/null 2>&1; then
+    return 1
+  fi
+  pkg update -y || true
+  # openssl 提供 libcrypto.so.3；ca-certificates 给 HTTPS git clone
+  pkg install -y openssl ca-certificates git || pkg install -y git
+  # 装完再补一次 openssl，避免旧镜像残留缺库
+  pkg install -y openssl >/dev/null 2>&1 || true
+}
+
 ensure_git() {
   if command -v git >/dev/null 2>&1; then
+    # 已有 git 但仍可能缺 libcrypto：补装 openssl，避免后续偶发失败
+    if command -v pkg >/dev/null 2>&1; then
+      if ! command -v openssl >/dev/null 2>&1 || \
+         ! ls "${PREFIX:-/data/data/com.termux/files/usr}/lib"/libcrypto.so* >/dev/null 2>&1; then
+        pkg install -y openssl ca-certificates || true
+      fi
+    fi
     return 0
   fi
-  if command -v pkg >/dev/null 2>&1; then
-    pkg update -y || true
-    pkg install -y git
-  else
-    echo "未找到 git，请先安装"
-    exit 1
+  if pkg_fix_termux_base; then
+    return 0
   fi
+  echo "未找到 git，请先安装"
+  exit 1
 }
 
 framework_ok() {
@@ -64,8 +82,8 @@ install_env() {
   log "检测 / 安装运行环境"
   if is_termux || [ "${NEXUS_FORCE_TERMUX:-}" = "1" ]; then
     if command -v pkg >/dev/null 2>&1; then
-      pkg update -y || true
-      pkg install -y nodejs git
+      pkg_fix_termux_base || true
+      pkg install -y nodejs
     fi
   fi
   if ! command -v node >/dev/null 2>&1; then

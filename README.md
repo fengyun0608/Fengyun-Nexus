@@ -54,7 +54,7 @@ cd Fengyun-Nexus
 - Termux：
 
 ```bash
-pkg install git -y
+pkg install -y openssl ca-certificates git
 git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
 bash ~/Fengyun-Nexus/termux-install.sh
 ```
