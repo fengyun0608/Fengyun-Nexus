@@ -8,7 +8,7 @@
 
 | 平台 | 怎么启动 |
 |------|----------|
-| **Windows 电脑** | 双击 `启动.bat`，或 `pnpm boot` |
+| **Windows 电脑** | 双击 `start.bat`（推荐，避免中文乱码），或 `启动.bat`，或 `pnpm boot` |
 | **Linux / macOS 服务器** | `chmod +x boot.sh && ./boot.sh`，或 `pnpm boot` |
 | **手机 Termux** | 见下方 Termux；`./boot.sh`（自动精简模式） |
 
