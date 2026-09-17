@@ -117,18 +117,36 @@ export function applyRemoteUpdate(root: string): {
   version?: string;
   error?: string;
   shouldExit?: boolean;
+  updated?: boolean;
 } {
   try {
+    const before = git(root, ["rev-parse", "HEAD"]);
     const branch = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]) || "main";
     const pullBranch = branch === "HEAD" ? "main" : branch;
     git(root, ["fetch", "origin", "--prune"]);
-    git(root, ["pull", "--ff-only", "origin", pullBranch]);
+    try {
+      git(root, ["pull", "--ff-only", "origin", pullBranch]);
+    } catch (e) {
+      // 本地有未提交改动时 ff-only 易失败：对齐远程（管理端主动 #更新）
+      const err = e instanceof Error ? e.message : String(e);
+      if (/divergent|not possible to fast-forward|local changes|untracked|would be overwritten/i.test(err)) {
+        git(root, ["reset", "--hard", `origin/${pullBranch}`]);
+        git(root, ["clean", "-fd"]);
+      } else {
+        throw e;
+      }
+    }
+    const after = git(root, ["rev-parse", "HEAD"]);
     const version = readLocalVersion(root);
+    const updated = before !== after;
     return {
       ok: true,
       version,
+      updated,
       shouldExit: true,
-      message: `已更新到 ${version}，即将重启`,
+      message: updated
+        ? `已更新到 ${version}，即将重启`
+        : `已是最新 ${version}，即将重启`,
     };
   } catch (e) {
     return {

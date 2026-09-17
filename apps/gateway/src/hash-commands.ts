@@ -1,6 +1,7 @@
 /**
  * Framework admin commands — every command MUST start with `#`.
- * #关机 / #开机 = soft power. #重启 = call system restart executable.
+ * #关机 / #开机 = soft power. #重启 = same-window restart.
+ * #更新 = git pull 框架后同窗口重启。
  * Plugin commands (#菜单 / #生图 / …) are NOT handled here — they go to PluginHost.
  */
 export type HashCommandResult = {
@@ -10,6 +11,8 @@ export type HashCommandResult = {
   powerOff?: boolean;
   /** Invoke repo-root restart.sh / restart.bat then exit process */
   systemRestart?: boolean;
+  /** git pull framework then same-window restart */
+  systemUpdate?: boolean;
 };
 
 export type HashCommandContext = {
@@ -29,6 +32,8 @@ export const ADMIN_HASH = new Set([
   "#关机",
   "#开机",
   "#重启",
+  "#更新",
+  "#update",
 ]);
 
 export function isAdminHash(cmd: string): boolean {
@@ -42,6 +47,7 @@ const HELP = [
   "#关机 — 暂停应答",
   "#开机 — 恢复应答",
   "#重启 — 重启",
+  "#更新 — 更新框架并重启",
   "#菜单 — 功能菜单",
 ].join("\n");
 
@@ -68,7 +74,15 @@ export function parseHashCommand(
     };
   }
 
-  if (ctx.powerOff && cmd !== "#开机" && cmd !== "#帮助" && cmd !== "#状态" && cmd !== "#重启") {
+  if (
+    ctx.powerOff &&
+    cmd !== "#开机" &&
+    cmd !== "#帮助" &&
+    cmd !== "#状态" &&
+    cmd !== "#重启" &&
+    cmd !== "#更新" &&
+    cmd !== "#update"
+  ) {
     return {
       handled: true,
       replies: ["已关机，发送 #开机"],
@@ -108,6 +122,14 @@ export function parseHashCommand(
         replies: [], // filled by gateway with uptime
         powerOff: false,
         systemRestart: true,
+      };
+    case "#更新":
+    case "#update":
+      return {
+        handled: true,
+        replies: [],
+        powerOff: false,
+        systemUpdate: true,
       };
     default:
       return { handled: false, replies: [] };

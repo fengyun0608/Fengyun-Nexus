@@ -474,6 +474,28 @@ async function bootstrap(): Promise<void> {
           });
         }
 
+        if (cmd.systemUpdate) {
+          log.info("收到 #更新：拉取远程框架…");
+          const upd = applyRemoteUpdate(ROOT);
+          if (!upd.ok) {
+            const detail = upd.error ? `更新失败\n${upd.error}` : "更新失败";
+            log.error(detail);
+            replies = [detail];
+          } else {
+            replies = [upd.message];
+            const uptime = formatUptime(Date.now() - startedAt);
+            saveRestartNotify(ROOT, {
+              channel: msg.channel,
+              chatId: msg.chatId,
+              userId: msg.userId,
+              messageType: msg.meta?.messageType,
+              groupId: msg.meta?.groupId,
+              requestedAt: nowIso(),
+              previousUptime: uptime,
+            });
+          }
+        }
+
         for (const content of replies) {
           db.insertMessage({
             id: newId("msg"),
@@ -494,6 +516,23 @@ async function bootstrap(): Promise<void> {
           content: msg.content,
           createdAt: msg.createdAt,
         });
+
+        if (cmd.systemUpdate) {
+          const last = replies[0] ?? "";
+          if (last.startsWith("更新失败")) {
+            clearRestartNotify(ROOT);
+            return replies;
+          }
+          const r = scheduleSystemRestart(ROOT);
+          if (!r.ok) {
+            clearRestartNotify(ROOT);
+            log.error(`更新后重启失败：${r.message}`);
+            return [`${last}\n重启失败：${r.message}`];
+          }
+          log.ok(`更新完成，同窗口重启（退出码 ${r.exitCode}）`);
+          setTimeout(() => process.exit(r.exitCode), 1200);
+          return replies;
+        }
 
         if (cmd.systemRestart) {
           const r = scheduleSystemRestart(ROOT);
