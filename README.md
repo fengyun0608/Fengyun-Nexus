@@ -1,57 +1,116 @@
-<p align="center">
-  <h1 align="center">Fengyun Nexus</h1>
-  <p align="center">可扩展的 AI 对话与自动化枢纽</p>
-</p>
+# Fengyun Nexus
+
+本地可控的 AI 对话与自动化枢纽：控制台、消息通道、插件、工作流、多模型配置，一套跑通。
+
+灵感自 Yunzai 系与 [XRK-Yunzai](https://gitcode.com/xrkseek/XRK-Yunzai) 一类框架的分层思路——事件进网关、插件按规则吃消息、通道可插拔——做成自己的产品壳，而不是再 fork 一份崽。
 
 <p align="center">
   <img alt="license" src="https://img.shields.io/badge/License-MIT-c4842f?style=flat-square" />
-  <img alt="product" src="https://img.shields.io/badge/Product-Fengyun%20Nexus-8fad7a?style=flat-square" />
-  <img alt="env" src="https://img.shields.io/badge/Desktop%20%7C%20Server%20%7C%20Mobile%20%7C%20Termux-1a1f18?style=flat-square" />
+  <img alt="node" src="https://img.shields.io/badge/Node.js-%E2%89%A520-339933?style=flat-square" />
+  <img alt="platform" src="https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Termux-1a1f18?style=flat-square" />
 </p>
 
 <p align="center">
   <a href="https://gitcode.com/fengyunnb_admin/Fengyun-Nexus">GitCode</a>
   ·
-  <a href="docs/product/README.md">产品介绍</a>
+  <a href="docs/product/start.md">上手</a>
   ·
-  <a href="docs/product/start.md">开始使用</a>
+  <a href="docs/ecosystem/plugins.md">插件</a>
   ·
   <a href="LICENSE">MIT</a>
 </p>
 
 ---
 
-## 这是什么
+## 能干什么
 
-**Fengyun Nexus** 是一套独立的对话与自动化产品：把框架内对话、消息通道、插件能力、工作流和管理控制台收进同一体验。
+| 分类 | 说明 |
+|------|------|
+| 控制台 | 浏览器里对话、看状态、改配置；默认中文，可切 English |
+| 消息通道 | Web / Webhook / QQ（OneBot 11 · NapCat） |
+| 插件 | `plugins/` 扫描加载；通道插件与框架插件分开管，支持热重载 |
+| AI | 多供应商（云端 / 本地 / 自定义），控制台实时切换；没配密钥就不乱回 |
+| 工作流 / MCP | 网关上挂工作流与工具调用 |
+| 管理指令 | 一律 `#` 开头：`#帮助` `#状态` `#关机` `#开机` `#重启` `#更新` |
+| 部署姿态 | `desktop` / `server` / `termux`（`NEXUS_ENV`） |
 
-- 产品名固定为英文 **Fengyun Nexus**
-- 控制台默认中文，可切换 English
-- 适合电脑、服务器、手机浏览器与 Termux
+密钥和 `*.local.json` 只留本机，仓库默认不收。
 
-## 你能做什么
+---
 
-- 在统一控制台里对话、看状态、管配置
-- 接入消息通道（含 QQ / OneBot 11）
-- 装载与管理插件（通道插件 / 框架插件分层）
-- 配置多种 AI 供应商，按需切换
-- 查看数据看板与最新消息
-- 用 `#` 指令做基础管理（如帮助、开关机）
+## 架构
 
-本地配置留在你自己的机器上，不会被上传。
+```text
+  浏览器控制台 / QQ·NapCat / Webhook
+              │
+              ▼
+         Gateway 网关  (:8787)
+    ┌─────────┼──────────┐
+    ▼         ▼          ▼
+  通道适配   会话 + LLM   插件宿主
+  onebot11   providers    plugins/
+  web/webhook             ├─ 工作流
+                          └─ MCP / 工具
+              │
+              ▼
+         本地库（SQLite 等）
+```
+
+消息路径大致是：通道归一成统一消息 → 管理 `#` 指令 → 插件按优先级 → 有密钥再走模型 → 写库并回通道。
+
+`#重启` / `#更新` 写重启标记后退出码 `75`，由 `boot.mjs` **同窗口**再拉起，不新开终端。
+
+---
+
+## 目录
+
+```text
+Fengyun-Nexus/
+├── apps/
+│   ├── gateway/          # 网关：HTTP、OneBot、指令、插件热更
+│   ├── web/              # Vite 控制台
+│   └── cli/              # pnpm nexus …
+├── packages/             # shared / channel / core / db / llm / plugin-* / workflow / mcp-host
+├── plugins/              # 业务插件（菜单、回声、生图、QQ 打招呼…）
+├── configs/              # *.default.json；本机覆盖用 *.local.json
+├── scripts/boot.mjs      # 依赖检查 → 构建 → 拉网关（支持同窗重启）
+├── start.bat / boot.sh   # 电脑 / Linux·macOS 入口
+└── termux-install.sh     # 手机 Termux 一键装+启
+```
+
+---
+
+## 环境
+
+| 组件 | 要求 |
+|------|------|
+| Node.js | ≥ 20（推荐 LTS） |
+| pnpm | 9.x（Termux 建议固定 `pnpm@9.15.0`） |
+| Git | 克隆与 `#更新` 需要 |
+
+更细的说明见 [环境要求](docs/product/environment.md)。
+
+---
 
 ## 快速开始
-
-**必备：** Node.js ≥ 20、pnpm、Git。详见 [环境要求](docs/product/environment.md)。
 
 ```bash
 git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
 cd Fengyun-Nexus
 ```
 
-- Windows：`start.bat`
-- Linux / macOS：`chmod +x boot.sh && ./boot.sh`
-- Termux：
+| 平台 | 命令 |
+|------|------|
+| Windows | `start.bat` |
+| Linux / macOS | `chmod +x boot.sh && ./boot.sh` |
+| Termux | 见下方 |
+
+控制台：<http://127.0.0.1:8787/>  
+初始账号：`console` / `console`（登录后请改掉）
+
+### Termux
+
+先把包对齐（缺 openssl / libcurl 时 git HTTPS 会挂）：
 
 ```bash
 yes | apt update && yes | apt full-upgrade -y
@@ -60,25 +119,42 @@ git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Feng
 bash ~/Fengyun-Nexus/termux-install.sh
 ```
 
-若出现 `libssl.so.1.1 not found`，说明 Termux 包只升了一半，**必须先 `apt full-upgrade`**，不要只装 git。
+仓已在时直接：`bash ~/Fengyun-Nexus/termux-install.sh`  
+强制重装：`cd ~ && NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`
 
-手机端**只这一个脚本**：自动检测未装 / 残缺 / 已装，修好环境并拉齐后启动，**不弹选择题**。  
-强制整仓重装：`cd ~ && NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`  
 不要用 GitCode `raw` 的 `curl | bash`。
 
-浏览器打开：**http://127.0.0.1:8787/**  
-初始账号：`console` / `console`（首次登录后请改成自己的账号密码）
+---
+
+## 常用命令
+
+```bash
+pnpm boot                 # 启动（正式，无 watch）
+pnpm nexus setup          # 交互配置
+pnpm nexus env desktop    # 切换姿态
+pnpm nexus status
+```
+
+群里 / 控制台（主人或已登录管理端）：
+
+- `#帮助` `#状态` `#关机` `#开机`
+- `#重启` — 同窗口重启
+- `#更新` — 拉远程框架后同窗口重启
+
+---
 
 ## 文档
 
-对外只放**介绍与上手**：
-
 - [产品介绍](docs/product/README.md)
-- [环境要求](docs/product/environment.md)
 - [开始使用](docs/product/start.md)
-- [插件生态简介](docs/ecosystem/plugins.md)
+- [环境要求](docs/product/environment.md)
+- [插件生态](docs/ecosystem/plugins.md)
+- [对内：如何运作](docs/internal/how-it-works.md)
 
-## 开源协议
+---
 
-MIT License — 见 [LICENSE](LICENSE)。  
+## 协议
+
+MIT License — [LICENSE](LICENSE)
+
 Copyright (c) 2026 Fengyun
