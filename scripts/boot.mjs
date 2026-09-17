@@ -2,7 +2,7 @@
 /**
  * Fengyun Nexus boot — detect deps, build packages + Vite console, start gateway.
  */
-import { existsSync, readFileSync, unlinkSync, cpSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, cpSync, statSync, mkdirSync } from "node:fs";
 import { spawn, execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -201,12 +201,69 @@ async function ensureBuild() {
   }
 
   // 同步到 gateway/public，避免启动时 dist 缺失仍用旧 public
+  // Windows 上对中文路径做整树 rmSync/cpSync 偶发原生崩溃（0xC0000409），故：可跳过 / 可失败继续 / Win 优先 robocopy
+  await syncConsolePublic();
+}
+
+function consoleAlreadySynced(distDir, pubDir) {
+  const distHtml = join(distDir, "index.html");
+  const pubHtml = join(pubDir, "index.html");
+  if (!existsSync(distHtml) || !existsSync(pubHtml)) return false;
+  try {
+    const ds = statSync(distHtml);
+    const ps = statSync(pubHtml);
+    // 体积与修改时间都对齐则认为已同步
+    return ds.size === ps.size && Math.abs(ds.mtimeMs - ps.mtimeMs) < 2000;
+  } catch {
+    return false;
+  }
+}
+
+function syncViaRobocopy(distDir, pubDir) {
+  // robocopy 退出码 0–7 都算成功
+  try {
+    execSync(
+      `robocopy "${distDir}" "${pubDir}" /E /NFL /NDL /NJH /NJS /nc /ns /np /R:2 /W:1`,
+      { stdio: "ignore", windowsHide: true },
+    );
+    return existsSync(join(pubDir, "index.html"));
+  } catch (e) {
+    const code = typeof e?.status === "number" ? e.status : 16;
+    return code < 8 && existsSync(join(pubDir, "index.html"));
+  }
+}
+
+async function syncConsolePublic() {
   const distDir = join(root, "apps/web/dist");
   const pubDir = join(root, "apps/gateway/public");
-  if (existsSync(join(distDir, "index.html"))) {
-    rmSync(pubDir, { recursive: true, force: true });
-    cpSync(distDir, pubDir, { recursive: true });
+  if (!existsSync(join(distDir, "index.html"))) {
+    bootLog("WARN", ANSI.yellow, "apps/web/dist 缺失，跳过同步 public");
+    return;
+  }
+  if (consoleAlreadySynced(distDir, pubDir)) {
+    bootLog("OK", ANSI.green, "console public 已是最新，跳过同步");
+    return;
+  }
+
+  bootLog("INFO", ANSI.cyan, "同步控制台 → apps/gateway/public …");
+  try {
+    if (isWin) {
+      if (syncViaRobocopy(distDir, pubDir)) {
+        bootLog("OK", ANSI.green, "console synced → apps/gateway/public");
+        return;
+      }
+      bootLog("WARN", ANSI.yellow, "robocopy 未完成，改用 Node 复制");
+    }
+    // 不先整目录删除，降低 Windows 文件锁 / 杀软拦截导致的原生崩溃概率
+    mkdirSync(pubDir, { recursive: true });
+    cpSync(distDir, pubDir, { recursive: true, force: true });
     bootLog("OK", ANSI.green, "console synced → apps/gateway/public");
+  } catch (e) {
+    bootLog(
+      "WARN",
+      ANSI.yellow,
+      `同步 public 失败（可继续启动）：${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 }
 
@@ -247,15 +304,36 @@ async function main() {
       continue;
     }
     if (code !== 0) {
-      throw new Error(`pnpm --filter @fengyun/nexus-gateway ${gatewayScript} exited ${code}`);
+      throw new Error(
+        `pnpm --filter @fengyun/nexus-gateway ${gatewayScript} exited ${code}${formatWinCrashHint(code)}`,
+      );
     }
     process.exit(0);
   }
 }
 
+/** Windows NTSTATUS 常见原生崩溃码 → 中文提示 */
+function formatWinCrashHint(code) {
+  if (!isWin || typeof code !== "number") return "";
+  const u = code < 0 ? code >>> 0 : code;
+  if (u === 0xc0000409 || code === -1073740791 || code === 3221226505) {
+    return "（Windows 原生崩溃 0xC0000409：请关掉已开着的 Nexus 窗口后重试；若反复出现，可删 apps/gateway/public 再 start.bat）";
+  }
+  if (u === 0xc0000005) {
+    return "（访问冲突 0xC0000005：检查杀软是否拦截 node/tsx）";
+  }
+  return "";
+}
+
 main().catch((e) => {
   const msg = e.message || String(e);
   bootLog("ERROR", ANSI.red, msg);
+  if (/0xC0000409|3221226505|-1073740791/i.test(msg)) {
+    bootLog("INFO", ANSI.cyan, "处理建议：");
+    bootLog("INFO", ANSI.cyan, "  1. 关掉所有 Fengyun Nexus / node 相关 CMD 窗口");
+    bootLog("INFO", ANSI.cyan, "  2. 再双击 start.bat");
+    bootLog("INFO", ANSI.cyan, "  3. 仍失败可执行：rd /s /q apps\\gateway\\public  然后重新 start.bat");
+  }
   if (/PNPM_ENGINE_NO_NATIVE_BINARY|android-arm64|@pnpm\/exe/i.test(msg)) {
     bootLog(
       "INFO",

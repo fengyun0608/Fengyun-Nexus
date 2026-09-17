@@ -346,11 +346,24 @@ function runCmd(
 ): Promise<number> {
   return new Promise((resolve, reject) => {
     appendLog(task, `$ ${command} ${args.join(" ")}`);
-    const child = spawn(command, args, {
-      cwd: opts?.cwd || rootDir,
-      env: { ...process.env, ...opts?.env },
-      shell: process.platform === "win32",
-    });
+    // Windows：路径含空格时 shell:true 会把 D:\Program Files\... 拆断；
+    // 对 .cmd 走 cmd.exe /d /s /c，并给参数加引号。
+    const win = process.platform === "win32";
+    let child;
+    if (win) {
+      const q = (s: string) => (`"${String(s).replace(/"/g, '\\"')}"`);
+      const line = [q(command), ...args.map(q)].join(" ");
+      child = spawn("cmd.exe", ["/d", "/s", "/c", line], {
+        cwd: opts?.cwd || rootDir,
+        env: { ...process.env, ...opts?.env },
+        windowsHide: true,
+      });
+    } else {
+      child = spawn(command, args, {
+        cwd: opts?.cwd || rootDir,
+        env: { ...process.env, ...opts?.env },
+      });
+    }
     child.stdout?.on("data", (buf: Buffer) => {
       for (const line of buf.toString("utf8").split(/\r?\n/)) {
         if (line.trim()) appendLog(task, line);
