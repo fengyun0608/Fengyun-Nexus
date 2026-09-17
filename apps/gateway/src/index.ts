@@ -39,6 +39,9 @@ import { formatErrorForClient, translateError } from "./errors-zh.js";
 import { isAdminHash, parseHashCommand } from "./hash-commands.js";
 import {
   createInstallTask,
+  autoQueueMissing,
+  getTask,
+  initEnvTasks,
   listRuntimes,
   listTasks,
   setTaskStatus,
@@ -374,6 +377,10 @@ async function bootstrap(): Promise<void> {
     }),
   });
   await bootStep("  · 注册工具 nexus.status");
+
+  await bootStep("初始化：环境安装队列…");
+  initEnvTasks(ROOT);
+  await bootStep("  · 未安装运行时将自动排队安装");
 
   await bootStep("初始化：HTTP 网关路由…");
 
@@ -1337,17 +1344,50 @@ async function bootstrap(): Promise<void> {
     res.json({ ok: true, runtimes: listRuntimes(), counts: taskCounts() });
   });
 
+  app.post("/v1/admin/env-runtimes/auto-queue", authMiddleware, (_req, res) => {
+    const result = autoQueueMissing();
+    res.json({
+      ok: true,
+      message:
+        result.queued.length > 0
+          ? `已自动排队 ${result.queued.length} 个未安装环境`
+          : "所需环境均已就绪",
+      queued: result.queued,
+      skipped: result.skipped,
+      items: listTasks(),
+      counts: taskCounts(),
+      runtimes: listRuntimes(),
+    });
+  });
+
   app.get("/v1/admin/env-tasks", authMiddleware, (_req, res) => {
     res.json({ ok: true, items: listTasks(), counts: taskCounts() });
+  });
+
+  app.get("/v1/admin/env-tasks/:id", authMiddleware, (req, res) => {
+    const task = getTask(String(req.params.id));
+    if (!task) {
+      res.status(404).json({ error: "任务未找到" });
+      return;
+    }
+    res.json({ ok: true, task });
   });
 
   app.post("/v1/admin/env-tasks", authMiddleware, (req, res) => {
     try {
       const runtime = String(req.body?.runtime ?? "") as EnvRuntimeId;
-      const version = String(req.body?.version ?? "");
-      const mode = String(req.body?.mode ?? "binary") as "compile" | "binary";
-      const task = createInstallTask({ runtime, version, mode });
-      res.json({ ok: true, message: "已加入待执行任务", task, counts: taskCounts() });
+      const version = req.body?.version ? String(req.body.version) : undefined;
+      const mode = req.body?.mode
+        ? (String(req.body.mode) as "compile" | "binary")
+        : undefined;
+      const task = createInstallTask({ runtime, version, mode, auto: Boolean(req.body?.auto) });
+      res.json({
+        ok: true,
+        message: "已加入队列并自动开始",
+        task,
+        counts: taskCounts(),
+        items: listTasks(),
+      });
     } catch (e) {
       res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
     }
@@ -1365,7 +1405,7 @@ async function bootstrap(): Promise<void> {
       res.status(404).json({ error: "任务未找到" });
       return;
     }
-    res.json({ ok: true, task, counts: taskCounts() });
+    res.json({ ok: true, task, counts: taskCounts(), items: listTasks() });
   });
 
   app.get("/v1/admin/update/check", authMiddleware, (_req, res) => {

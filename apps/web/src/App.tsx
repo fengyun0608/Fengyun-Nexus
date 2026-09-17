@@ -74,9 +74,12 @@ type EnvTask = {
   version: string;
   mode: "compile" | "binary";
   status: EnvTaskStatus;
+  progress?: number;
+  logs?: string[];
   createdAt: string;
   updatedAt: string;
   note?: string;
+  error?: string;
 };
 type EnvTaskCounts = {
   pending: number;
@@ -559,6 +562,13 @@ export default function App() {
     if (panel !== "dashboard" && panel !== "database") setRawPage(false);
   }, [panel]);
 
+  useEffect(() => {
+    if (!token || (panel !== "env-setup" && panel !== "env-tasks")) return;
+    void autoQueueEnv();
+    const timer = window.setInterval(() => void refreshEnv(), 1200);
+    return () => window.clearInterval(timer);
+  }, [panel, token]);
+
   const sessionHours = meta?.admin?.sessionHours ?? 12;
   const displayEnv = envLabel(locale, meta?.env.id ?? envPick, meta?.env.label);
   const activeChannel = channels.find((c) => c.id === activeChannelId);
@@ -600,6 +610,24 @@ export default function App() {
       }
     } catch {
       /* ignore */
+    }
+  };
+
+  const autoQueueEnv = async () => {
+    if (!token) return;
+    try {
+      const res = await api<{
+        message?: string;
+        items?: EnvTask[];
+        counts?: EnvTaskCounts;
+        runtimes?: EnvRuntimeDef[];
+      }>("/v1/admin/env-runtimes/auto-queue", { method: "POST", token });
+      if (res.runtimes) setEnvRuntimes(res.runtimes);
+      if (res.items) setEnvTasks(res.items);
+      if (res.counts) setEnvCounts(res.counts);
+      if (res.message) setActionMsg(res.message);
+    } catch (e) {
+      setActionMsg(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -970,7 +998,7 @@ export default function App() {
     if (!token) return;
     setActionMsg("");
     try {
-      const res = await api<{ message?: string; counts?: EnvTaskCounts; task?: EnvTask }>(
+      const res = await api<{ message?: string; counts?: EnvTaskCounts; items?: EnvTask[] }>(
         "/v1/admin/env-tasks",
         {
           method: "POST",
@@ -983,9 +1011,9 @@ export default function App() {
         },
       );
       if (res.counts) setEnvCounts(res.counts);
+      if (res.items) setEnvTasks(res.items);
       setActionMsg(res.message || tr("envTaskQueued"));
       void refreshEnv();
-      setPanel("env-tasks");
     } catch (e) {
       setActionMsg(e instanceof Error ? e.message : String(e));
     }
@@ -2279,51 +2307,63 @@ export default function App() {
                     setEnvPickRuntime(rt.id);
                     setEnvPickVersion(rt.versions[0] || "");
                     setEnvPickMode(rt.modes.includes("binary") ? "binary" : rt.modes[0] || "binary");
+                    if (!rt.installed && token) {
+                      void api("/v1/admin/env-tasks", {
+                        method: "POST",
+                        token,
+                        body: JSON.stringify({
+                          runtime: rt.id,
+                          version: rt.versions[0],
+                          mode: rt.modes.includes("binary") ? "binary" : "compile",
+                          auto: true,
+                        }),
+                      }).then(() => void refreshEnv());
+                    }
                   }}
                 >
                   <strong>{rt.label}</strong>
                   <span className="muted">
                     {rt.installed
                       ? `${tr("envInstalled")}: ${rt.activeVersion || "—"}`
-                      : tr("envNotInstalled")}
+                      : tr("envNotInstalledAuto")}
                   </span>
                 </button>
               ))}
             </div>
+            {actionMsg && <p className="muted pad">{actionMsg}</p>}
+            <div className="hero sub">
+              <h1>{tr("envLiveInstall")}</h1>
+              <p>{tr("envLiveInstallHint")}</p>
+            </div>
+            {envTasks.filter((t) => t.status === "pending" || t.status === "running").length ===
+              0 && <p className="muted pad">{tr("noEnvTasksRunning")}</p>}
+            {envTasks
+              .filter((t) => t.status === "pending" || t.status === "running" || t.status === "failed")
+              .slice(0, 6)
+              .map((task) => (
+                <div className="install-block" key={task.id}>
+                  <div className="install-head">
+                    <strong>
+                      {task.runtime} · {task.version}
+                    </strong>
+                    <span className="muted">
+                      {tr(`taskStatus_${task.status}`)} · {task.progress ?? 0}%
+                    </span>
+                  </div>
+                  <div className="progress-track">
+                    <div className="progress-fill" style={{ width: `${task.progress ?? 0}%` }} />
+                  </div>
+                  <pre className="code-block install-log">
+                    {(task.logs && task.logs.length
+                      ? task.logs
+                      : [tr("envWaitingLog")]
+                    ).join("\n")}
+                  </pre>
+                </div>
+              ))}
             <div className="form">
-              <label>
-                {tr("envVersion")}
-                <select
-                  value={envPickVersion}
-                  onChange={(e) => setEnvPickVersion(e.target.value)}
-                >
-                  {(envRuntimes.find((r) => r.id === envPickRuntime)?.versions ?? []).map((v) => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {tr("envMode")}
-                <select
-                  value={envPickMode}
-                  onChange={(e) =>
-                    setEnvPickMode(e.target.value === "compile" ? "compile" : "binary")
-                  }
-                >
-                  {(envRuntimes.find((r) => r.id === envPickRuntime)?.modes ?? ["binary"]).map(
-                    (m) => (
-                      <option key={m} value={m}>
-                        {m === "compile" ? tr("envModeCompile") : tr("envModeBinary")}
-                      </option>
-                    ),
-                  )}
-                </select>
-              </label>
-              {actionMsg && <p className="muted">{actionMsg}</p>}
-              <button type="button" className="btn" onClick={() => void createEnvTask()}>
-                {tr("envInstall")}
+              <button type="button" className="btn ghost" onClick={() => setPanel("env-tasks")}>
+                {tr("envTasks")}
               </button>
             </div>
           </section>
@@ -2335,13 +2375,9 @@ export default function App() {
               <h1>{tr("envTasks")}</h1>
               <p>{tr("envTasksHero")}</p>
             </div>
-            <div className="form">
-              <button type="button" className="btn ghost" onClick={() => void refreshEnv()}>
-                {tr("refresh")}
-              </button>
-            </div>
-            {(["pending", "running", "paused"] as const).map((st) => {
+            {(["running", "pending", "failed", "done", "paused"] as const).map((st) => {
               const rows = envTasks.filter((t) => t.status === st);
+              if (rows.length === 0 && st !== "running" && st !== "pending") return null;
               return (
                 <div key={st}>
                   <div className="hero sub">
@@ -2352,53 +2388,27 @@ export default function App() {
                   <div className="list">
                     {rows.length === 0 && <p className="muted pad">{tr("noEnvTasks")}</p>}
                     {rows.map((task) => (
-                      <div className="list-row" key={task.id}>
-                        <div>
+                      <div className="install-block" key={task.id}>
+                        <div className="install-head">
                           <strong>
                             {task.runtime} · {task.version}
                           </strong>
-                          <div className="muted">
-                            {task.note || task.id} · {task.mode}
-                          </div>
+                          <span className="muted">
+                            {task.note || task.id} · {task.progress ?? 0}%
+                          </span>
                         </div>
-                        <div className="row-actions">
-                          {st === "pending" && (
-                            <button
-                              type="button"
-                              className="btn mini"
-                              onClick={() => void setEnvTaskStatus(task.id, "running")}
-                            >
-                              {tr("taskStart")}
-                            </button>
-                          )}
-                          {st === "running" && (
-                            <button
-                              type="button"
-                              className="btn mini ghost"
-                              onClick={() => void setEnvTaskStatus(task.id, "paused")}
-                            >
-                              {tr("taskPause")}
-                            </button>
-                          )}
-                          {st === "paused" && (
-                            <button
-                              type="button"
-                              className="btn mini"
-                              onClick={() => void setEnvTaskStatus(task.id, "running")}
-                            >
-                              {tr("taskResume")}
-                            </button>
-                          )}
-                          {(st === "running" || st === "paused" || st === "pending") && (
-                            <button
-                              type="button"
-                              className="btn mini ghost"
-                              onClick={() => void setEnvTaskStatus(task.id, "done")}
-                            >
-                              {tr("taskDone")}
-                            </button>
-                          )}
+                        <div className="progress-track">
+                          <div
+                            className="progress-fill"
+                            style={{ width: `${task.progress ?? 0}%` }}
+                          />
                         </div>
+                        <pre className="code-block install-log">
+                          {(task.logs && task.logs.length
+                            ? task.logs
+                            : [tr("envWaitingLog")]
+                          ).join("\n")}
+                        </pre>
                       </div>
                     ))}
                   </div>

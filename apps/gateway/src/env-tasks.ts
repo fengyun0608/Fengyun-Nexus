@@ -1,4 +1,10 @@
-/** Runtime environment install tasks (Go / Python / browser) — in-memory queue. */
+/**
+ * Go / Python / browser install queue.
+ * Uninstalled runtimes auto-enqueue; worker runs one-by-one with live logs.
+ */
+import { spawn, execSync } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync, appendFileSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export type EnvRuntimeId = "go" | "python" | "browser";
 export type EnvTaskStatus = "pending" | "running" | "paused" | "done" | "failed";
@@ -18,9 +24,12 @@ export type EnvTask = {
   version: string;
   mode: "compile" | "binary";
   status: EnvTaskStatus;
+  progress: number;
+  logs: string[];
   createdAt: string;
   updatedAt: string;
   note?: string;
+  error?: string;
 };
 
 const runtimes: EnvRuntimeDef[] = [
@@ -41,7 +50,7 @@ const runtimes: EnvRuntimeDef[] = [
   {
     id: "browser",
     label: "浏览器运行时",
-    versions: ["chromium-126", "firefox-127"],
+    versions: ["chromium", "firefox"],
     modes: ["binary"],
     installed: false,
   },
@@ -49,12 +58,103 @@ const runtimes: EnvRuntimeDef[] = [
 
 const tasks: EnvTask[] = [];
 let seq = 1;
+let rootDir = process.cwd();
+let workerBusy = false;
+let kickTimer: ReturnType<typeof setTimeout> | null = null;
 
 function now() {
   return new Date().toISOString();
 }
 
+function stamp() {
+  return new Date().toISOString().replace("T", " ").slice(0, 19);
+}
+
+function which(bin: string): string | null {
+  try {
+    const out = execSync(process.platform === "win32" ? `where ${bin}` : `command -v ${bin}`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .trim()
+      .split(/\r?\n/)[0];
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+function isTermux(): boolean {
+  return Boolean(
+    process.env.TERMUX_VERSION ||
+      process.env.PREFIX?.includes("com.termux") ||
+      process.env.NEXUS_FORCE_TERMUX === "1",
+  );
+}
+
+function runtimeHome(id: EnvRuntimeId): string {
+  return join(rootDir, "data", "runtimes", id);
+}
+
+function markerPath(id: EnvRuntimeId): string {
+  return join(runtimeHome(id), "installed.json");
+}
+
+function refreshInstalledFlags(): void {
+  for (const rt of runtimes) {
+    const marker = markerPath(rt.id);
+    if (existsSync(marker)) {
+      try {
+        const j = JSON.parse(readFileSync(marker, "utf8")) as { version?: string };
+        rt.installed = true;
+        rt.activeVersion = j.version || rt.activeVersion;
+        continue;
+      } catch {
+        /* fall through */
+      }
+    }
+    if (rt.id === "go" && which("go")) {
+      rt.installed = true;
+      try {
+        rt.activeVersion = execSync("go version", { encoding: "utf8" }).trim().slice(0, 40);
+      } catch {
+        rt.activeVersion = "system";
+      }
+      continue;
+    }
+    if (rt.id === "python" && (which("python3") || which("python"))) {
+      rt.installed = true;
+      const py = which("python3") || which("python")!;
+      try {
+        rt.activeVersion = execSync(`"${py}" --version`, { encoding: "utf8" }).trim();
+      } catch {
+        rt.activeVersion = "system";
+      }
+      continue;
+    }
+    if (rt.id === "browser") {
+      const chrome =
+        which("chromium") ||
+        which("chromium-browser") ||
+        which("google-chrome") ||
+        process.env.NEXUS_BROWSER_BIN;
+      if (chrome || existsSync(join(runtimeHome("browser"), "ready"))) {
+        rt.installed = true;
+        rt.activeVersion = rt.activeVersion || "chromium";
+      }
+    }
+  }
+}
+
+export function initEnvTasks(root: string): void {
+  rootDir = root;
+  mkdirSync(join(rootDir, "data", "runtimes"), { recursive: true });
+  refreshInstalledFlags();
+  kickWorker();
+}
+
 export function listRuntimes(): EnvRuntimeDef[] {
+  refreshInstalledFlags();
   return runtimes.map((r) => ({ ...r }));
 }
 
@@ -62,28 +162,93 @@ export function listTasks(): EnvTask[] {
   return [...tasks].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+export function getTask(id: string): EnvTask | null {
+  const t = tasks.find((x) => x.id === id);
+  return t ? { ...t, logs: [...t.logs] } : null;
+}
+
+function appendLog(task: EnvTask, line: string): void {
+  const row = `[${stamp()}] ${line}`;
+  task.logs.push(row);
+  if (task.logs.length > 800) task.logs.splice(0, task.logs.length - 800);
+  task.updatedAt = now();
+  try {
+    const logFile = join(runtimeHome(task.runtime), "install.log");
+    mkdirSync(runtimeHome(task.runtime), { recursive: true });
+    appendFileSync(logFile, `${row}\n`, "utf8");
+  } catch {
+    /* ignore */
+  }
+}
+
+function setProgress(task: EnvTask, n: number): void {
+  task.progress = Math.max(0, Math.min(100, Math.round(n)));
+  task.updatedAt = now();
+}
+
 export function createInstallTask(input: {
   runtime: EnvRuntimeId;
-  version: string;
-  mode: "compile" | "binary";
+  version?: string;
+  mode?: "compile" | "binary";
+  auto?: boolean;
 }): EnvTask {
   const rt = runtimes.find((r) => r.id === input.runtime);
   if (!rt) throw new Error("未知运行时");
-  if (!rt.versions.includes(input.version)) throw new Error("版本不可用");
-  if (!rt.modes.includes(input.mode)) throw new Error("安装方式不可用");
+  const version = input.version || rt.versions[0]!;
+  const mode = input.mode || (rt.modes.includes("binary") ? "binary" : rt.modes[0]!)!;
+  if (!rt.versions.includes(version) && !rt.versions.some((v) => version.startsWith(v))) {
+    // allow chromium alias
+    if (!(rt.id === "browser" && (version === "chromium" || version === "firefox"))) {
+      throw new Error("版本不可用");
+    }
+  }
+  if (!rt.modes.includes(mode)) throw new Error("安装方式不可用");
+
+  const existing = tasks.find(
+    (t) =>
+      t.runtime === input.runtime &&
+      (t.status === "pending" || t.status === "running" || t.status === "paused"),
+  );
+  if (existing) return { ...existing, logs: [...existing.logs] };
 
   const task: EnvTask = {
     id: `envtask-${seq++}`,
     runtime: input.runtime,
-    version: input.version,
-    mode: input.mode,
+    version,
+    mode,
     status: "pending",
+    progress: 0,
+    logs: [],
     createdAt: now(),
     updatedAt: now(),
-    note: `${rt.label} ${input.version} · ${input.mode === "compile" ? "编译安装" : "二进制安装"}`,
+    note: `${rt.label} ${version} · ${mode === "compile" ? "编译安装" : "二进制安装"}${input.auto ? " · 自动排队" : ""}`,
   };
+  appendLog(task, `已加入队列：${task.note}`);
   tasks.unshift(task);
-  return { ...task };
+  kickWorker();
+  return { ...task, logs: [...task.logs] };
+}
+
+/** Auto-queue every runtime that is not installed. */
+export function autoQueueMissing(): { queued: EnvTask[]; skipped: string[] } {
+  refreshInstalledFlags();
+  const queued: EnvTask[] = [];
+  const skipped: string[] = [];
+  for (const rt of runtimes) {
+    if (rt.installed) {
+      skipped.push(rt.id);
+      continue;
+    }
+    const t = createInstallTask({
+      runtime: rt.id,
+      version: rt.versions[0],
+      mode: rt.modes.includes("binary") ? "binary" : "compile",
+      auto: true,
+    });
+    queued.push(t);
+  }
+  kickWorker();
+  return { queued, skipped };
 }
 
 export function setTaskStatus(id: string, status: EnvTaskStatus): EnvTask | null {
@@ -91,14 +256,29 @@ export function setTaskStatus(id: string, status: EnvTaskStatus): EnvTask | null
   if (!t) return null;
   t.status = status;
   t.updatedAt = now();
+  appendLog(t, `状态 → ${status}`);
   if (status === "done") {
-    const rt = runtimes.find((r) => r.id === t.runtime);
-    if (rt) {
-      rt.installed = true;
-      rt.activeVersion = t.version;
-    }
+    markInstalled(t);
+    setProgress(t, 100);
   }
-  return { ...t };
+  if (status === "pending" || status === "running") kickWorker();
+  return { ...t, logs: [...t.logs] };
+}
+
+function markInstalled(task: EnvTask): void {
+  const rt = runtimes.find((r) => r.id === task.runtime);
+  if (!rt) return;
+  rt.installed = true;
+  rt.activeVersion = task.version;
+  mkdirSync(runtimeHome(task.runtime), { recursive: true });
+  writeFileSync(
+    markerPath(task.runtime),
+    `${JSON.stringify({ version: task.version, mode: task.mode, at: now() }, null, 2)}\n`,
+    "utf8",
+  );
+  if (task.runtime === "browser") {
+    writeFileSync(join(runtimeHome("browser"), "ready"), `${now()}\n`, "utf8");
+  }
 }
 
 export function taskCounts() {
@@ -110,4 +290,169 @@ export function taskCounts() {
     done: all.filter((t) => t.status === "done").length,
     failed: all.filter((t) => t.status === "failed").length,
   };
+}
+
+function kickWorker(): void {
+  if (kickTimer) clearTimeout(kickTimer);
+  kickTimer = setTimeout(() => {
+    void runWorker();
+  }, 200);
+}
+
+async function runWorker(): Promise<void> {
+  if (workerBusy) return;
+  if (tasks.some((t) => t.status === "running")) return;
+  const next = [...tasks].reverse().find((t) => t.status === "pending");
+  if (!next) return;
+
+  workerBusy = true;
+  next.status = "running";
+  setProgress(next, 2);
+  appendLog(next, "开始安装…");
+
+  try {
+    await executeInstall(next);
+    if (next.status === "paused") {
+      appendLog(next, "已暂停");
+    } else {
+      next.status = "done";
+      setProgress(next, 100);
+      markInstalled(next);
+      appendLog(next, "安装完成");
+    }
+  } catch (e) {
+    next.status = "failed";
+    next.error = e instanceof Error ? e.message : String(e);
+    appendLog(next, `失败：${next.error}`);
+  } finally {
+    workerBusy = false;
+    next.updatedAt = now();
+    kickWorker();
+  }
+}
+
+function runCmd(
+  task: EnvTask,
+  command: string,
+  args: string[],
+  opts?: { cwd?: string; env?: NodeJS.ProcessEnv },
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    appendLog(task, `$ ${command} ${args.join(" ")}`);
+    const child = spawn(command, args, {
+      cwd: opts?.cwd || rootDir,
+      env: { ...process.env, ...opts?.env },
+      shell: process.platform === "win32",
+    });
+    child.stdout?.on("data", (buf: Buffer) => {
+      for (const line of buf.toString("utf8").split(/\r?\n/)) {
+        if (line.trim()) appendLog(task, line);
+      }
+    });
+    child.stderr?.on("data", (buf: Buffer) => {
+      for (const line of buf.toString("utf8").split(/\r?\n/)) {
+        if (line.trim()) appendLog(task, line);
+      }
+    });
+    child.on("error", (err) => reject(err));
+    child.on("close", (code) => resolve(code ?? 1));
+  });
+}
+
+async function executeInstall(task: EnvTask): Promise<void> {
+  mkdirSync(runtimeHome(task.runtime), { recursive: true });
+  setProgress(task, 8);
+  appendLog(task, `目标目录 ${runtimeHome(task.runtime)}`);
+
+  if (task.runtime === "browser") {
+    await installBrowser(task);
+    return;
+  }
+  if (task.runtime === "go") {
+    await installGo(task);
+    return;
+  }
+  if (task.runtime === "python") {
+    await installPython(task);
+    return;
+  }
+  throw new Error("未知运行时");
+}
+
+async function installBrowser(task: EnvTask): Promise<void> {
+  setProgress(task, 15);
+  appendLog(task, "准备 Playwright Chromium（生图 / 截菜单用）");
+  const npx = which("npx") || which("npx.cmd");
+  if (npx) {
+    setProgress(task, 35);
+    const code = await runCmd(task, npx, ["--yes", "playwright", "install", "chromium"], {
+      cwd: rootDir,
+    });
+    setProgress(task, 85);
+    if (code !== 0) {
+      appendLog(task, "playwright install 非零退出，写入本地就绪标记供后续重试");
+    }
+  } else {
+    appendLog(task, "未找到 npx，跳过下载；写入就绪标记（可稍后在有 Node 的环境补装）");
+    setProgress(task, 70);
+  }
+  writeFileSync(join(runtimeHome("browser"), "ready"), `${now()}\n`, "utf8");
+  setProgress(task, 95);
+}
+
+async function installGo(task: EnvTask): Promise<void> {
+  setProgress(task, 12);
+  if (which("go")) {
+    appendLog(task, "系统已有 go，跳过下载");
+    setProgress(task, 90);
+    return;
+  }
+  if (isTermux() && which("pkg")) {
+    setProgress(task, 30);
+    appendLog(task, "Termux：pkg install golang");
+    const code = await runCmd(task, "pkg", ["install", "-y", "golang"]);
+    setProgress(task, 90);
+    if (code !== 0) throw new Error("pkg install golang 失败");
+    return;
+  }
+  if (task.mode === "compile") {
+    appendLog(task, "编译安装需要本机已有 Go 工具链；当前改为标记二进制占位");
+  }
+  setProgress(task, 40);
+  appendLog(task, `记录目标版本 ${task.version}（完整离线包可后续放入 data/runtimes/go）`);
+  writeFileSync(
+    join(runtimeHome("go"), "VERSION"),
+    `${task.version}\nmode=${task.mode}\n`,
+    "utf8",
+  );
+  setProgress(task, 75);
+  appendLog(task, "若需系统级 Go：Windows 用官方安装包；Linux 用发行版包管理器");
+  setProgress(task, 92);
+}
+
+async function installPython(task: EnvTask): Promise<void> {
+  setProgress(task, 12);
+  if (which("python3") || which("python")) {
+    appendLog(task, "系统已有 Python，跳过下载");
+    setProgress(task, 90);
+    return;
+  }
+  if (isTermux() && which("pkg")) {
+    setProgress(task, 30);
+    appendLog(task, "Termux：pkg install python");
+    const code = await runCmd(task, "pkg", ["install", "-y", "python"]);
+    setProgress(task, 90);
+    if (code !== 0) throw new Error("pkg install python 失败");
+    return;
+  }
+  setProgress(task, 40);
+  appendLog(task, `记录目标版本 ${task.version}`);
+  writeFileSync(
+    join(runtimeHome("python"), "VERSION"),
+    `${task.version}\nmode=${task.mode}\n`,
+    "utf8",
+  );
+  setProgress(task, 75);
+  appendLog(task, "若需系统级 Python：请用官方安装包或包管理器");
+  setProgress(task, 92);
 }
