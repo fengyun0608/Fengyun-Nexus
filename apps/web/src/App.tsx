@@ -326,7 +326,10 @@ export default function App() {
     settings: true,
     aiLayer: true,
   });
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.matchMedia("(min-width: 821px)").matches;
+  });
   const [rawPage, setRawPage] = useState(false);
   const [logsTab, setLogsTab] = useState<"gateway" | "messages">("gateway");
   const [pwConfirmStep, setPwConfirmStep] = useState(false);
@@ -1475,6 +1478,14 @@ export default function App() {
         <button type="button" className="sidebar-reopen" onClick={() => setSidebarOpen(true)}>
           {tr("menu")}
         </button>
+      )}
+      {sidebarOpen && (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label={tr("collapse")}
+          onClick={() => setSidebarOpen(false)}
+        />
       )}
 
       <main className="workspace">

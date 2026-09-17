@@ -482,9 +482,8 @@ async function bootstrap(): Promise<void> {
             log.error(`系统重启失败：${r.message}`);
             return [r.message];
           }
-          log.ok(`已调用系统重启程序 → ${r.script}`);
-          // Give the detached restart console a moment to spawn before we die
-          setTimeout(() => process.exit(0), 2200);
+          log.ok(`已请求同窗口重启（退出码 ${r.exitCode}）`);
+          setTimeout(() => process.exit(r.exitCode), 1200);
         }
         return replies;
       }
@@ -1388,11 +1387,11 @@ async function bootstrap(): Promise<void> {
     if (result.shouldExit) {
       const r = scheduleSystemRestart(ROOT);
       if (r.ok) {
-        log.ok(`更新完成，已调用系统重启 → ${r.script}`);
+        log.ok(`更新完成，同窗口重启（退出码 ${r.exitCode}）`);
       } else {
-        log.warn(`更新完成，但重启程序未就绪：${r.message}`);
+        log.warn(`更新完成，但重启标记失败：${r.message}`);
       }
-      setTimeout(() => process.exit(0), 2200);
+      setTimeout(() => process.exit(r.ok ? r.exitCode : 0), 1200);
     }
   });
 

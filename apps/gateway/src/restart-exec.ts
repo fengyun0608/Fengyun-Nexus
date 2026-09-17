@@ -1,70 +1,54 @@
-import { spawn } from "node:child_process";
-import { chmodSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
+/** Parent boot.mjs loops when gateway exits with this code (same window / Termux session). */
+export const NEXUS_RESTART_EXIT_CODE = 75;
+
+const FLAG = "nexus-restart.flag";
+
+export function restartFlagPath(root: string): string {
+  return join(root, "data", FLAG);
+}
+
+/** Mark that the next process exit should be treated as same-window restart. */
+export function writeRestartFlag(root: string): void {
+  const dir = join(root, "data");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(restartFlagPath(root), `${Date.now()}\n`, "utf8");
+}
+
+export function consumeRestartFlag(root: string): boolean {
+  const p = restartFlagPath(root);
+  if (!existsSync(p)) return false;
+  try {
+    unlinkSync(p);
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
 /**
- * Invoke repo-root restart executable (like Yunzai-style system restart).
- * - Windows: start /min restart.bat in a breakaway console so it survives gateway exit
- * - Unix/Termux: restart.sh backgrounds wait + boot.sh
+ * Same-window restart: write flag + exit 75.
+ * boot.mjs / pnpm boot 父进程检测到后原地再拉网关，不新开终端窗口。
  */
 export function scheduleSystemRestart(root: string): {
   ok: boolean;
   message: string;
-  script?: string;
+  exitCode: number;
 } {
-  const isWin = process.platform === "win32";
-  const script = join(root, isWin ? "restart.bat" : "restart.sh");
-  if (!existsSync(script)) {
-    return { ok: false, message: "未找到重启程序" };
-  }
-
   try {
-    if (!isWin) {
-      try {
-        chmodSync(script, 0o755);
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (isWin) {
-      // CRITICAL: do NOT use `cmd /c restart.bat` alone — that process exits with the
-      // gateway and nested `start /b` children often die with it.
-      // `start "title" /min` creates a new console process that outlives us.
-      const child = spawn(
-        "cmd.exe",
-        ["/c", "start", "FengyunNexusRestart", "/min", "cmd.exe", "/c", `call "${script}"`],
-        {
-          cwd: root,
-          detached: true,
-          stdio: "ignore",
-          windowsHide: true,
-          env: {
-            ...process.env,
-            NEXUS_RESTART_DELAY: process.env.NEXUS_RESTART_DELAY || "4",
-          },
-        },
-      );
-      child.unref();
-    } else {
-      const child = spawn("bash", [script], {
-        cwd: root,
-        detached: true,
-        stdio: "ignore",
-        env: {
-          ...process.env,
-          NEXUS_RESTART_DELAY: process.env.NEXUS_RESTART_DELAY || "4",
-        },
-      });
-      child.unref();
-    }
-
-    return { ok: true, message: "正在重启", script };
+    writeRestartFlag(root);
+    return {
+      ok: true,
+      message: "正在重启",
+      exitCode: NEXUS_RESTART_EXIT_CODE,
+    };
   } catch {
     return {
       ok: false,
       message: "重启失败",
-      script,
+      exitCode: 1,
     };
   }
 }

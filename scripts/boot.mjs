@@ -2,7 +2,7 @@
 /**
  * Fengyun Nexus boot — detect deps, build packages + Vite console, start gateway.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { spawn, execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,10 +96,45 @@ function run(args) {
       env,
     });
     child.on("exit", (code) => {
-      if (code === 0) resolve();
+      if (code === 0) resolve(0);
       else reject(new Error(`pnpm ${args.join(" ")} exited ${code}`));
     });
   });
+}
+
+/** Like run(), but returns exit code instead of throwing (for restart loop). */
+function runCode(args) {
+  return new Promise((resolve) => {
+    const env = {
+      ...process.env,
+      NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS: "false",
+    };
+    const child = spawn(pnpmCmd, args, {
+      cwd: root,
+      stdio: "inherit",
+      shell: isWin,
+      env,
+    });
+    child.on("exit", (code, signal) => {
+      if (signal) resolve(1);
+      else resolve(code ?? 0);
+    });
+  });
+}
+
+function consumeRestartFlag() {
+  const p = join(root, "data", "nexus-restart.flag");
+  if (!existsSync(p)) return false;
+  try {
+    unlinkSync(p);
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 async function detectDeps() {
@@ -182,7 +217,22 @@ async function main() {
   if (gatewayScript === "dev") {
     bootLog("WARN", ANSI.yellow, "NEXUS_DEV=1 → tsx watch 热重载；聊天写库勿误触需排除 data/");
   }
-  await run(["--filter", "@fengyun/nexus-gateway", gatewayScript]);
+
+  // #重启 / 更新：网关退出码 75 或 data/nexus-restart.flag → 同窗口再拉起，不新开终端
+  const RESTART_CODE = 75;
+  for (;;) {
+    const code = await runCode(["--filter", "@fengyun/nexus-gateway", gatewayScript]);
+    const flagged = consumeRestartFlag();
+    if (code === RESTART_CODE || flagged) {
+      bootLog("OK", ANSI.green, "同窗口重启中…");
+      await sleep(1200);
+      continue;
+    }
+    if (code !== 0) {
+      throw new Error(`pnpm --filter @fengyun/nexus-gateway ${gatewayScript} exited ${code}`);
+    }
+    process.exit(0);
+  }
 }
 
 main().catch((e) => {
