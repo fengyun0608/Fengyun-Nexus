@@ -485,13 +485,16 @@ async function bootstrap(): Promise<void> {
         }
 
         if (cmd.systemUpdate) {
-          log.info("收到 #更新：拉取远程框架…");
+          log.info(
+            `收到 #更新  channel=${msg.channel}  user=${msg.userId}  chat=${msg.chatId}`,
+          );
           const upd = applyRemoteUpdate(ROOT);
           if (!upd.ok) {
             const detail = upd.error ? `更新失败\n${upd.error}` : "更新失败";
             log.error(detail);
             replies = [detail];
           } else {
+            // 终端/网页看完整报告；QQ 只走合并转发，不再额外 sendText
             replies = [upd.reportText || upd.message];
             const uptime = formatUptime(Date.now() - startedAt);
             saveRestartNotify(ROOT, {
@@ -503,21 +506,37 @@ async function bootstrap(): Promise<void> {
               requestedAt: nowIso(),
               previousUptime: uptime,
             });
-            // QQ：合并转发（匿名用户）+ 多群通报
             if (msg.channel === "onebot11" && upd.forwardNodes?.length) {
               try {
-                await onebot.sendForward(upd.forwardNodes, msg);
+                const okFwd = await onebot.sendForward(upd.forwardNodes, msg);
+                log.info(okFwd ? "更新报告已合并转发" : "合并转发未发出，将回退纯文本");
                 const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
                 const originGid = msg.meta?.groupId ? String(msg.meta.groupId) : "";
                 for (const gid of notifyIds) {
                   if (originGid && gid === originGid) continue;
                   await onebot.sendForwardToGroup(gid, upd.forwardNodes);
                 }
+                // 转发成功：写入库供控制台查看，但不再对群 sendText（避免刷屏）
+                if (okFwd && upd.reportText) {
+                  db.insertMessage({
+                    id: newId("msg"),
+                    channel: msg.channel,
+                    chatId: msg.chatId,
+                    userId: "nexus",
+                    role: "assistant",
+                    content: upd.reportText,
+                    createdAt: nowIso(),
+                  });
+                  replies = [];
+                }
               } catch (e) {
                 log.warn(
                   `更新转发发送失败：${e instanceof Error ? e.message : String(e)}`,
                 );
               }
+            }
+            for (const line of (upd.reportText || upd.message).split(/\n/)) {
+              if (line.trim()) log.info(`[更新] ${line}`);
             }
           }
         }
@@ -549,16 +568,16 @@ async function bootstrap(): Promise<void> {
             clearRestartNotify(ROOT);
             return replies;
           }
-          // 群里已用合并转发，控制台/终端仍回完整报告；OneBot 再回简短「正在重启」避免重复刷屏
+          // QQ 已转发则回空数组，禁止再刷「正在重启」；转发失败则只回一条纯文本
           const out =
-            msg.channel === "onebot11"
-              ? ["正在重启"]
+            msg.channel === "onebot11" && replies.length === 0
+              ? []
               : replies;
           const r = scheduleSystemRestart(ROOT);
           if (!r.ok) {
             clearRestartNotify(ROOT);
             log.error(`更新后重启失败：${r.message}`);
-            return [`${last}\n重启失败：${r.message}`];
+            return last ? [`${last}\n重启失败：${r.message}`] : [`重启失败：${r.message}`];
           }
           log.ok(`更新完成，同窗口重启（退出码 ${r.exitCode}）`);
           setTimeout(() => process.exit(r.exitCode), 1500);

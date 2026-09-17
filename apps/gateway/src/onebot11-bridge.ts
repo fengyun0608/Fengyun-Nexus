@@ -147,6 +147,14 @@ export class OneBot11Bridge {
     return { ok: true, replied: replies };
   }
 
+  private openSockets(prefer?: WebSocket): WebSocket[] {
+    if (prefer && prefer.readyState === WebSocket.OPEN) return [prefer];
+    for (const ws of this.sockets) {
+      if (ws.readyState === WebSocket.OPEN) return [ws];
+    }
+    return [];
+  }
+
   private async handleEvent(ev: Ob11MessageEvent, prefer?: WebSocket): Promise<number> {
     this.lastEventAt = new Date().toISOString();
     if (ev.self_id != null) this.selfId = String(ev.self_id);
@@ -171,15 +179,11 @@ export class OneBot11Bridge {
     });
     const echo = `nx_${++this.echoSeq}`;
     const payload = JSON.stringify({ action: "send_msg", params, echo });
-    const targets = prefer ? [prefer] : [...this.sockets];
-    let sent = false;
-    for (const ws of targets) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(payload);
-        sent = true;
-      }
-    }
-    return sent;
+    // 只发一个连接，避免多 WS 客户端时同一条刷 N 遍
+    const targets = this.openSockets(prefer);
+    if (!targets.length) return false;
+    targets[0].send(payload);
+    return true;
   }
 
   /**
@@ -208,9 +212,8 @@ export class OneBot11Bridge {
     }));
 
     const mt = (ctx.meta?.messageType as string | undefined) ?? "private";
-    const prefer = opts?.prefer;
-    const targets = prefer ? [prefer] : [...this.sockets];
-    if (!targets.some((ws) => ws.readyState === WebSocket.OPEN)) return false;
+    const targets = this.openSockets(opts?.prefer);
+    if (!targets.length) return false;
 
     let action = "send_private_forward_msg";
     let params: Record<string, unknown> = {
@@ -225,14 +228,8 @@ export class OneBot11Bridge {
 
     const echo = `nx_fwd_${++this.echoSeq}`;
     const payload = JSON.stringify({ action, params, echo });
-    let sent = false;
-    for (const ws of targets) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(payload);
-        sent = true;
-      }
-    }
-    return sent;
+    targets[0].send(payload);
+    return true;
   }
 
   /** 向指定群发送合并转发（更新/重启多群通报） */
