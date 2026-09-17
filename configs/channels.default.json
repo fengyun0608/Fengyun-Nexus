@@ -1,0 +1,22 @@
+{
+  "channels": {
+    "web": {
+      "label": "网页控制台",
+      "masters": [],
+      "onlyMasters": false,
+      "note": ""
+    },
+    "webhook": {
+      "label": "HTTP Webhook",
+      "masters": [],
+      "onlyMasters": false,
+      "note": ""
+    },
+    "onebot11": {
+      "label": "QQ（OneBot 11）",
+      "masters": [],
+      "onlyMasters": false,
+      "note": "主人 QQ 号，多个用逗号分隔"
+    }
+  }
+}

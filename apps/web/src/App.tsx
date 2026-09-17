@@ -38,13 +38,25 @@ type Meta = {
   db?: { messages: number; plugins: number; kv: number };
 };
 
-type ChannelItem = { id: string; label?: string };
+type ChannelItem = {
+  id: string;
+  label?: string;
+  masters?: string[];
+  onlyMasters?: boolean;
+};
 type PluginItem = {
   id: string;
   name: string;
   version?: string;
   category?: string;
   configSupported?: boolean;
+  enabled?: boolean;
+};
+type ChannelSettings = {
+  label?: string;
+  masters: string[];
+  onlyMasters: boolean;
+  note?: string;
 };
 type PluginConfigField = {
   key: string;
@@ -257,6 +269,9 @@ export default function App() {
   const [dbPick, setDbPick] = useState("");
   const [dbPath, setDbPath] = useState("");
   const [editProviderId, setEditProviderId] = useState("");
+  const [chMasters, setChMasters] = useState("");
+  const [chOnlyMasters, setChOnlyMasters] = useState(false);
+  const [chNote, setChNote] = useState("");
 
   const tr = (key: string, vars?: Record<string, string | number>) => t(locale, key, vars);
 
@@ -395,6 +410,78 @@ export default function App() {
   const openChannel = (id: string) => {
     setActiveChannelId(id);
     setPanel("channel-detail");
+    setActionMsg("");
+    void loadChannelSettings(id);
+    if (id === "onebot11") void refreshOnebot();
+  };
+
+  const loadChannelSettings = async (id: string) => {
+    if (!token) {
+      setChMasters("");
+      setChOnlyMasters(false);
+      setChNote("");
+      return;
+    }
+    try {
+      const res = await api<{ settings: ChannelSettings }>(
+        `/v1/channels/${encodeURIComponent(id)}/settings`,
+        { token },
+      );
+      setChMasters((res.settings.masters ?? []).join(", "));
+      setChOnlyMasters(Boolean(res.settings.onlyMasters));
+      setChNote(res.settings.note ?? "");
+    } catch {
+      setChMasters("");
+      setChOnlyMasters(false);
+      setChNote("");
+    }
+  };
+
+  const saveChannelSettings = async () => {
+    if (!token || !activeChannelId) return;
+    setActionMsg("");
+    try {
+      const res = await api<{ message?: string; settings?: ChannelSettings }>(
+        `/v1/channels/${encodeURIComponent(activeChannelId)}/settings`,
+        {
+          method: "PUT",
+          token,
+          body: JSON.stringify({
+            masters: chMasters,
+            onlyMasters: chOnlyMasters,
+            note: chNote,
+          }),
+        },
+      );
+      setActionMsg(res.message || tr("saveOk"));
+      if (res.settings) {
+        setChMasters((res.settings.masters ?? []).join(", "));
+        setChOnlyMasters(Boolean(res.settings.onlyMasters));
+        setChNote(res.settings.note ?? "");
+      }
+      void refreshSide();
+    } catch (e) {
+      setActionMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const setPluginEnabled = async (id: string, enabled: boolean) => {
+    if (!token) {
+      setInfo(tr("needLogin"));
+      return;
+    }
+    setActionMsg("");
+    try {
+      const res = await api<{ message?: string; items?: PluginItem[] }>(
+        `/v1/plugins/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`,
+        { method: "POST", token },
+      );
+      if (res.items) setPlugins(res.items);
+      else void refreshSide();
+      setActionMsg(res.message || tr("saveOk"));
+    } catch (e) {
+      setActionMsg(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const send = async () => {
@@ -817,32 +904,13 @@ export default function App() {
             onClick={() => setPanel("channels")}
             badge={String(channels.length || 0)}
           />
-          <TreeItem
-            label={tr("onebotDev")}
-            active={panel === "onebot"}
-            onClick={() => {
-              setActionMsg("");
-              setPanel("onebot");
-              void refreshOnebot();
-            }}
-            badge={onebotInfo?.connected ? "ON" : "…"}
-          />
           {channels.map((c) => (
             <TreeItem
               key={c.id}
               label={channelLabel(locale, c.id, c.label)}
               active={panel === "channel-detail" && activeChannelId === c.id}
               onClick={() => openChannel(c.id)}
-              badge="on"
-            />
-          ))}
-          {plugins.map((p) => (
-            <TreeItem
-              key={p.id}
-              label={p.name}
-              active={panel === "plugin-config" && activePluginId === p.id}
-              onClick={() => void openPluginConfig(p.id)}
-              badge={p.configSupported ? "cfg" : "·"}
+              badge={c.id === "onebot11" && onebotInfo?.connected ? "ON" : "on"}
             />
           ))}
           <TreeItem
@@ -887,6 +955,24 @@ export default function App() {
           onToggle={() => toggleGroup("settings")}
         >
           <TreeItem
+            label={tr("pluginManage")}
+            active={panel === "plugins" || panel === "plugin-config"}
+            onClick={() => {
+              setActionMsg("");
+              setPanel("plugins");
+            }}
+            badge={String(plugins.length)}
+          />
+          <TreeItem
+            label={tr("pluginUpdate")}
+            active={panel === "registry"}
+            onClick={() => {
+              setActionMsg("");
+              setPanel("registry");
+              if (!publishPluginId && plugins[0]?.id) setPublishPluginId(plugins[0].id);
+            }}
+          />
+          <TreeItem
             label={tr("aiProvider")}
             active={panel === "ai"}
             onClick={() => {
@@ -902,15 +988,6 @@ export default function App() {
               void refreshLogs();
             }}
             badge={String(logItems.length || "…")}
-          />
-          <TreeItem
-            label={tr("pluginUpdate")}
-            active={panel === "registry"}
-            onClick={() => {
-              setActionMsg("");
-              setPanel("registry");
-              if (!publishPluginId && plugins[0]?.id) setPublishPluginId(plugins[0].id);
-            }}
           />
           <TreeItem label={tr("config")} active={panel === "config"} onClick={() => setPanel("config")} />
           <TreeItem label={tr("admin")} active={panel === "admin"} onClick={() => setPanel("admin")} />
@@ -993,23 +1070,114 @@ export default function App() {
           </section>
         )}
 
-        {panel === "channel-detail" && activeChannel && hint && (
+        {panel === "channel-detail" && activeChannel && (
           <section className="panel">
             <div className="hero">
               <h1>{channelLabel(locale, activeChannel.id, activeChannel.label)}</h1>
               <p>
-                {tr("channelId")}: <code>{activeChannel.id}</code>. {tr("pluginBaseline")}
+                {tr("channelId")}: <code>{activeChannel.id}</code>. {tr("channelSettingsHero")}
               </p>
             </div>
             <div className="form">
-              <p className="muted">{hint.tip}</p>
-              <p className="muted">{tr("canonicalPattern")}</p>
-              <pre className="code-block">{hint.sample}</pre>
-              {activeChannel.id === "onebot11" && (
-                <button type="button" className="btn" onClick={() => setPanel("onebot")}>
-                  {tr("onebotDev")}
+              <div className="hero sub">
+                <h1>{tr("channelSettings")}</h1>
+              </div>
+              <p className="muted">{tr("channelSettingsHint")}</p>
+              <label>
+                {tr("channelMasters")}
+                <input
+                  value={chMasters}
+                  onChange={(e) => setChMasters(e.target.value)}
+                  placeholder={tr("channelMastersPh")}
+                />
+              </label>
+              <label>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={chOnlyMasters}
+                    onChange={(e) => setChOnlyMasters(e.target.checked)}
+                  />
+                  {tr("channelOnlyMasters")}
+                </span>
+              </label>
+              <label>
+                {tr("channelNote")}
+                <input value={chNote} onChange={(e) => setChNote(e.target.value)} />
+              </label>
+              {actionMsg && panel === "channel-detail" && <p className="muted">{actionMsg}</p>}
+              <button type="button" className="btn" onClick={() => void saveChannelSettings()}>
+                {tr("saveChannelSettings")}
+              </button>
+            </div>
+
+            {activeChannel.id === "onebot11" && (
+              <div className="form">
+                <div className="hero sub">
+                  <h1>{tr("onebotConn")}</h1>
+                </div>
+                <div className="chips">
+                  <div className="chip">
+                    {tr("onebotStatus")}{" "}
+                    <strong>
+                      {onebotInfo?.connected ? tr("onebotConnected") : tr("onebotDisconnected")}
+                    </strong>
+                  </div>
+                  <div className="chip">
+                    {tr("onebotClients")} <strong>{onebotInfo?.clients ?? 0}</strong>
+                  </div>
+                  <div className="chip">
+                    {tr("onebotSelfId")} <strong>{onebotInfo?.selfId || "—"}</strong>
+                  </div>
+                </div>
+                <p className="muted">{tr("onebotHint")}</p>
+                <label>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={obEnabled}
+                      onChange={(e) => setObEnabled(e.target.checked)}
+                    />
+                    {tr("onebotEnabled")}
+                  </span>
+                </label>
+                <label>
+                  {tr("onebotWsPath")}
+                  <input value={obWsPath} onChange={(e) => setObWsPath(e.target.value)} />
+                </label>
+                <label>
+                  {tr("onebotHttpPath")}
+                  <input value={obHttpPath} onChange={(e) => setObHttpPath(e.target.value)} />
+                </label>
+                <label>
+                  {tr("onebotToken")}
+                  <input
+                    type="password"
+                    value={obToken}
+                    onChange={(e) => setObToken(e.target.value)}
+                    autoComplete="off"
+                  />
+                </label>
+                <button type="button" className="btn" onClick={() => void saveOnebot()}>
+                  {tr("onebotSave")}
                 </button>
-              )}
+                <button type="button" className="btn ghost" onClick={() => void refreshOnebot()}>
+                  {tr("refresh")}
+                </button>
+              </div>
+            )}
+
+            {hint && (
+              <div className="form">
+                <div className="hero sub">
+                  <h1>{tr("pluginBaseline")}</h1>
+                </div>
+                <p className="muted">{hint.tip}</p>
+                <p className="muted">{tr("canonicalPattern")}</p>
+                <pre className="code-block">{hint.sample}</pre>
+              </div>
+            )}
+            <div className="form">
               <button type="button" className="btn ghost" onClick={() => setPanel("channels")}>
                 {tr("backChannels")}
               </button>
@@ -1562,35 +1730,50 @@ export default function App() {
                 </button>
               </div>
             )}
+            <div className="form">
+              <button type="button" className="btn ghost" onClick={() => setPanel("plugins")}>
+                {tr("backPlugins")}
+              </button>
+            </div>
           </section>
         )}
 
         {panel === "plugins" && (
           <section className="panel">
             <div className="hero">
-              <h1>{tr("plugins")}</h1>
-              <p>{tr("pluginsHero")}</p>
+              <h1>{tr("pluginManage")}</h1>
+              <p>{tr("pluginManageHero")}</p>
             </div>
+            {actionMsg && panel === "plugins" && <p className="muted pad">{actionMsg}</p>}
             <div className="list">
               {plugins.length === 0 && <p className="muted pad">{tr("noPlugins")}</p>}
               {plugins.map((p) => (
-                <button
-                  type="button"
-                  className="list-row list-row-btn"
-                  key={p.id}
-                  onClick={() => void openPluginConfig(p.id)}
-                >
+                <div className="list-row" key={p.id}>
                   <div>
                     <strong>{p.name}</strong>
                     <div className="muted">
                       {p.id}
                       {p.version ? ` @${p.version}` : ""}
+                      {p.enabled === false ? ` · ${tr("pluginDisabled")}` : ""}
                     </div>
                   </div>
-                  <span className="badge ok">
-                    {p.configSupported ? tr("openConfig") : tr("loaded")}
-                  </span>
-                </button>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="btn mini"
+                      onClick={() => void openPluginConfig(p.id)}
+                    >
+                      {tr("pluginManageBtn")}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn mini ghost"
+                      onClick={() => void setPluginEnabled(p.id, p.enabled === false)}
+                    >
+                      {p.enabled === false ? tr("pluginEnable") : tr("pluginDisable")}
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
           </section>

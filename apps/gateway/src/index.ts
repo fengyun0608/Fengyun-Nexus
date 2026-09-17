@@ -26,6 +26,14 @@ import {
 } from "@fengyun/nexus-shared";
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
 import { bootStep, printBootBanner, printBootSuccess } from "./boot-banner.js";
+import {
+  getChannelSettings,
+  isChannelMaster,
+  loadChannelsConfig,
+  saveChannelsConfig,
+  type ChannelSettings,
+  type ChannelsConfigFile,
+} from "./channel-settings.js";
 import { loadDbConfig, resolveDbOpenOpts, saveDbConfig } from "./db-config.js";
 import { formatErrorForClient, translateError } from "./errors-zh.js";
 import { getLogEntries, log } from "./log.js";
@@ -255,6 +263,7 @@ async function bootstrap(): Promise<void> {
 
   const plugins = new PluginHost();
   await bootStep("初始化：扫描插件目录 plugins/ …");
+  const prevPlugins = db.listPlugins();
   const scan = await loadPluginsFromDir(PLUGINS_DIR, (tip) => {
     if (tip.level === "ok") log.ok(`[插件] ${tip.id}  ${tip.message}`);
     else if (tip.level === "warn") log.warn(`[插件] ${tip.id}  ${tip.message}`);
@@ -263,20 +272,29 @@ async function bootstrap(): Promise<void> {
   });
   for (const p of scan.host.values()) {
     plugins.register(p);
+    const prev = prevPlugins.find((x) => x.id === p.manifest.id);
+    const enabled = prev ? prev.enabled !== false : true;
+    plugins.setEnabled(p.manifest.id, enabled);
     db.upsertPlugin({
       id: p.manifest.id,
       name: p.manifest.name,
       version: p.manifest.version,
-      enabled: true,
+      enabled,
       loadedAt: nowIso(),
     });
-    await bootStep(`  · 挂载插件 ${p.manifest.id}@${p.manifest.version}`, 18);
+    await bootStep(
+      `  · 挂载插件 ${p.manifest.id}@${p.manifest.version}${enabled ? "" : "（已停用）"}`,
+      18,
+    );
   }
   await plugins.emitReady((id) => ({
     pluginId: id,
     reply: async () => undefined,
     log: (m) => log.plugin(id, m),
   }));
+
+  let channelCfg: ChannelsConfigFile = loadChannelsConfig(ROOT);
+  await bootStep("初始化：消息通道配置（主人等，与插件装载独立）…");
   await bootStep(`插件就绪：${plugins.list().length} 个`);
 
   await bootStep("初始化：工作流引擎…");
@@ -348,6 +366,13 @@ async function bootstrap(): Promise<void> {
 
   /** Process inbound message: plugins first; LLM only if configured; never local-echo. */
   async function processInbound(msg: NexusMessage): Promise<string[]> {
+    const chSettings = getChannelSettings(channelCfg, msg.channel);
+    if (chSettings.onlyMasters && chSettings.masters.length) {
+      if (!isChannelMaster(chSettings, msg.userId)) {
+        return [];
+      }
+    }
+
     const session = sessions.getOrCreate({
       channel: msg.channel,
       chatId: msg.chatId,
@@ -612,11 +637,54 @@ async function bootstrap(): Promise<void> {
 
   app.get("/v1/plugins", (_req, res) => {
     res.json({
-      items: plugins.values().map((p) => ({
-        ...p.manifest,
-        configSupported: Boolean(p.configSchema?.length),
-      })),
+      items: plugins.listConsole(),
       tips: scan.tips,
+    });
+  });
+
+  app.post("/v1/plugins/:id/enable", authMiddleware, (req, res) => {
+    const id = String(req.params.id);
+    const p = plugins.get(id);
+    if (!p) {
+      res.status(404).json({ error: "插件未找到", errorType: "not_found" });
+      return;
+    }
+    plugins.setEnabled(id, true);
+    db.upsertPlugin({
+      id: p.manifest.id,
+      name: p.manifest.name,
+      version: p.manifest.version,
+      enabled: true,
+      loadedAt: nowIso(),
+    });
+    log.ok(`插件已启用  ${id}`);
+    res.json({
+      ok: true,
+      message: `已启用 ${p.manifest.name}`,
+      items: plugins.listConsole(),
+    });
+  });
+
+  app.post("/v1/plugins/:id/disable", authMiddleware, (req, res) => {
+    const id = String(req.params.id);
+    const p = plugins.get(id);
+    if (!p) {
+      res.status(404).json({ error: "插件未找到", errorType: "not_found" });
+      return;
+    }
+    plugins.setEnabled(id, false);
+    db.upsertPlugin({
+      id: p.manifest.id,
+      name: p.manifest.name,
+      version: p.manifest.version,
+      enabled: false,
+      loadedAt: nowIso(),
+    });
+    log.warn(`插件已停用  ${id}`);
+    res.json({
+      ok: true,
+      message: `已停用 ${p.manifest.name}`,
+      items: plugins.listConsole(),
     });
   });
 
@@ -678,7 +746,67 @@ async function bootstrap(): Promise<void> {
 
   app.get("/v1/channels", (_req, res) => {
     res.json({
-      items: channels.list().map((c) => ({ id: c.id, label: c.label ?? c.id })),
+      items: channels.list().map((c) => {
+        const s = getChannelSettings(channelCfg, c.id);
+        return {
+          id: c.id,
+          label: s.label || c.label || c.id,
+          masters: s.masters,
+          onlyMasters: s.onlyMasters,
+        };
+      }),
+    });
+  });
+
+  app.get("/v1/channels/:id/settings", authMiddleware, (req, res) => {
+    const id = String(req.params.id);
+    if (!channels.get(id)) {
+      res.status(404).json({ error: "通道未找到", errorType: "not_found" });
+      return;
+    }
+    res.json({
+      ok: true,
+      id,
+      settings: getChannelSettings(channelCfg, id),
+    });
+  });
+
+  app.put("/v1/channels/:id/settings", authMiddleware, (req, res) => {
+    const id = String(req.params.id);
+    if (!channels.get(id)) {
+      res.status(404).json({ error: "通道未找到", errorType: "not_found" });
+      return;
+    }
+    const body = (req.body ?? {}) as Partial<ChannelSettings>;
+    const prev = getChannelSettings(channelCfg, id);
+    let masters = prev.masters;
+    if (typeof body.masters === "string") {
+      masters = String(body.masters)
+        .split(/[,，\s]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    } else if (Array.isArray(body.masters)) {
+      masters = body.masters.map((m) => String(m).trim()).filter(Boolean);
+    }
+    const next: ChannelSettings = {
+      ...prev,
+      ...body,
+      masters,
+      onlyMasters:
+        typeof body.onlyMasters === "boolean" ? body.onlyMasters : prev.onlyMasters,
+      note: typeof body.note === "string" ? body.note : prev.note,
+      label: typeof body.label === "string" ? body.label : prev.label,
+    };
+    channelCfg = {
+      channels: { ...channelCfg.channels, [id]: next },
+    };
+    saveChannelsConfig(ROOT, channelCfg);
+    log.ok(`通道配置已保存  ${id}  masters=${next.masters.join(",") || "—"}`);
+    res.json({
+      ok: true,
+      message: "通道配置已保存（与插件装载独立）",
+      id,
+      settings: next,
     });
   });
 

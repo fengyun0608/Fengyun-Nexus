@@ -142,6 +142,7 @@ export function definePlugin(plugin: NexusPlugin): NexusPlugin {
 
 export class PluginHost {
   private plugins = new Map<string, NexusPlugin>();
+  private disabled = new Set<string>();
 
   register(plugin: NexusPlugin): void {
     this.plugins.set(plugin.manifest.id, plugin);
@@ -151,10 +152,31 @@ export class PluginHost {
     return this.plugins.get(id);
   }
 
+  setEnabled(id: string, enabled: boolean): boolean {
+    if (!this.plugins.has(id)) return false;
+    if (enabled) this.disabled.delete(id);
+    else this.disabled.add(id);
+    return true;
+  }
+
+  isEnabled(id: string): boolean {
+    return this.plugins.has(id) && !this.disabled.has(id);
+  }
+
   list(): PluginManifest[] {
     return [...this.plugins.values()]
       .sort((a, b) => (a.manifest.priority ?? 5000) - (b.manifest.priority ?? 5000))
       .map((p) => p.manifest);
+  }
+
+  listConsole(): Array<
+    PluginManifest & { enabled: boolean; configSupported: boolean }
+  > {
+    return this.values().map((p) => ({
+      ...p.manifest,
+      enabled: this.isEnabled(p.manifest.id),
+      configSupported: Boolean(p.configSchema?.length),
+    }));
   }
 
   values(): NexusPlugin[] {
@@ -165,6 +187,7 @@ export class PluginHost {
 
   async emitReady(makeCtx: (id: string) => PluginContext): Promise<void> {
     for (const p of this.values()) {
+      if (!this.isEnabled(p.manifest.id)) continue;
       await p.onReady?.(makeCtx(p.manifest.id));
     }
   }
@@ -172,6 +195,7 @@ export class PluginHost {
   async dispatchEvent(e: NexusEvent, makeCtx: (id: string) => PluginContext): Promise<NexusMessage[]> {
     const out: NexusMessage[] = [];
     for (const p of this.values()) {
+      if (!this.isEnabled(p.manifest.id)) continue;
       const ctx = makeCtx(p.manifest.id);
       if (typeof p.accept === "function") {
         const hit = await p.accept(e, ctx);
