@@ -4,6 +4,7 @@
  */
 import { existsSync, readFileSync, unlinkSync, cpSync, statSync, mkdirSync, readdirSync } from "node:fs";
 import { spawn, execSync } from "node:child_process";
+import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -65,6 +66,32 @@ function runtimeEnv() {
   } catch {
     return undefined;
   }
+}
+
+function guessEnv() {
+  if (process.env.NEXUS_ENV) return process.env.NEXUS_ENV;
+  const hint = runtimeEnv();
+  if (hint) return hint;
+  if (isTermux()) return "termux";
+  if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+    return "server";
+  }
+  return "desktop";
+}
+
+function consoleHints(port, env) {
+  const lines = [`本机 http://127.0.0.1:${port}/`];
+  if (env !== "server" && env !== "termux" && env !== "mobile") return lines;
+  const nets = networkInterfaces();
+  for (const list of Object.values(nets)) {
+    for (const n of list || []) {
+      const fam = String(n.family);
+      if (n.internal || (fam !== "IPv4" && fam !== "4")) continue;
+      lines.push(`外网 http://${n.address}:${port}/`);
+    }
+  }
+  lines.push("云服务器请在安全组放行这个 TCP 端口，别的端口连不上");
+  return lines;
 }
 
 function which(bin) {
@@ -375,12 +402,7 @@ async function main() {
   loadDotEnv();
   bootLog("INFO", ANSI.magenta, "Fengyun Nexus 启动器");
 
-  if (!process.env.NEXUS_ENV) {
-    const hint = runtimeEnv();
-    if (hint) process.env.NEXUS_ENV = hint;
-    else if (isTermux()) process.env.NEXUS_ENV = "termux";
-    else process.env.NEXUS_ENV = "desktop";
-  }
+  process.env.NEXUS_ENV = guessEnv();
 
   await detectDeps();
   await ensureBuild();
@@ -388,7 +410,9 @@ async function main() {
   const port = process.env.PORT || "8787";
   bootLog("OK", ANSI.green, `姿态=${process.env.NEXUS_ENV}`);
   bootLog("INFO", ANSI.cyan, `即将拉起网关 → 先连数据库，再刷初始化日志`);
-  bootLog("INFO", ANSI.cyan, `控制台 http://127.0.0.1:${port}/`);
+  for (const line of consoleHints(port, process.env.NEXUS_ENV)) {
+    bootLog("INFO", ANSI.cyan, line);
+  }
   bootLog("INFO", ANSI.cyan, "初始账号 console / console  |  或: pnpm nexus setup");
 
   // 正式启动用 start（无 watch）。开发热重载：NEXUS_DEV=1 或 pnpm --filter @fengyun/nexus-gateway dev

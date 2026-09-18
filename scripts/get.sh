@@ -123,6 +123,12 @@ persist_mirror() {
   fi
 }
 
+persist_env() {
+  [ -n "${NEXUS_ENV:-}" ] || return 0
+  mkdir -p "$INSTALL_DIR/configs" 2>/dev/null || return 0
+  printf '{\n  "env": "%s"\n}\n' "$NEXUS_ENV" > "$INSTALL_DIR/configs/runtime.local.json"
+}
+
 safe_cd_home() {
   cd "$HOME" 2>/dev/null || cd / 2>/dev/null || true
 }
@@ -164,8 +170,12 @@ run_root() {
 
 pkg_install() {
   if command -v apt-get >/dev/null 2>&1; then
-    run_root apt-get update -y || true
-    run_root DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+    # 必须用 env 带变量。root 下直接写 DEBIAN_FRONTEND=... 会被当成命令名
+    run_root env DEBIAN_FRONTEND=noninteractive apt-get update -y || true
+    run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+      -o Dpkg::Options::=--force-confdef \
+      -o Dpkg::Options::=--force-confold \
+      "$@"
     return $?
   fi
   if command -v dnf >/dev/null 2>&1; then
@@ -521,6 +531,7 @@ finalize_tree() {
   fi
   date -u +%Y-%m-%dT%H:%M:%SZ > "$INSTALL_DIR/.nexus-installed"
   persist_mirror
+  persist_env
   ok "框架已就绪  env=$NEXUS_ENV  mirror=$MIRROR  $(git -C "$INSTALL_DIR" log -1 --oneline 2>/dev/null || echo ready)"
 }
 
@@ -570,7 +581,13 @@ ensure_framework() {
 boot_now() {
   cd "$INSTALL_DIR"
   export NEXUS_ENV
-  log "启动  控制台 http://127.0.0.1:8787/"
+  log "启动  姿态=$NEXUS_ENV"
+  if [ "$NEXUS_ENV" = "server" ] || [ "$NEXUS_ENV" = "termux" ] || [ "$NEXUS_ENV" = "mobile" ]; then
+    log "控制台监听 0.0.0.0:8787。本机用 http://127.0.0.1:8787/ ，外网用本机公网 IP:8787"
+    log "云服务器请在安全组放行 TCP 8787，只开别的端口连不上"
+  else
+    log "控制台 http://127.0.0.1:8787/"
+  fi
   exec ./boot.sh
 }
 

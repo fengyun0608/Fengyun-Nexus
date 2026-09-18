@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { dirname, join, resolve, sep, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import cors from "cors";
@@ -202,14 +203,35 @@ function loadJson<T>(rel: string): T {
   return JSON.parse(readFileSync(p, "utf8")) as T;
 }
 
+function headlessLinux(): boolean {
+  return process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
+}
+
 function resolveEnvId(): NexusEnvId {
   const raw = (
     process.env.NEXUS_ENV ||
     loadRuntimeEnvHint() ||
-    (isTermuxHost() ? "termux" : "desktop")
+    (isTermuxHost() ? "termux" : headlessLinux() ? "server" : "desktop")
   ).toLowerCase();
   if (raw === "mobile" || raw === "desktop" || raw === "server" || raw === "termux") return raw;
   return "desktop";
+}
+
+function consoleUrls(port: number, host: string): string[] {
+  const urls = [`http://127.0.0.1:${port}/`];
+  const open = host === "0.0.0.0" || host === "::" || host === "[::]";
+  if (!open) {
+    if (host && host !== "127.0.0.1" && host !== "localhost") urls.push(`http://${host}:${port}/`);
+    return urls;
+  }
+  for (const list of Object.values(networkInterfaces())) {
+    for (const n of list || []) {
+      const fam = String(n.family);
+      if (n.internal || (fam !== "IPv4" && fam !== "4")) continue;
+      urls.push(`http://${n.address}:${port}/`);
+    }
+  }
+  return urls;
 }
 
 function loadEnvProfile(id: NexusEnvId): EnvProfile {
@@ -2467,10 +2489,17 @@ async function bootstrap(): Promise<void> {
   }
 
   await bootStep("初始化：监听端口…");
+  const urls = consoleUrls(port, host);
+  const publicUrl = urls.find((u) => !u.includes("127.0.0.1")) || urls[0]!;
   const server = app.listen(port, host, () => {
     onebot.attach(server);
+    if (host === "0.0.0.0" || host === "::") {
+      log.info(`监听 ${host}:${port}。外网用公网 IP，不要用 127.0.0.1`);
+      log.info("云服务器请在安全组放行这个 TCP 端口。别的端口连不上");
+    }
+    for (const u of urls) log.info(`控制台 ${u}`);
     void printBootSuccess({
-      url: `http://127.0.0.1:${port}/`,
+      url: publicUrl,
       env: profile.id,
       plugins: plugins.list().length,
       channels: channels.list().length,
