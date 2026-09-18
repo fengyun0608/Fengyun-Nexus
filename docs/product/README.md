@@ -6,8 +6,6 @@
 
 控制台、消息通道、插件、工作流、多模型配置放在同一套网关里跑。分层参考 Yunzai / [XRK-Yunzai](https://gitcode.com/xrkseek/XRK-Yunzai)：通道入站 → 指令与插件 → 模型 → 回通道。
 
-## 能力一览
-
 | 能力 | 说明 |
 |------|------|
 | 控制台 | 对话、通道、插件、看板、配置；默认中文，可切 English |
@@ -25,7 +23,7 @@
 控制台 / QQ / Webhook  →  Gateway  →  通道 · 会话/LLM · 插件/工作流/MCP  →  本地库
 ```
 
-细节见 [如何运作](../internal/how-it-works.md)。
+细节见仓库内网关与插件源码。
 
 ## 下一步
 

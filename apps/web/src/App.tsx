@@ -196,6 +196,8 @@ type UiModal =
   | { kind: "channel-docs" }
   | { kind: "onebot-conn" }
   | { kind: "plugin-config"; id: string }
+  | { kind: "plugin-source"; dir: string }
+  | { kind: "new-plugin" }
   | { kind: "password" }
   | { kind: "update" };
 
@@ -419,6 +421,16 @@ export default function App() {
   const [chNotifyGroups, setChNotifyGroups] = useState("");
   const [chPersona, setChPersona] = useState("");
   const [chNote, setChNote] = useState("");
+  const [botName, setBotName] = useState("Nexus");
+  const [botWake, setBotWake] = useState("");
+  const [devFiles, setDevFiles] = useState<Array<{ path: string; size: number }>>([]);
+  const [devFilePath, setDevFilePath] = useState("");
+  const [devFileContent, setDevFileContent] = useState("");
+  const [newPluginGuide, setNewPluginGuide] = useState<{
+    pluginsDir: string;
+    templateDir: string;
+    steps: string[];
+  } | null>(null);
   const [pluginLayer, setPluginLayer] = useState<PluginLayer>({ step: "home" });
   const [updateInfo, setUpdateInfo] = useState<{
     currentVersion: string;
@@ -1208,6 +1220,125 @@ export default function App() {
     }
   };
 
+  const loadBotSettings = async () => {
+    if (!token) return;
+    try {
+      const res = await api<{ bot: { name?: string; wakePrefixes?: string[] } }>(
+        "/v1/admin/bot",
+        { token },
+      );
+      setBotName(res.bot?.name || "Nexus");
+      setBotWake((res.bot?.wakePrefixes ?? []).join(", "));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const saveBotSettings = async () => {
+    if (!token) {
+      setActionMsg(tr("needLogin"));
+      return;
+    }
+    try {
+      const res = await api<{ message?: string; bot?: { name?: string; wakePrefixes?: string[] } }>(
+        "/v1/admin/bot",
+        {
+          method: "PUT",
+          token,
+          body: JSON.stringify({
+            name: botName,
+            wakePrefixes: botWake,
+          }),
+        },
+      );
+      setBotName(res.bot?.name || botName);
+      setBotWake((res.bot?.wakePrefixes ?? []).join(", "));
+      setActionMsg(res.message || tr("saveOk"));
+    } catch (e) {
+      setActionMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const openPluginSource = async (pluginId: string) => {
+    if (!token) {
+      flashModal(tr("needLogin"), "error");
+      return;
+    }
+    try {
+      const res = await api<{
+        items: Array<{ id: string; dir: string }>;
+      }>("/v1/admin/dev/plugins", { token });
+      const norm = (s: string) => s.toLowerCase().replace(/[.-]/g, "");
+      const hit =
+        res.items.find((d) => d.dir === pluginId || d.id === pluginId) ||
+        res.items.find((d) => norm(d.dir) === norm(pluginId));
+      if (!hit) {
+        flashModal(tr("pluginSourceMissing"), "error");
+        return;
+      }
+      const files = await api<{ files: Array<{ path: string; size: number }> }>(
+        `/v1/admin/dev/plugins/${encodeURIComponent(hit.dir)}/files`,
+        { token },
+      );
+      setDevFiles(files.files ?? []);
+      setDevFilePath("");
+      setDevFileContent("");
+      setUiModal({ kind: "plugin-source", dir: hit.dir });
+      const prefer =
+        (files.files ?? []).find((f) => f.path.endsWith("/index.ts")) ||
+        (files.files ?? [])[0];
+      if (prefer) void loadDevFile(prefer.path);
+    } catch (e) {
+      flashModal(e instanceof Error ? e.message : String(e), "error");
+    }
+  };
+
+  const loadDevFile = async (path: string) => {
+    if (!token) return;
+    try {
+      const res = await api<{ path: string; content: string }>(
+        `/v1/admin/dev/file?path=${encodeURIComponent(path)}`,
+        { token },
+      );
+      setDevFilePath(res.path);
+      setDevFileContent(res.content);
+    } catch (e) {
+      flashModal(e instanceof Error ? e.message : String(e), "error");
+    }
+  };
+
+  const saveDevFile = async () => {
+    if (!token || !devFilePath) return;
+    try {
+      const res = await api<{ message?: string }>("/v1/admin/dev/file", {
+        method: "PUT",
+        token,
+        body: JSON.stringify({ path: devFilePath, content: devFileContent }),
+      });
+      flashModal(res.message || tr("saveOk"), "ok");
+    } catch (e) {
+      flashModal(e instanceof Error ? e.message : String(e), "error");
+    }
+  };
+
+  const openNewPluginGuide = async () => {
+    if (!token) {
+      flashModal(tr("needLogin"), "error");
+      return;
+    }
+    try {
+      const res = await api<{
+        pluginsDir: string;
+        templateDir: string;
+        steps: string[];
+      }>("/v1/admin/dev/new-plugin", { token });
+      setNewPluginGuide(res);
+      setUiModal({ kind: "new-plugin" });
+    } catch (e) {
+      flashModal(e instanceof Error ? e.message : String(e), "error");
+    }
+  };
+
   const savePluginConfig = async () => {
     if (!token || !activePluginId) return;
     setModalStatus("");
@@ -1511,7 +1642,14 @@ export default function App() {
             }}
             badge={String(logItems.length || "…")}
           />
-          <TreeItem label={tr("config")} active={panel === "config"} onClick={() => setPanel("config")} />
+          <TreeItem
+            label={tr("config")}
+            active={panel === "config"}
+            onClick={() => {
+              setPanel("config");
+              void loadBotSettings();
+            }}
+          />
           <TreeItem label={tr("admin")} active={panel === "admin"} onClick={() => setPanel("admin")} />
         </TreeGroup>
 
@@ -2276,6 +2414,22 @@ export default function App() {
               <p className="muted">
                 {tr("frameworkVersion")}: {meta?.version ?? "…"}
               </p>
+              <label>
+                {tr("botName")}
+                <input value={botName} onChange={(e) => setBotName(e.target.value)} />
+              </label>
+              <label>
+                {tr("botWake")}
+                <input
+                  value={botWake}
+                  onChange={(e) => setBotWake(e.target.value)}
+                  placeholder={tr("botWakePh")}
+                />
+              </label>
+              <p className="muted">{tr("botWakeHint")}</p>
+              <button type="button" className="btn" onClick={() => void saveBotSettings()}>
+                {tr("saveBot")}
+              </button>
               <button
                 type="button"
                 className="btn"
@@ -2606,9 +2760,18 @@ export default function App() {
                     >
                       {tr("configMasters")}
                     </button>
+                    <button type="button" className="btn ghost" onClick={() => void openNewPluginGuide()}>
+                      {tr("newPlugin")}
+                    </button>
                     <p className="muted">{tr("channelSettingsHint")}</p>
                   </div>
-                ) : null}
+                ) : (
+                  <div className="form" style={{ paddingTop: 0 }}>
+                    <button type="button" className="btn ghost" onClick={() => void openNewPluginGuide()}>
+                      {tr("newPlugin")}
+                    </button>
+                  </div>
+                )}
                 {actionMsg && <p className="muted pad">{actionMsg}</p>}
                 <div className="list">
                   {filteredPlugins.length === 0 && (
@@ -2637,6 +2800,13 @@ export default function App() {
                           onClick={() => void openPluginConfig(p.id)}
                         >
                           {tr("pluginManageBtn")}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn mini ghost"
+                          onClick={() => void openPluginSource(p.id)}
+                        >
+                          {tr("pluginSource")}
                         </button>
                         <button
                           type="button"
@@ -2977,6 +3147,9 @@ async menu(e) {
           >
             {tr("configMasters")}
           </button>
+          <button type="button" className="btn ghost" onClick={() => void openNewPluginGuide()}>
+            {tr("newPlugin")}
+          </button>
           <p className="muted">{tr("channelSettingsHint")}</p>
         </div>
         <div className="list compact">
@@ -3000,6 +3173,13 @@ async menu(e) {
                 <button
                   type="button"
                   className="btn mini ghost"
+                  onClick={() => void openPluginSource(p.id)}
+                >
+                  {tr("pluginSource")}
+                </button>
+                <button
+                  type="button"
+                  className="btn mini ghost"
                   onClick={() => void setPluginEnabled(p.id, p.enabled === false)}
                 >
                   {p.enabled === false ? tr("pluginEnable") : tr("pluginDisable")}
@@ -3008,6 +3188,74 @@ async menu(e) {
             </div>
           ))}
         </div>
+      </FloatModal>
+
+      <FloatModal
+        open={uiModal?.kind === "plugin-source"}
+        onClose={popModal}
+        closeLabel={tr("backLayer")}
+        title={tr("pluginSource")}
+        subtitle={uiModal?.kind === "plugin-source" ? uiModal.dir : undefined}
+        status={modalStatus}
+        statusTone={modalTone}
+        footer={
+          <button type="button" className="btn" onClick={() => void saveDevFile()} disabled={!devFilePath}>
+            {tr("saveFile")}
+          </button>
+        }
+      >
+        <div className="list compact" style={{ marginBottom: 12 }}>
+          {devFiles.map((f) => (
+            <button
+              type="button"
+              key={f.path}
+              className={`list-row ${devFilePath === f.path ? "active" : ""}`}
+              onClick={() => void loadDevFile(f.path)}
+              style={{ width: "100%", textAlign: "left", cursor: "pointer" }}
+            >
+              <div>
+                <strong>{f.path.split("/").slice(1).join("/") || f.path}</strong>
+                <div className="muted">{f.size} B</div>
+              </div>
+            </button>
+          ))}
+        </div>
+        {devFilePath ? (
+          <label>
+            {devFilePath}
+            <textarea
+              value={devFileContent}
+              onChange={(e) => setDevFileContent(e.target.value)}
+              rows={18}
+              style={{ fontFamily: "ui-monospace, Consolas, monospace", fontSize: 13 }}
+            />
+          </label>
+        ) : (
+          <p className="muted">{tr("pickSourceFile")}</p>
+        )}
+      </FloatModal>
+
+      <FloatModal
+        open={uiModal?.kind === "new-plugin"}
+        onClose={popModal}
+        title={tr("newPlugin")}
+        subtitle={tr("newPluginHint")}
+      >
+        {newPluginGuide && (
+          <>
+            <p className="muted">
+              {tr("pluginsDir")}: <code>{newPluginGuide.pluginsDir}</code>
+            </p>
+            <p className="muted">
+              {tr("templateDir")}: <code>{newPluginGuide.templateDir}</code>
+            </p>
+            <ol>
+              {newPluginGuide.steps.map((s) => (
+                <li key={s}>{s}</li>
+              ))}
+            </ol>
+          </>
+        )}
       </FloatModal>
 
       <FloatModal

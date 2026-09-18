@@ -1,0 +1,6 @@
+{
+  "name": "Nexus",
+  "wakePrefixes": [],
+  "commandPrefix": "#",
+  "note": "wakePrefixes：群聊里呼唤前缀，留空表示不强制。例如填 nexus 后可用 nexus帮助 / #nexus帮助"
+}

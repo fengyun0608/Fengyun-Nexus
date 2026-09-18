@@ -51,7 +51,16 @@ import {
   type EnvTaskStatus,
 } from "./env-tasks.js";
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
-import { scheduleSystemRestart } from "./restart-exec.js";
+import { loadBotConfig, saveBotConfig, stripWakePrefix, type BotConfig } from "./bot-config.js";
+import {
+  listPluginDirs,
+  listPluginFiles,
+  readPluginFile,
+  scaffoldPluginGuide,
+  writePluginFile,
+} from "./plugin-files.js";
+import { pathToFileURL } from "node:url";
+import { renderMenuShot } from "./menu-shot.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
   buildRestartingMessage,
@@ -63,6 +72,7 @@ import {
   peekRestartNotify,
   saveRestartNotify,
 } from "./restart-notify.js";
+import { scheduleSystemRestart } from "./restart-exec.js";
 import { reloadPlugins, watchPluginsHotReload } from "./plugin-hot-reload.js";
 import { getLogEntries, log } from "./log.js";
 import {
@@ -345,6 +355,7 @@ async function bootstrap(): Promise<void> {
   watchPluginsHotReload(pluginHotDeps, { enabled: !hotOff });
 
   let channelCfg: ChannelsConfigFile = loadChannelsConfig(ROOT);
+  let botCfg: BotConfig = loadBotConfig(ROOT);
   await bootStep("初始化：消息通道配置（主人等，与插件装载独立）…");
 
   /** Soft power-off: ignore normal chat until #开机. #重启 calls system restart executable. */
@@ -443,8 +454,9 @@ async function bootstrap(): Promise<void> {
     const chSettings = getChannelSettings(channelCfg, msg.channel);
     const isMaster = isChannelMaster(chSettings, msg.userId);
     const isAdminConsole = Boolean(opts?.isAdminConsole);
-    const trimmed = msg.content.trim();
-    const isHash = trimmed.startsWith("#");
+    const trimmedRaw = msg.content.trim();
+    const trimmed = stripWakePrefix(trimmedRaw, botCfg);
+    const isHash = trimmed.startsWith("#") || trimmed.startsWith(botCfg.commandPrefix || "#");
     const hashCmd = isHash
       ? resolveAdminHash(trimmed) ?? (trimmed.split(/\s+/)[0] ?? "")
       : "";
@@ -474,6 +486,26 @@ async function bootstrap(): Promise<void> {
         if (typeof cmd.powerOff === "boolean") powerOff = cmd.powerOff;
 
         let replies = [...cmd.replies];
+
+        // #帮助 / #状态：和生图一样渲成图片再发（群里好看）
+        if (
+          (hashCmd === "#帮助" || hashCmd === "#help" || hashCmd === "#状态") &&
+          replies.length
+        ) {
+          try {
+            const shot = await renderMenuShot({
+              title: hashCmd === "#状态" ? "运行状态" : "管理指令",
+              lines: replies[0].split(/\n/).filter(Boolean),
+            });
+            if (shot.ok) {
+              const fileUrl = pathToFileURL(shot.pngPath).href;
+              replies = [`[CQ:image,file=${fileUrl}]`];
+            }
+          } catch (e) {
+            log.warn(`帮助图渲染失败：${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+
         if (cmd.systemRestart) {
           const uptime = formatUptime(Date.now() - startedAt);
           replies = [buildRestartingMessage(uptime)];
@@ -493,11 +525,14 @@ async function bootstrap(): Promise<void> {
           );
         }
 
+        let updateResult: Awaited<ReturnType<typeof applyRemoteUpdate>> | null = null;
+
         if (cmd.systemUpdate) {
           log.info(
             `收到 #更新  channel=${msg.channel}  user=${msg.userId}  chat=${msg.chatId}`,
           );
-          const upd = applyRemoteUpdate(ROOT);
+          updateResult = applyRemoteUpdate(ROOT);
+          const upd = updateResult;
           if (!upd.ok) {
             const detail = upd.error ? `更新失败\n${upd.error}` : "更新失败";
             log.error(detail);
@@ -505,19 +540,21 @@ async function bootstrap(): Promise<void> {
           } else {
             const report = upd.reportText || upd.message;
             replies = [report];
-            const uptime = formatUptime(Date.now() - startedAt);
             const gid = originGroupId(msg);
             const mt = originMessageType(msg);
-            saveRestartNotify(ROOT, {
-              channel: msg.channel,
-              chatId: gid ? `group:${gid}` : msg.chatId,
-              userId: msg.userId,
-              messageType: mt,
-              groupId: gid,
-              requestedAt: nowIso(),
-              previousUptime: uptime,
-            });
-            // 主人在哪个群发的，更新报告就发回哪个群（纯文本保达；合并转发作增强）
+            // 有实际更新才记重启回执
+            if (upd.shouldExit) {
+              const uptime = formatUptime(Date.now() - startedAt);
+              saveRestartNotify(ROOT, {
+                channel: msg.channel,
+                chatId: gid ? `group:${gid}` : msg.chatId,
+                userId: msg.userId,
+                messageType: mt,
+                groupId: gid,
+                requestedAt: nowIso(),
+                previousUptime: uptime,
+              });
+            }
             if (msg.channel === "onebot11") {
               try {
                 let sent = false;
@@ -540,7 +577,6 @@ async function bootstrap(): Promise<void> {
                     ? `更新报告已发回原${mt === "group" ? `群 ${gid}` : "会话"}`
                     : "更新报告发送失败，将回退由回复通道再试",
                 );
-                // 额外通报群（可选）
                 if (sent && upd.forwardNodes?.length) {
                   const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
                   for (const extra of notifyIds) {
@@ -600,12 +636,17 @@ async function bootstrap(): Promise<void> {
         });
 
         if (cmd.systemUpdate) {
-          const last = replies[0] ?? "";
-          if (last.startsWith("更新失败")) {
+          const last = replies[0] ?? updateResult?.message ?? "";
+          if (!updateResult?.ok || last.startsWith("更新失败")) {
             clearRestartNotify(ROOT);
-            return replies;
+            return replies.length ? replies : [last || "更新失败"];
           }
-          // QQ 已转发则回空数组，禁止再刷「正在重启」；转发失败则只回一条纯文本
+          // 已是最新：只通知，不重启
+          if (!updateResult.shouldExit) {
+            clearRestartNotify(ROOT);
+            log.ok("已是最新，跳过重启");
+            return replies.length ? replies : [updateResult.message];
+          }
           const out =
             msg.channel === "onebot11" && replies.length === 0
               ? []
@@ -659,19 +700,21 @@ async function bootstrap(): Promise<void> {
       chatId: msg.chatId,
       userId: msg.userId,
     });
-    sessions.append(session, "user", msg.content);
+    // 插件匹配用去掉呼唤前缀后的文本（nexus帮助 → #帮助）
+    const pluginMsg = trimmed !== trimmedRaw ? { ...msg, content: trimmed } : msg;
+    sessions.append(session, "user", trimmed);
     db.insertMessage({
       id: msg.id,
       channel: msg.channel,
       chatId: msg.chatId,
       userId: msg.userId,
       role: "user",
-      content: msg.content,
+      content: trimmed,
       createdAt: msg.createdAt,
     });
 
     const pluginReplies = await Promise.race([
-      plugins.onMessage(msg, (id) => ({
+      plugins.onMessage(pluginMsg, (id) => ({
         pluginId: id,
         reply: async () => undefined,
         log: (m) => log.plugin(id, m),
@@ -1605,6 +1648,74 @@ async function bootstrap(): Promise<void> {
       }
       setTimeout(() => process.exit(r.ok ? r.exitCode : 0), 1200);
     }
+  });
+
+  app.get("/v1/admin/bot", authMiddleware, (_req, res) => {
+    res.json({ ok: true, bot: botCfg });
+  });
+
+  app.put("/v1/admin/bot", authMiddleware, (req, res) => {
+    const body = (req.body ?? {}) as Partial<BotConfig>;
+    const next: BotConfig = {
+      ...botCfg,
+      name: typeof body.name === "string" && body.name.trim() ? body.name.trim() : botCfg.name,
+      wakePrefixes: Array.isArray(body.wakePrefixes)
+        ? body.wakePrefixes.map((x) => String(x).trim()).filter(Boolean)
+        : typeof body.wakePrefixes === "string"
+          ? String(body.wakePrefixes)
+              .split(/[,，\s]+/)
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : botCfg.wakePrefixes,
+      commandPrefix:
+        typeof body.commandPrefix === "string" && body.commandPrefix
+          ? body.commandPrefix
+          : botCfg.commandPrefix,
+      note: typeof body.note === "string" ? body.note : botCfg.note,
+    };
+    botCfg = next;
+    saveBotConfig(ROOT, botCfg);
+    log.ok(`机器人配置已保存  name=${botCfg.name}  前缀=${botCfg.wakePrefixes.join(",") || "无"}`);
+    res.json({ ok: true, message: "已保存", bot: botCfg });
+  });
+
+  app.get("/v1/admin/dev/plugins", authMiddleware, (_req, res) => {
+    res.json({
+      ok: true,
+      items: listPluginDirs(ROOT),
+      guide: scaffoldPluginGuide(ROOT),
+    });
+  });
+
+  app.get("/v1/admin/dev/plugins/:dir/files", authMiddleware, (req, res) => {
+    const dir = String(req.params.dir || "");
+    res.json({ ok: true, dir, files: listPluginFiles(ROOT, dir) });
+  });
+
+  app.get("/v1/admin/dev/file", authMiddleware, (req, res) => {
+    const path = String(req.query.path ?? "");
+    const r = readPluginFile(ROOT, path);
+    if (!r.ok) {
+      res.status(400).json({ error: r.error });
+      return;
+    }
+    res.json({ ok: true, path: r.path, content: r.content });
+  });
+
+  app.put("/v1/admin/dev/file", authMiddleware, (req, res) => {
+    const path = String(req.body?.path ?? "");
+    const content = String(req.body?.content ?? "");
+    const r = writePluginFile(ROOT, path, content);
+    if (!r.ok) {
+      res.status(400).json({ error: r.error });
+      return;
+    }
+    log.ok(`已保存插件文件 ${r.path}`);
+    res.json({ ok: true, path: r.path, message: "已保存，插件热重载会自动生效" });
+  });
+
+  app.get("/v1/admin/dev/new-plugin", authMiddleware, (_req, res) => {
+    res.json({ ok: true, ...scaffoldPluginGuide(ROOT) });
   });
 
   const staticRoot = existsSync(join(WEB_DIST, "index.html"))

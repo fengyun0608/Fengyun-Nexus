@@ -103,16 +103,16 @@ export function buildUpdateReport(opts: {
     : "覆盖文件\n· 无";
 
   const overwriteNote = overwritten ? "本地改动已对齐远程" : "";
-  const restartLine = "正在重启";
+  const restartLine = updated ? "正在重启" : "";
 
   const forwardNodes = [head, commitBlock, fileBlock];
   if (overwriteNote) forwardNodes.push(overwriteNote);
-  forwardNodes.push(restartLine);
+  if (restartLine) forwardNodes.push(restartLine);
 
   const reportText = forwardNodes.join("\n\n");
   const message = updated
     ? `已更新到 ${version}，正在重启`
-    : `已是最新 ${version}，正在重启`;
+    : `已是最新 ${version}`;
 
   return { reportText, forwardNodes, message };
 }
@@ -248,7 +248,7 @@ export function applyRemoteUpdate(root: string): UpdateApplyResult {
       afterCommit: short(after),
       commits,
       files,
-      shouldExit: true,
+      shouldExit: updated,
       message: built.message,
       reportText: built.reportText,
       forwardNodes: built.forwardNodes,

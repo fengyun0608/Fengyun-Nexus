@@ -30,3 +30,6 @@ __pycache__/
 *.pyc
 .tmp-ref/
 tmp-*.mjs
+
+# 对内笔记 — 只留本机，勿推远程
+docs/internal/

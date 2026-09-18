@@ -319,7 +319,8 @@ async function runWorker(): Promise<void> {
 
   try {
     await executeInstall(next);
-    if (next.status === "paused") {
+    // executeInstall 可能把状态改成 paused
+    if ((next.status as EnvTaskStatus) === "paused") {
       appendLog(next, "已暂停");
     } else {
       next.status = "done";

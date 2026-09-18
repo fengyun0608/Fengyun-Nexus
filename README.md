@@ -149,7 +149,6 @@ pnpm nexus status
 - [开始使用](docs/product/start.md)
 - [环境要求](docs/product/environment.md)
 - [插件生态](docs/ecosystem/plugins.md)
-- [对内：如何运作](docs/internal/how-it-works.md)
 
 ---
 
