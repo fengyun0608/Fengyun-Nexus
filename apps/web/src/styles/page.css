@@ -54,3 +54,6 @@
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   margin-top: 12px;
 }
+.layer-grid.tight {
+  padding: 8px 0 0;
+}

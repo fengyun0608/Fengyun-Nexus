@@ -3,11 +3,11 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   NButton,
-  NCard,
   NInput,
-  NSwitch,
+  NModal,
   NSpace,
   NSpin,
+  NSwitch,
   useMessage,
 } from "naive-ui";
 import { api } from "@/api/client";
@@ -21,6 +21,28 @@ type Settings = {
   notifyGroupIds?: string[];
   systemPrompt?: string;
   note?: string;
+};
+
+type PluginItem = {
+  id: string;
+  name?: string;
+  enabled?: boolean;
+  kind?: "channel" | "framework";
+  adapterScope?: "all" | "channel" | "specified";
+  channels?: string[];
+};
+
+type OneBotInfo = {
+  connected?: boolean;
+  clients?: number;
+  selfId?: string;
+  message?: string;
+  config?: {
+    enabled?: boolean;
+    accessToken?: string;
+    reverseWsPath?: string;
+    httpPath?: string;
+  };
 };
 
 const auth = useAuthStore();
@@ -41,23 +63,60 @@ const notifyGroupIds = ref("");
 const systemPrompt = ref("");
 const note = ref("");
 
+const showSettings = ref(false);
+const showPlugins = ref(false);
+const showOnebot = ref(false);
+
+const plugins = ref<PluginItem[]>([]);
+const onebot = ref<OneBotInfo | null>(null);
+const obEnabled = ref(false);
+const obToken = ref("");
+const obWs = ref("");
+const obHttp = ref("");
+
+const channelPlugins = computed(() =>
+  plugins.value.filter((p) => {
+    const scope = p.adapterScope || (p.kind === "framework" ? "all" : "specified");
+    if (scope === "all") return true;
+    return (p.channels || []).includes(id.value);
+  }),
+);
+
+async function loadSettings() {
+  const res = await api<{ settings: Settings }>(
+    `/v1/channels/${encodeURIComponent(id.value)}/settings`,
+    { token: auth.token },
+  );
+  const s = res.settings || {};
+  label.value = s.label || id.value;
+  masters.value = (s.masters || []).join(", ");
+  onlyMasters.value = Boolean(s.onlyMasters);
+  replyGroupIds.value = (s.replyGroupIds || []).join(", ");
+  notifyGroupIds.value = (s.notifyGroupIds || []).join(", ");
+  systemPrompt.value = s.systemPrompt || "";
+  note.value = s.note || "";
+}
+
+async function loadPlugins() {
+  const res = await api<{ items: PluginItem[] }>("/v1/plugins", { token: auth.token });
+  plugins.value = res.items || [];
+}
+
+async function loadOnebot() {
+  if (id.value !== "onebot11") return;
+  onebot.value = await api<OneBotInfo>("/v1/channels/onebot11", { token: auth.token });
+  obEnabled.value = Boolean(onebot.value.config?.enabled);
+  obToken.value = onebot.value.config?.accessToken || "";
+  obWs.value = onebot.value.config?.reverseWsPath || "/onebot/v11/ws";
+  obHttp.value = onebot.value.config?.httpPath || "/onebot/v11";
+}
+
 async function load() {
   if (!id.value) return;
   loading.value = true;
   err.value = "";
   try {
-    const res = await api<{ settings: Settings }>(
-      `/v1/channels/${encodeURIComponent(id.value)}/settings`,
-      { token: auth.token },
-    );
-    const s = res.settings || {};
-    label.value = s.label || id.value;
-    masters.value = (s.masters || []).join(", ");
-    onlyMasters.value = Boolean(s.onlyMasters);
-    replyGroupIds.value = (s.replyGroupIds || []).join(", ");
-    notifyGroupIds.value = (s.notifyGroupIds || []).join(", ");
-    systemPrompt.value = s.systemPrompt || "";
-    note.value = s.note || "";
+    await Promise.all([loadSettings(), loadPlugins(), loadOnebot()]);
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -65,7 +124,7 @@ async function load() {
   }
 }
 
-async function save() {
+async function saveSettings() {
   saving.value = true;
   try {
     await api(`/v1/channels/${encodeURIComponent(id.value)}/settings`, {
@@ -82,6 +141,41 @@ async function save() {
       }),
     });
     message.success("通道配置已保存");
+    showSettings.value = false;
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function togglePlugin(p: PluginItem, enabled: boolean) {
+  try {
+    await api(`/v1/plugins/${encodeURIComponent(p.id)}/${enabled ? "enable" : "disable"}`, {
+      method: "POST",
+      token: auth.token,
+    });
+    p.enabled = enabled;
+    message.success(enabled ? `已启用 ${p.name || p.id}` : `已停用 ${p.name || p.id}`);
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function saveOnebot() {
+  saving.value = true;
+  try {
+    onebot.value = await api<OneBotInfo>("/v1/channels/onebot11/config", {
+      method: "POST",
+      token: auth.token,
+      body: JSON.stringify({
+        enabled: obEnabled.value,
+        accessToken: obToken.value,
+        reverseWsPath: obWs.value,
+        httpPath: obHttp.value,
+      }),
+    });
+    message.success(onebot.value.message || "已保存");
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {
@@ -96,42 +190,126 @@ watch(id, () => void load());
 <template>
   <div class="page">
     <header class="page-head">
-      <n-space align="center">
-        <n-button quaternary @click="router.push('/channels')">← 返回通道</n-button>
-      </n-space>
+      <p class="crumb">
+        <button type="button" class="linkish" @click="router.push('/channels')">全部通道</button>
+        <span> / </span>
+        <strong>{{ label || id }}</strong>
+      </p>
       <h1>{{ label || id }}</h1>
-      <p class="muted">本通道中枢：主人与回复范围在这里改。</p>
+      <p class="muted">通道中枢：设置与本通道插件从卡片进入中央弹窗。</p>
     </header>
+
     <n-spin :show="loading">
       <p v-if="err" class="err">{{ err }}</p>
-      <n-card v-else title="通道设置" size="small">
-        <label class="field">显示名 <n-input v-model:value="label" /></label>
-        <label class="field">主人 QQ / ID <n-input v-model:value="masters" placeholder="逗号分隔" /></label>
-        <label class="field row-switch">
-          仅主人可触发
-          <n-switch v-model:value="onlyMasters" />
-        </label>
-        <label class="field">回复群 <n-input v-model:value="replyGroupIds" placeholder="空=全部" /></label>
-        <label class="field">通知群 <n-input v-model:value="notifyGroupIds" /></label>
-        <label class="field">系统提示 <n-input v-model:value="systemPrompt" type="textarea" :rows="4" /></label>
-        <label class="field">备注 <n-input v-model:value="note" /></label>
-        <n-space>
-          <n-button type="primary" :loading="saving" @click="save">保存</n-button>
-          <n-button @click="router.push('/plugins')">本通道相关插件</n-button>
-          <n-button v-if="id === 'onebot11' || id.includes('onebot')" @click="router.push('/onebot')">
-            OneBot 连接
-          </n-button>
-        </n-space>
-      </n-card>
+      <div v-else class="layer-grid tight">
+        <button type="button" class="layer-card" @click="showSettings = true">
+          <strong>通道设置</strong>
+          <span>主人、回复群、系统提示等。</span>
+        </button>
+        <button type="button" class="layer-card" @click="showPlugins = true">
+          <strong>本通道插件管理</strong>
+          <span>本通道可用插件 · {{ channelPlugins.length }}</span>
+        </button>
+        <button
+          v-if="id === 'onebot11'"
+          type="button"
+          class="layer-card"
+          @click="showOnebot = true"
+        >
+          <strong>OneBot 连接</strong>
+          <span>{{ onebot?.connected ? "已连接" : "未连接" }}</span>
+        </button>
+      </div>
     </n-spin>
+
+    <n-modal
+      v-model:show="showSettings"
+      preset="card"
+      title="通道设置"
+      :style="{ width: 'min(520px, 94vw)' }"
+    >
+      <label class="field">显示名 <n-input v-model:value="label" /></label>
+      <label class="field">主人 QQ / ID <n-input v-model:value="masters" placeholder="逗号分隔" /></label>
+      <label class="field row-switch">
+        仅主人可触发
+        <n-switch v-model:value="onlyMasters" />
+      </label>
+      <label class="field">回复群 <n-input v-model:value="replyGroupIds" placeholder="空=全部" /></label>
+      <label class="field">通知群 <n-input v-model:value="notifyGroupIds" /></label>
+      <label class="field">系统提示 <n-input v-model:value="systemPrompt" type="textarea" :rows="4" /></label>
+      <label class="field">备注 <n-input v-model:value="note" /></label>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showSettings = false">关闭</n-button>
+          <n-button type="primary" :loading="saving" @click="saveSettings">保存</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal
+      v-model:show="showPlugins"
+      preset="card"
+      title="本通道插件管理"
+      :style="{ width: 'min(560px, 94vw)' }"
+    >
+      <p class="hint">含系统通用插件与本通道专用插件。</p>
+      <div v-for="p in channelPlugins" :key="p.id" class="plug-row">
+        <div>
+          <strong>{{ p.name || p.id }}</strong>
+          <p class="hint">{{ p.id }} · {{ p.kind === "framework" ? "系统" : "通道" }}</p>
+        </div>
+        <n-switch :value="Boolean(p.enabled)" @update:value="(v) => togglePlugin(p, v)" />
+      </div>
+      <p v-if="!channelPlugins.length" class="muted">本通道暂无可用插件</p>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="router.push('/plugins')">打开插件包</n-button>
+          <n-button @click="showPlugins = false">关闭</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal
+      v-model:show="showOnebot"
+      preset="card"
+      title="OneBot 连接"
+      :style="{ width: 'min(480px, 94vw)' }"
+    >
+      <p class="hint">
+        {{ onebot?.connected ? "已连接" : "未连接" }}
+        · 客户端 {{ onebot?.clients ?? 0 }}
+        · QQ {{ onebot?.selfId || "—" }}
+      </p>
+      <label class="field row-switch">启用 <n-switch v-model:value="obEnabled" /></label>
+      <label class="field">Access Token <n-input v-model:value="obToken" type="password" show-password-on="click" /></label>
+      <label class="field">反向 WS 路径 <n-input v-model:value="obWs" /></label>
+      <label class="field">HTTP 路径 <n-input v-model:value="obHttp" /></label>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="loadOnebot">刷新</n-button>
+          <n-button type="primary" :loading="saving" @click="saveOnebot">保存</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <style scoped>
 @import "@/styles/page.css";
+.layer-grid.tight {
+  padding: 8px 0 0;
+}
 .row-switch {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.plug-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
 }
 </style>
