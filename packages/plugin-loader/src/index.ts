@@ -149,6 +149,15 @@ export async function loadPluginsFromDir(
 
     const { entries: files, mode } = resolvePluginEntries(dir, manifest);
     if (!files.length) {
+      const adapterOnly = listTsEntries(join(dir, "adapter")).length > 0;
+      if (adapterOnly) {
+        tip({
+          level: "info",
+          id: manifest.id,
+          message: "仅 adapter/：消息插件入口可省略，通道由宿主自动检测挂载",
+        });
+        continue;
+      }
       tip({
         level: "error",
         id: manifest.id,

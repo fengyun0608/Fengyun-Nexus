@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { NButton, NInput, NForm, NFormItem, useMessage } from "naive-ui";
+import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 
 const auth = useAuthStore();
@@ -15,20 +16,15 @@ const pass = ref("");
 type NavItem = { to: string; label: string; names?: string[] };
 type NavGroup = { title: string; items: NavItem[] };
 
-const navGroups: NavGroup[] = [
+const channelNav = ref<NavItem[]>([]);
+
+const staticGroups: NavGroup[] = [
   {
     title: "总览",
     items: [
       { to: "/home", label: "概览", names: ["home"] },
       { to: "/chat", label: "对话", names: ["chat"] },
       { to: "/logs", label: "日志", names: ["logs"] },
-    ],
-  },
-  {
-    title: "通道",
-    items: [
-      { to: "/channels", label: "消息通道", names: ["channels", "channel-detail"] },
-      { to: "/onebot", label: "OneBot 11", names: ["onebot"] },
     ],
   },
   {
@@ -62,20 +58,66 @@ const navGroups: NavGroup[] = [
   },
 ];
 
+const navGroups = computed<NavGroup[]>(() => {
+  const channelItems: NavItem[] = [
+    { to: "/channels", label: "消息通道", names: ["channels"] },
+    ...channelNav.value,
+    { to: "/onebot", label: "OneBot 11", names: ["onebot"] },
+  ];
+  return [
+    staticGroups[0],
+    { title: "通道", items: channelItems },
+    ...staticGroups.slice(1),
+  ];
+});
+
 const active = computed(() => String(route.name || "home"));
 
 function isActive(item: NavItem): boolean {
+  if (item.to.startsWith("/channels/") && route.name === "channel-detail") {
+    const id = String(route.params.id || "");
+    return item.to === `/channels/${encodeURIComponent(id)}` || item.to === `/channels/${id}`;
+  }
+  if (item.to === "/channels") return active.value === "channels";
   return (item.names || [item.to.slice(1)]).includes(active.value);
 }
 
+async function refreshChannelNav() {
+  if (!auth.loggedIn || !auth.token) {
+    channelNav.value = [];
+    return;
+  }
+  try {
+    const res = await api<{ items: Array<{ id: string; label: string }> }>("/v1/channels", {
+      token: auth.token,
+    });
+    channelNav.value = (res.items || []).map((c) => ({
+      to: `/channels/${encodeURIComponent(c.id)}`,
+      label: c.label || c.id,
+      names: ["channel-detail"],
+    }));
+  } catch {
+    channelNav.value = [];
+  }
+}
+
 onMounted(() => {
-  void auth.refreshMe();
+  void auth.refreshMe().then(() => refreshChannelNav());
 });
+
+watch(
+  () => auth.loggedIn,
+  (ok) => {
+    if (ok) void refreshChannelNav();
+    else channelNav.value = [];
+  },
+);
 
 async function onLogin() {
   try {
     await auth.login(user.value.trim(), pass.value);
     message.success("登录成功");
+    await refreshChannelNav();
     await router.replace("/home");
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));

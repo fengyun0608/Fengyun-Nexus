@@ -85,6 +85,7 @@ import {
   saveRestartNotify,
 } from "./restart-notify.js";
 import { scheduleSystemRestart } from "./restart-exec.js";
+import { remountPluginChannels } from "./channel-adapters.js";
 import { reloadPlugins, watchPluginsHotReload } from "./plugin-hot-reload.js";
 import { getLogEntries, log } from "./log.js";
 import {
@@ -355,6 +356,18 @@ async function bootstrap(): Promise<void> {
   }
   await plugins.emitReady((id) => makePluginCtx(id, (m) => log.plugin(id, m)));
 
+  await bootStep("初始化：扫描插件 adapter/ 并自动挂载通道…");
+  await remountPluginChannels(
+    PLUGINS_DIR,
+    channels,
+    {
+      ok: (m) => log.ok(m),
+      warn: (m) => log.warn(m),
+      error: (m) => log.error(m),
+      info: (m) => log.info(m),
+    },
+  );
+
   const pluginHotDeps = {
     pluginsDir: PLUGINS_DIR,
     host: plugins,
@@ -371,6 +384,19 @@ async function bootstrap(): Promise<void> {
       warn: (m: string) => log.warn(m),
       error: (m: string) => log.error(m),
       info: (m: string) => log.info(m),
+    },
+    remountChannels: async () => {
+      await remountPluginChannels(
+        PLUGINS_DIR,
+        channels,
+        {
+          ok: (m) => log.ok(m),
+          warn: (m) => log.warn(m),
+          error: (m) => log.error(m),
+          info: (m) => log.info(m),
+        },
+        { cacheBust: true },
+      );
     },
   };
   // 热更新只重载插件，不重启网关进程
@@ -1247,6 +1273,7 @@ async function bootstrap(): Promise<void> {
           label: s.label || c.label || c.id,
           masters: s.masters,
           onlyMasters: s.onlyMasters,
+          source: channels.sourceOf(c.id) || "core",
         };
       }),
     });

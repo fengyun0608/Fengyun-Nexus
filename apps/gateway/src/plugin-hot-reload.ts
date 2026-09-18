@@ -23,6 +23,8 @@ export type PluginReloadDeps = {
     error: (m: string) => void;
     info: (m: string) => void;
   };
+  /** 插件热更后：重新扫描 adapter/ 并挂到 ChannelRegistry */
+  remountChannels?: () => Promise<void>;
 };
 
 /**
@@ -66,6 +68,10 @@ export async function reloadPlugins(deps: PluginReloadDeps): Promise<{
     }
 
     await host.emitReady((id) => makePluginCtx(id, (m) => log.info(`[${id}] ${m}`)));
+
+    if (deps.remountChannels) {
+      await deps.remountChannels();
+    }
 
     const n = host.list().length;
     log.ok(`插件热更新完成：${n} 个`);

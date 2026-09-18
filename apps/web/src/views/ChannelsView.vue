@@ -10,6 +10,7 @@ type ChannelItem = {
   label?: string;
   masters?: string[];
   onlyMasters?: boolean;
+  source?: "core" | "plugin";
 };
 
 const auth = useAuthStore();
@@ -57,6 +58,7 @@ onMounted(() => void load());
           <strong>{{ c.label || c.id }}</strong>
           <span>
             {{ c.id }}
+            · {{ c.source === "plugin" ? "插件自动挂载" : "内置" }}
             · 主人 {{ (c.masters || []).length || "—" }}
             · {{ c.onlyMasters ? "仅主人" : "全员可触发" }}
           </span>

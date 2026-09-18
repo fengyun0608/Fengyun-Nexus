@@ -71,12 +71,22 @@ export {
 
 export class ChannelRegistry {
   private adapters = new Map<string, ChannelAdapter>();
+  private sources = new Map<string, "core" | "plugin">();
 
-  register(adapter: ChannelAdapter): void {
-    this.adapters.set(adapter.id, adapter);
+  /** source=core 内置；plugin 来自插件包 adapter 目录扫描 */
+  register(adapter: ChannelAdapter, source: "core" | "plugin" = "core"): boolean {
+    const id = String(adapter?.id || "").trim();
+    if (!id) return false;
+    if (this.sources.get(id) === "core" && source === "plugin") {
+      return false;
+    }
+    this.adapters.set(id, adapter);
+    this.sources.set(id, source);
+    return true;
   }
 
   unregister(id: string): boolean {
+    this.sources.delete(id);
     return this.adapters.delete(id);
   }
 
@@ -88,7 +98,35 @@ export class ChannelRegistry {
     return [...this.adapters.values()];
   }
 
+  listWithSource(): Array<ChannelAdapter & { source: "core" | "plugin" }> {
+    return this.list().map((a) => ({
+      ...a,
+      source: this.sources.get(a.id) || "core",
+    }));
+  }
+
   has(id: string): boolean {
     return this.adapters.has(id);
+  }
+
+  sourceOf(id: string): "core" | "plugin" | undefined {
+    return this.sources.get(id);
+  }
+
+  /** 卸掉旧的插件通道，再挂上本次扫到的（内置 core 不动） */
+  remountPlugins(adapters: ChannelAdapter[]): { mounted: string[]; skipped: string[] } {
+    for (const [id, src] of [...this.sources.entries()]) {
+      if (src === "plugin") {
+        this.adapters.delete(id);
+        this.sources.delete(id);
+      }
+    }
+    const mounted: string[] = [];
+    const skipped: string[] = [];
+    for (const a of adapters) {
+      if (this.register(a, "plugin")) mounted.push(a.id);
+      else skipped.push(a.id);
+    }
+    return { mounted, skipped };
   }
 }

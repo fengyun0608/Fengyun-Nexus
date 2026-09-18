@@ -6,13 +6,15 @@
 my-plugin/
   nexus.plugin.json   # 不要写 main；不要根 index（有 index 就只加载它）
   plugin/             # 消息规则 *.ts（可多个）
-  adapter/            # 可选：协议适配
+  adapter/            # 可选：协议适配（宿主自动检测挂载，侧栏自动出现）
   workflow/           # 可选：AI 工作流
   http/               # 可选：REST
   events/             # 可选：进群/撤回等
   commonconfig/       # 可选：面板配置
   www/                # 可选：插件自带前端
 ```
+
+`adapter/*.ts` 导出 `defineAdapter({ id, label, normalizeInbound, formatOutbound })` 即可；**不用改网关、不用手写 register**。仅 adapter、没有 plugin 入口也可以。
 
 群里发 `#模块化` 测模板自带规则（复制后记得改指令）。
 
