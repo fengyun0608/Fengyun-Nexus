@@ -28,7 +28,6 @@ export type HashCommandContext = {
 export const ADMIN_HASH = new Set([
   "#帮助",
   "#help",
-  "#状态",
   "#关机",
   "#开机",
   "#重启",
@@ -93,7 +92,6 @@ export function parseHashCommand(
     cmd !== "#开机" &&
     cmd !== "#帮助" &&
     cmd !== "#help" &&
-    cmd !== "#状态" &&
     cmd !== "#重启" &&
     cmd !== "#更新" &&
     cmd !== "#更新插件" &&
@@ -109,17 +107,6 @@ export function parseHashCommand(
     case "#帮助":
     case "#help":
       return { handled: true, replies: [HELP] };
-    case "#状态":
-      return {
-        handled: true,
-        replies: [
-          ctx.powerOff
-            ? "已关机"
-            : ctx.uptime
-              ? `运行中\n本次运行时间：${ctx.uptime}`
-              : "运行中",
-        ],
-      };
     case "#关机":
       return {
         handled: true,

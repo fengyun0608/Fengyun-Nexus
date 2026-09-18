@@ -16,7 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const PLUGINS = ["z-menu", "z-draw", "z-echo"];
+const PLUGINS = ["z-menu", "z-status", "z-draw", "z-echo"];
 const SKIP = new Set(["node_modules", "dist", ".git"]);
 
 const outArg = process.argv[2];
@@ -74,14 +74,17 @@ for (const name of PLUGINS) {
 
 const readme = `# Fengyun Nexus · 系统插件包
 
-菜单 / 生图 / 回声。放到宿主 \`plugins/\` 下即可加载。
+菜单 / 状态 / 生图 / 回声。放到宿主 \`plugins/\` 下即可加载。
+
+专仓：https://gitcode.com/fengyunnb_admin/fengyun-system-plugins
 
 ## 包含
 
 | 目录 | 指令 | 说明 |
 |------|------|------|
 | \`plugins/z-menu\` | \`#菜单\` | 菜单图（系统截图） |
-| \`plugins/z-draw\` | \`#生图\` | 同上，显式生图指令 |
+| \`plugins/z-status\` | \`#状态\` | 框架 / 网络 / OneBot / AI / 群 |
+| \`plugins/z-draw\` | \`#生图\` | 菜单图截图发群 |
 | \`plugins/z-echo\` | \`#echo 文本\` | 回声示例 |
 
 ## 更新
@@ -92,40 +95,27 @@ const readme = `# Fengyun Nexus · 系统插件包
 - 框架或系统插件**有一方有更新**：多群合并转发说明改了啥，然后同窗口重启
 - 两边都最新：只回执，不重启
 
-专仓地址在控制台「插件更新」里配。
+专仓地址默认：\`configs/registry.json\` → \`pluginsRepo.url\`。
 
-## 截图规范
-
-截图由**宿主系统**提供，插件只调：
+## 截图与状态
 
 \`\`\`ts
 const shot = await ctx.shot.renderMenu({ title: "功能菜单", lines: ["#帮助", "#状态"] });
 if (shot.ok) await e.replyImage(pathToFileURL(shot.pngPath).href);
-// 任意 HTML：ctx.shot.renderHtml({ html, selector: "#shot" })
+
+const lines = ctx.runtime.statusLines(); // 宿主注入的运行信息
 \`\`\`
 
 - \`e.replyImage\` **只发图**，不要旁文。
-- 浏览器运行时在宿主控制台「环境配置」安装，插件不要再装 Playwright。
+- 浏览器运行时在宿主控制台「环境配置」安装。
 
-## 发布到另一个仓库
-
-本目录即是完整包。在空仓库根目录：
+## 发布
 
 \`\`\`bash
-# 在 Fengyun-Nexus 里生成
 pnpm pack:system-plugins
-# 或指定输出路径
-node scripts/export-system-plugin-pack.mjs /path/to/your-plugins-repo
-
-cd packs/fengyun-system-plugins   # 或你的目标路径
-git init
-git add .
-git commit -m "系统插件包：菜单 / 生图 / 回声"
-git remote add origin <你的仓库 URL>
-git push -u origin main
+cd packs/fengyun-system-plugins
+git add . && git commit -m "系统插件包更新" && git push
 \`\`\`
-
-宿主控制台「插件更新」填专仓地址即可检测与拉取；群里 \`#更新\` 会一并拉齐并重启。
 `;
 
 writeFileSync(join(outRoot, "README.md"), readme, "utf8");

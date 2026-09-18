@@ -1,0 +1,7 @@
+{
+  "id": "z.status",
+  "name": "状态",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "description": "运行状态图：框架 / 网络 / OneBot / AI / 群"
+}

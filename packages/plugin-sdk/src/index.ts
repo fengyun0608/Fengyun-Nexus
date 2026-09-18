@@ -159,6 +159,11 @@ export interface PluginContext {
   log: (msg: string) => void;
   /** 系统截图能力；菜单图 / 网页图走这里，勿在插件里另装浏览器 */
   shot: PluginShot;
+  /** 宿主运行时只读信息（状态图等） */
+  runtime: {
+    /** 框架 / 网络 / OneBot / AI / 群等状态行 */
+    statusLines: () => string[];
+  };
 }
 
 export interface PluginConfigField {

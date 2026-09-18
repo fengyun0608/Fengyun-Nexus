@@ -65,7 +65,7 @@ import {
 } from "./plugin-files.js";
 import { pathToFileURL } from "node:url";
 import { renderMenuShot } from "./menu-shot.js";
-import { makePluginCtx } from "./plugin-ctx.js";
+import { makePluginCtx, setPluginRuntime } from "./plugin-ctx.js";
 import { splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
@@ -498,6 +498,8 @@ async function bootstrap(): Promise<void> {
     });
   }
 
+  setPluginRuntime({ statusLines: collectStatusLines });
+
   /** Process inbound message: # admin → plugins (first match) → LLM. Never local-echo. */
   async function processInbound(
     msg: NexusMessage,
@@ -539,19 +541,11 @@ async function bootstrap(): Promise<void> {
 
         let replies = [...cmd.replies];
 
-        // #状态：补齐框架 / 网络 / 通道等基础信息
-        if (hashCmd === "#状态") {
-          replies = [collectStatusLines().join("\n")];
-        }
-
-        // #帮助 / #状态：和生图一样渲成图片再发（群里好看）
-        if (
-          (hashCmd === "#帮助" || hashCmd === "#help" || hashCmd === "#状态") &&
-          replies.length
-        ) {
+        // #帮助：和生图一样渲成图片再发
+        if ((hashCmd === "#帮助" || hashCmd === "#help") && replies.length) {
           try {
             const shot = await renderMenuShot({
-              title: hashCmd === "#状态" ? "运行状态" : "管理指令",
+              title: "管理指令",
               lines: replies[0].split(/\n/).filter(Boolean),
             });
             if (shot.ok) {
