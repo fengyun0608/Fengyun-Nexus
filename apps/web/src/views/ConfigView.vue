@@ -12,6 +12,7 @@ const botWake = ref("");
 const saving = ref(false);
 const updateBusy = ref(false);
 const showUpdate = ref(false);
+const applyReport = ref("");
 const updateInfo = ref<{
   currentVersion?: string;
   remoteVersion?: string;
@@ -19,6 +20,10 @@ const updateInfo = ref<{
   currentCommit?: string;
   remoteCommit?: string;
   message?: string;
+  plugins?: {
+    available: number;
+    items: Array<{ name: string; dir: string; status: string; detail?: string }>;
+  };
 } | null>(null);
 
 async function loadBot() {
@@ -51,6 +56,7 @@ async function saveBot() {
 
 async function checkUpdate() {
   updateBusy.value = true;
+  applyReport.value = "";
   try {
     updateInfo.value = await api("/v1/admin/update/check", { token: auth.token });
     showUpdate.value = true;
@@ -64,13 +70,22 @@ async function checkUpdate() {
 async function applyUpdate() {
   updateBusy.value = true;
   try {
-    const res = await api<{ message?: string; reportText?: string }>("/v1/admin/update/apply", {
+    const res = await api<{
+      message?: string;
+      reportText?: string;
+      updateSummary?: string[];
+      shouldExit?: boolean;
+    }>("/v1/admin/update/apply", {
       method: "POST",
       token: auth.token,
       body: JSON.stringify({ confirm: true }),
     });
-    message.success(res.reportText || res.message || "更新中，网关即将重启");
-    showUpdate.value = false;
+    applyReport.value = res.reportText || res.message || "更新完成";
+    if (res.shouldExit) {
+      message.success("已拉取，网关即将重启；群通知群会收到回执");
+    } else {
+      message.success(res.message || "已是最新");
+    }
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {
@@ -85,7 +100,7 @@ onMounted(() => void loadBot());
   <div class="page">
     <header class="page-head">
       <h1>配置</h1>
-      <p class="muted">呼唤前缀在此改；框架更新点右侧按钮，结果在中央弹窗确认。</p>
+      <p class="muted">呼唤前缀在此改；框架与系统插件更新点右侧按钮，结果在中央弹窗确认。</p>
     </header>
 
     <div class="surface">
@@ -101,8 +116,8 @@ onMounted(() => void loadBot());
 
     <div class="admin-row surface" style="margin-top: 14px">
       <div>
-        <strong>框架更新</strong>
-        <p class="muted">检查远端版本；有更新时在弹窗里确认拉取并重启。</p>
+        <strong>框架与系统插件更新</strong>
+        <p class="muted">检查远端框架与官方系统插件专仓；有更新时在弹窗里确认拉取并重启。</p>
       </div>
       <n-button type="primary" :loading="updateBusy" @click="checkUpdate">检查更新</n-button>
     </div>
@@ -110,20 +125,34 @@ onMounted(() => void loadBot());
     <n-modal
       v-model:show="showUpdate"
       preset="card"
-      title="框架更新"
-      :style="{ width: 'min(440px, 92vw)' }"
+      title="框架与系统插件更新"
+      :style="{ width: 'min(560px, 94vw)' }"
     >
-      <p v-if="updateInfo" class="upd-line">
-        {{ updateInfo.currentVersion }} → {{ updateInfo.remoteVersion || "—" }}
-      </p>
-      <p v-if="updateInfo" class="hint mono">
-        {{ updateInfo.currentCommit || "?" }} → {{ updateInfo.remoteCommit || "?" }}
-      </p>
-      <p class="hint">{{ updateInfo?.message }}</p>
+      <template v-if="!applyReport">
+        <p v-if="updateInfo" class="upd-line">
+          框架 {{ updateInfo.currentVersion }} → {{ updateInfo.remoteVersion || "—" }}
+        </p>
+        <p v-if="updateInfo" class="hint mono">
+          {{ updateInfo.currentCommit || "?" }} → {{ updateInfo.remoteCommit || "?" }}
+        </p>
+        <p class="hint">{{ updateInfo?.message }}</p>
+        <div v-if="updateInfo?.plugins?.items?.length" class="plugin-box">
+          <strong>系统插件待更新</strong>
+          <ul>
+            <li v-for="p in updateInfo.plugins.items" :key="p.dir || p.name">
+              {{ p.name }}
+              <span v-if="p.detail" class="muted"> · {{ p.detail }}</span>
+            </li>
+          </ul>
+        </div>
+        <p v-else-if="updateInfo" class="hint">系统插件侧无待更新项</p>
+      </template>
+      <pre v-else class="report">{{ applyReport }}</pre>
       <template #footer>
         <n-space justify="end">
           <n-button @click="showUpdate = false">关闭</n-button>
           <n-button
+            v-if="!applyReport"
             type="primary"
             :disabled="!updateInfo?.updateAvailable"
             :loading="updateBusy"
@@ -154,5 +183,32 @@ onMounted(() => void loadBot());
 .upd-line {
   margin: 0 0 6px;
   font-size: 1.05rem;
+}
+.plugin-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+}
+.plugin-box ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.plugin-box li {
+  margin: 4px 0;
+}
+.report {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--line);
 }
 </style>

@@ -53,7 +53,7 @@ import {
 } from "./env-tasks.js";
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
 import { applyFullUpdate } from "./full-update.js";
-import { buildRestartOkLines, buildStatusLines, buildStatusPanelHtml, type StatusShotInput } from "./status-shot.js";
+import { buildRestartOkLines, buildRestartOkPanelHtml, buildStatusLines, buildStatusPanelHtml, type StatusShotInput } from "./status-shot.js";
 import { execFileSync } from "node:child_process";
 import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
 import {
@@ -64,7 +64,7 @@ import {
   writePluginFile,
 } from "./plugin-files.js";
 import { pathToFileURL } from "node:url";
-import { renderMenuShot } from "./menu-shot.js";
+import { renderHtmlShot, renderMenuShot } from "./menu-shot.js";
 import { makePluginCtx, setPluginRuntime } from "./plugin-ctx.js";
 import { splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
@@ -754,9 +754,10 @@ async function bootstrap(): Promise<void> {
     }
 
     // 框架 / 插件 # 指令：任何群都可响应（不吃 AI 回复群白名单）
+    // 软关机：仍允许只读诊断 #状态；其它插件 # 指令挡住
     if (powerOff && isHash && !isAdminHash(hashCmd)) {
-      // Soft off: still allow #开机 via admin path above; block other plugin cmds
-      return [];
+      const allowDiag = /^#状态$/i.test(String(hashCmd || "").trim());
+      if (!allowDiag) return [];
     }
 
     const session = sessions.getOrCreate({
@@ -1794,8 +1795,61 @@ async function bootstrap(): Promise<void> {
   });
 
   app.get("/v1/admin/update/check", authMiddleware, (_req, res) => {
-    const result = checkRemoteUpdate(ROOT);
-    res.status(result.ok ? 200 : 502).json(result);
+    const fw = checkRemoteUpdate(ROOT);
+    const repoUrl = String(registry.pluginsRepo?.url || "").trim();
+    let plugins: {
+      available: number;
+      items: Array<{ name: string; dir: string; status: string; detail?: string }>;
+    } = { available: 0, items: [] };
+    if (repoUrl) {
+      try {
+        const checked = checkPluginUpdates(ROOT, {
+          pluginsRepoUrl: repoUrl,
+          pluginsRepoBranch: registry.pluginsRepo?.branch || "main",
+        });
+        const need = checked.items.filter(
+          (i) => i.status === "update" || i.status === "remote-only",
+        );
+        plugins = {
+          available: need.length,
+          items: need.map((i) => ({
+            name: i.name || i.id || i.dir,
+            dir: i.dir,
+            status: i.status,
+            detail:
+              i.localVersion && i.remoteVersion && i.localVersion !== i.remoteVersion
+                ? `${i.localVersion}→${i.remoteVersion}`
+                : i.remoteVersion || i.message,
+          })),
+        };
+      } catch (e) {
+        plugins = {
+          available: 0,
+          items: [
+            {
+              name: "系统插件",
+              dir: "",
+              status: "error",
+              detail: e instanceof Error ? e.message : String(e),
+            },
+          ],
+        };
+      }
+    }
+    const updateAvailable = Boolean(fw.updateAvailable) || plugins.available > 0;
+    const bits: string[] = [];
+    if (fw.updateAvailable) bits.push(`框架 ${fw.remoteVersion || fw.currentVersion}`);
+    if (plugins.available) bits.push(`系统插件 ${plugins.available} 个`);
+    res.status(fw.ok ? 200 : 502).json({
+      ...fw,
+      updateAvailable,
+      message: updateAvailable
+        ? `发现更新：${bits.join(" + ")}`
+        : fw.ok
+          ? "框架与系统插件均已是最新"
+          : fw.message,
+      plugins,
+    });
   });
 
   app.post("/v1/admin/update/apply", authMiddleware, (req, res) => {
@@ -1814,13 +1868,27 @@ async function bootstrap(): Promise<void> {
     }
     res.json(result);
     if (result.shouldExit) {
+      const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
+      const targetGid = notifyIds[0];
+      if (targetGid) {
+        saveRestartNotify(ROOT, {
+          channel: "onebot11",
+          chatId: `group:${targetGid}`,
+          userId: "console",
+          messageType: "group",
+          groupId: targetGid,
+          requestedAt: nowIso(),
+          previousUptime: formatUptime(Date.now() - startedAt),
+          updateSummary: result.updateSummary || result.changeItems || [],
+        });
+      }
       const r = scheduleSystemRestart(ROOT);
       if (r.ok) {
         log.ok(`更新完成，同窗口重启（退出码 ${r.exitCode}）`);
       } else {
         log.warn(`更新完成，但重启标记失败：${r.message}`);
       }
-      setTimeout(() => process.exit(r.ok ? r.exitCode : 0), 1200);
+      setTimeout(() => process.exit(r.ok ? r.exitCode : 0), 2800);
     }
   });
 
@@ -1983,9 +2051,17 @@ async function bootstrap(): Promise<void> {
 
     let sendPayload = text;
     try {
-      const shot = await renderMenuShot({
-        title: "重启成功",
-        lines,
+      const html = buildRestartOkPanelHtml(loaded, {
+        previousUptime: pending.previousUptime,
+        version: readLocalVersion(ROOT),
+        commit: shortCommit() || undefined,
+        updateSummary: pending.updateSummary,
+      });
+      const shot = await renderHtmlShot({
+        html,
+        selector: "#panel",
+        width: 820,
+        height: 1400,
       });
       if (shot.ok) {
         sendPayload = `[CQ:image,file=${pathToFileURL(shot.pngPath).href}]`;

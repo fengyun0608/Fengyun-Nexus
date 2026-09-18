@@ -29,7 +29,7 @@ export class ZMenuPlugin extends Plugin {
   async menu(e: NexusEvent, ctx: PluginContext) {
     const lines = [
       "#帮助 — 管理指令",
-      "#状态 — 框架与运行信息",
+      "#状态 — 运行状态",
       "#菜单 — 功能菜单",
       "#更新 — 框架与系统插件",
       "#生图 — 菜单图截图发群",

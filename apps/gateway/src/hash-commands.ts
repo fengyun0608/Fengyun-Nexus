@@ -55,7 +55,7 @@ export function resolveAdminHash(rawToken: string): string | null {
 const HELP = [
   "管理指令",
   "#帮助 — 查看指令",
-  "#状态 — 框架 / 网络 / 通道",
+  "#状态 — 运行状态面板",
   "#关机 — 暂停应答",
   "#开机 — 恢复应答",
   "#重启 — 重启",

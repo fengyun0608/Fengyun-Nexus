@@ -409,3 +409,134 @@ export function buildRestartOkLines(
   lines.push(`共 ${plugins.length} 个`);
   return lines;
 }
+
+/** 重启成功面板 HTML（与 #状态 同视觉，截 #panel） */
+export function buildRestartOkPanelHtml(
+  plugins: Array<{ id: string; name: string; version?: string }>,
+  opts?: {
+    previousUptime?: string;
+    version?: string;
+    commit?: string;
+    updateSummary?: string[];
+  },
+): string {
+  const summary = (opts?.updateSummary || []).map((s) => String(s).trim()).filter(Boolean);
+  const chips = [
+    opts?.version ? `v${opts.version}` : "",
+    opts?.commit ? `#${opts.commit}` : "",
+    opts?.previousUptime ? `上次 ${opts.previousUptime}` : "",
+  ]
+    .filter(Boolean)
+    .map((t) => `<span class="chip">${escapeHtml(t)}</span>`)
+    .join("");
+
+  const summaryHtml = summary.length
+    ? `<div class="box">
+      <div class="sec-title">刚才更新了这些</div>
+      <ul class="list">${summary
+        .slice(0, 16)
+        .map((s) => `<li>${escapeHtml(s)}</li>`)
+        .join("")}${
+        summary.length > 16
+          ? `<li class="more">…另有 ${summary.length - 16} 条</li>`
+          : ""
+      }</ul>
+    </div>`
+    : "";
+
+  const pluginHtml = plugins.length
+    ? plugins
+        .map((p) => {
+          const ver = p.version ? ` @${p.version}` : "";
+          return `<li>${escapeHtml(p.name)}${escapeHtml(ver)}</li>`;
+        })
+        .join("")
+    : `<li>无</li>`;
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>重启成功</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(160deg, #dfe6df 0%, #c5d0c8 45%, #b8c4bc 100%);
+    color: #2c322c;
+  }
+  #panel {
+    width: 760px; margin: 0 auto;
+    display: grid; gap: 12px;
+  }
+  .box {
+    background: rgba(255,255,255,.92);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow: 0 10px 28px rgba(40,50,40,.12);
+  }
+  .bot {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .avatar {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: linear-gradient(145deg, #e8a54b, #8fad7a);
+    display: grid; place-items: center;
+    color: #fff; font-weight: 800; font-size: 22px;
+    position: relative; flex-shrink: 0;
+  }
+  .dot {
+    position: absolute; right: 2px; bottom: 2px;
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid #fff; background: #6f9b6a;
+  }
+  .bot h1 {
+    margin: 0 0 6px; font-size: 22px; font-weight: 700;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font-size: 12px; padding: 3px 10px; border-radius: 999px;
+    background: #f4efe6; color: #5a5040;
+  }
+  .badge {
+    display: inline-block; margin-top: 8px;
+    font-size: 12px; padding: 2px 10px; border-radius: 999px;
+    font-weight: 600; background: #e5f2e3; color: #3d6b3a;
+  }
+  .sec-title {
+    font-size: 13px; font-weight: 700; color: #5a635a;
+    margin-bottom: 12px; letter-spacing: .04em;
+  }
+  .list {
+    margin: 0; padding-left: 18px;
+    font-size: 14px; line-height: 1.55;
+  }
+  .list .more { color: #7a827a; list-style: none; margin-left: -18px; }
+  .foot {
+    font-size: 12px; color: #5a635a;
+  }
+  .foot b { color: #2c322c; }
+</style>
+</head>
+<body>
+  <div id="panel">
+    <div class="box bot">
+      <div class="avatar">N<span class="dot"></span></div>
+      <div>
+        <h1>重启成功</h1>
+        <div class="chips">${chips}</div>
+        <span class="badge">已加载新版本</span>
+      </div>
+    </div>
+    ${summaryHtml}
+    <div class="box">
+      <div class="sec-title">本次加载插件</div>
+      <ul class="list">${pluginHtml}</ul>
+      <p class="foot" style="margin:12px 0 0">共 <b>${plugins.length}</b> 个</p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
