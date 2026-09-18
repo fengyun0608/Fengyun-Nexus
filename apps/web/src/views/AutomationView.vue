@@ -15,7 +15,7 @@ type WorkflowItem = {
 type McpItem = { name: string; description?: string };
 type Guide = {
   workflowsDir?: string;
-  docs?: Array<{ title: string; path: string }>;
+  docs?: Array<{ title: string; path: string; url?: string }>;
   steps?: string[];
 };
 
@@ -32,6 +32,10 @@ const showCreate = ref(false);
 const creating = ref(false);
 const createForm = ref({ id: "", name: "", author: "", description: "" });
 const createResult = ref<{ path?: string; message?: string; docs?: Guide["docs"] } | null>(null);
+
+function docHref(d: { path: string; url?: string }): string {
+  return d.url || `/v1/docs/view?path=${encodeURIComponent(d.path)}`;
+}
 
 async function load() {
   loading.value = true;
@@ -165,9 +169,11 @@ onMounted(() => void load());
         <label class="field">作者 <n-input v-model:value="createForm.author" /></label>
         <label class="field">说明 <n-input v-model:value="createForm.description" type="textarea" :rows="2" /></label>
         <div v-if="guide?.docs?.length" class="docs-mini">
-          <strong>编写文档</strong>
-          <ul>
-            <li v-for="d in guide.docs" :key="d.path"><code>{{ d.path }}</code> — {{ d.title }}</li>
+          <strong>编写文档（点开新窗口）</strong>
+          <ul class="doc-links">
+            <li v-for="d in guide.docs" :key="d.path">
+              <a :href="docHref(d)" target="_blank" rel="noopener noreferrer">{{ d.title }}</a>
+            </li>
           </ul>
         </div>
       </template>
@@ -175,9 +181,11 @@ onMounted(() => void load());
         <p class="ok-line">{{ createResult.message }}</p>
         <p class="hint">路径：<code>{{ createResult.path }}</code></p>
         <div v-if="createResult.docs?.length" class="docs-mini">
-          <strong>接下来看这些文档开始写</strong>
-          <ul>
-            <li v-for="d in createResult.docs" :key="d.path"><code>{{ d.path }}</code> — {{ d.title }}</li>
+          <strong>接下来点这些链接开始写</strong>
+          <ul class="doc-links">
+            <li v-for="d in createResult.docs" :key="d.path">
+              <a :href="docHref(d)" target="_blank" rel="noopener noreferrer">{{ d.title }}</a>
+            </li>
           </ul>
         </div>
       </template>
@@ -224,6 +232,20 @@ onMounted(() => void load());
 .docs-mini ul {
   margin: 8px 0 0;
   padding-left: 18px;
+}
+.doc-links {
+  list-style: none;
+  padding-left: 0 !important;
+  display: grid;
+  gap: 6px;
+}
+.doc-links a {
+  color: var(--amber);
+  font-weight: 600;
+  text-decoration: none;
+}
+.doc-links a:hover {
+  text-decoration: underline;
 }
 .ok-line {
   color: var(--amber);

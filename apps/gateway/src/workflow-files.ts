@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import type { WorkflowDef } from "@fengyun/nexus-workflow";
+import { docLink } from "./docs-serve.js";
 
 export type LocalWorkflowMeta = WorkflowDef & {
   description?: string;
@@ -23,20 +24,21 @@ function workflowsRoot(root: string): string {
 
 export function scaffoldWorkflowGuide(root: string): {
   workflowsDir: string;
-  docs: Array<{ title: string; path: string }>;
+  docs: Array<{ title: string; path: string; url: string }>;
   steps: string[];
 } {
   const workflowsDir = workflowsRoot(root);
   return {
     workflowsDir,
     docs: [
-      { title: "产品介绍 · 工作流能力", path: "docs/product/how-it-works.md" },
-      { title: "本地工作流目录", path: "workflows" },
+      docLink("产品介绍 · 能力总览", "docs/product/README.md"),
+      docLink("目录与本地文件说明", "docs/product/directory.md"),
+      docLink("本地工作流目录", "workflows"),
     ],
     steps: [
       `本地工作流目录：${workflowsDir}`,
       "控制台「创建本地工作流」会生成 JSON 骨架",
-      "按文档改节点后，点刷新或重启即可加载",
+      "点文档链接在新窗口打开，按说明改节点后刷新即可",
       "本页可试跑已加载的工作流",
     ],
   };
@@ -80,7 +82,7 @@ export function createLocalWorkflow(
       id: string;
       path: string;
       workflow: LocalWorkflowMeta;
-      docs: Array<{ title: string; path: string }>;
+      docs: Array<{ title: string; path: string; url: string }>;
       message: string;
     }
   | { ok: false; error: string } {

@@ -86,13 +86,17 @@ const createForm = ref({
 const createResult = ref<{
   path?: string;
   message?: string;
-  docs?: Array<{ title: string; path: string }>;
+  docs?: Array<{ title: string; path: string; url?: string }>;
 } | null>(null);
 const pluginGuide = ref<{
   pluginsDir?: string;
-  docs?: Array<{ title: string; path: string }>;
+  docs?: Array<{ title: string; path: string; url?: string }>;
   steps?: string[];
 } | null>(null);
+
+function docHref(d: { path: string; url?: string }): string {
+  return d.url || `/v1/docs/view?path=${encodeURIComponent(d.path)}`;
+}
 
 const frameworkPlugins = computed(() =>
   plugins.value.filter((p) => p.adapterScope === "all" || p.kind === "framework"),
@@ -495,6 +499,14 @@ onMounted(() => void refresh());
           <p>`id` 必须英文；`name` 写中文显示名。</p>
           <p>需要网页截图时，调用 <code>ctx.shot</code>（系统内置），不要自己再装一套浏览器。</p>
         </template>
+        <div v-if="pluginGuide?.docs?.length" class="docs-mini">
+          <strong>教程与示例（新窗口打开）</strong>
+          <ul class="doc-links">
+            <li v-for="d in pluginGuide.docs" :key="d.path">
+              <a :href="docHref(d)" target="_blank" rel="noopener noreferrer">{{ d.title }}</a>
+            </li>
+          </ul>
+        </div>
       </div>
     </n-spin>
 
@@ -523,9 +535,11 @@ onMounted(() => void refresh());
           </select>
         </label>
         <div v-if="pluginGuide?.docs?.length" class="docs-mini">
-          <strong>编写文档</strong>
-          <ul>
-            <li v-for="d in pluginGuide.docs" :key="d.path"><code>{{ d.path }}</code> — {{ d.title }}</li>
+          <strong>编写文档（点开新窗口）</strong>
+          <ul class="doc-links">
+            <li v-for="d in pluginGuide.docs" :key="d.path">
+              <a :href="docHref(d)" target="_blank" rel="noopener noreferrer">{{ d.title }}</a>
+            </li>
           </ul>
         </div>
       </template>
@@ -533,9 +547,11 @@ onMounted(() => void refresh());
         <p class="ok-line">{{ createResult.message }}</p>
         <p class="hint">路径：<code>{{ createResult.path }}</code></p>
         <div v-if="createResult.docs?.length" class="docs-mini">
-          <strong>接下来看这些文档开始写</strong>
-          <ul>
-            <li v-for="d in createResult.docs" :key="d.path"><code>{{ d.path }}</code> — {{ d.title }}</li>
+          <strong>接下来点这些链接开始写</strong>
+          <ul class="doc-links">
+            <li v-for="d in createResult.docs" :key="d.path">
+              <a :href="docHref(d)" target="_blank" rel="noopener noreferrer">{{ d.title }}</a>
+            </li>
           </ul>
         </div>
       </template>
@@ -636,6 +652,20 @@ onMounted(() => void refresh());
 .docs-mini ul {
   margin: 8px 0 0;
   padding-left: 18px;
+}
+.doc-links {
+  list-style: none;
+  padding-left: 0 !important;
+  display: grid;
+  gap: 6px;
+}
+.doc-links a {
+  color: var(--amber);
+  font-weight: 600;
+  text-decoration: none;
+}
+.doc-links a:hover {
+  text-decoration: underline;
 }
 .kind-select {
   width: 100%;

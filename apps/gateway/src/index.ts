@@ -86,6 +86,7 @@ import {
 } from "./restart-notify.js";
 import { scheduleSystemRestart } from "./restart-exec.js";
 import { remountPluginChannels } from "./channel-adapters.js";
+import { renderDocView } from "./docs-serve.js";
 import { reloadPlugins, watchPluginsHotReload } from "./plugin-hot-reload.js";
 import { getLogEntries, log } from "./log.js";
 import {
@@ -1002,6 +1003,13 @@ async function bootstrap(): Promise<void> {
       },
       db: db.stats(),
     });
+  });
+
+  /** 教程 / 示例：新窗口打开，路径仅允许 docs、模板、workflows */
+  app.get("/v1/docs/view", (req, res) => {
+    const path = String(req.query.path || "");
+    const result = renderDocView(ROOT, path);
+    res.status(result.ok ? 200 : result.status).type("html").send(result.html);
   });
 
   app.post("/v1/admin/login", (req, res) => {

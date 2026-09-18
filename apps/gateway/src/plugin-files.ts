@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { docLink } from "./docs-serve.js";
 
 const TEXT_EXT = new Set([
   ".ts",
@@ -169,16 +170,16 @@ export function writePluginFile(
 export function scaffoldPluginGuide(root: string): {
   pluginsDir: string;
   templateDir: string;
-  docs: Array<{ title: string; path: string }>;
+  docs: Array<{ title: string; path: string; url: string }>;
   steps: string[];
 } {
   const pluginsDir = pluginsRoot(root);
   const templateDir = join(pluginsDir, "templates", "ts-plugin");
   const docs = [
-    { title: "插件生态介绍", path: "docs/ecosystem/plugins.md" },
-    { title: "通道插件说明", path: "docs/ecosystem/channel-plugins.md" },
-    { title: "简单模板", path: "plugins/templates/ts-plugin" },
-    { title: "模块化模板", path: "plugins/templates/modular-plugin" },
+    docLink("插件编写教程", "docs/ecosystem/plugins.md"),
+    docLink("通道插件教程", "docs/ecosystem/channel-plugins.md"),
+    docLink("简单示例模板", "plugins/templates/ts-plugin"),
+    docLink("模块化示例模板", "plugins/templates/modular-plugin"),
   ];
   return {
     pluginsDir,
@@ -188,7 +189,7 @@ export function scaffoldPluginGuide(root: string): {
       `本地插件目录：${pluginsDir}`,
       "控制台「创建本地插件」会生成目录与骨架",
       "manifest.id 用英文；name / author / version 给人看",
-      "打开文档与模板后改规则，保存后热重载",
+      "点文档链接在新窗口打开教程与示例，改完保存后热重载",
       "群里用 #帮助 或你的指令验证",
     ],
   };
@@ -222,7 +223,7 @@ export function createLocalPlugin(
       id: string;
       dir: string;
       path: string;
-      docs: Array<{ title: string; path: string }>;
+      docs: Array<{ title: string; path: string; url: string }>;
       message: string;
     }
   | { ok: false; error: string } {
@@ -289,6 +290,8 @@ export function createLocalPlugin(
 目录：\`plugins/${dir}\`
 
 改完保存后热重载即可；群里用 \`#${cmd} 你好\` 试一下。
+
+控制台里的「编写文档」是可点击链接，会在新窗口打开教程与示例模板。
 `,
     "utf8",
   );
