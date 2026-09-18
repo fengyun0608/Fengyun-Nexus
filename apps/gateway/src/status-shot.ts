@@ -49,6 +49,19 @@ export type StatusShotInput = {
   plugins: Array<{ name: string; version?: string; enabled: boolean }>;
   db: { driver: string; messages: number; plugins: number; kv: number; path?: string };
   bots: Array<{ selfId: string; label: string; connected: boolean; apiBase: string }>;
+  accounts?: Array<{
+    selfId: string;
+    label: string;
+    nickname: string;
+    connected: boolean;
+    friends: number | null;
+    groups: number | null;
+    msgIn: number;
+    msgOut: number;
+    session: string;
+    totalOnline: string;
+    avatar: string;
+  }>;
 };
 
 /** server 部署不展示本机 IP，其它姿态可展示 */
@@ -213,6 +226,15 @@ export function buildStatusLines(s: StatusShotInput): string[] {
   );
   lines.push(`数据库 ${s.db.driver} · 消息 ${s.db.messages}`);
   lines.push(`机器人 ${s.bots.map((b) => `${b.label || "未备注"}${b.connected ? "已连接" : "未连接"}`).join("、") || "无"}`);
+  for (const a of s.accounts || []) {
+    const name = a.nickname || a.label || "未命名";
+    const qq = a.selfId || "—";
+    const groups = a.groups == null ? "—" : String(a.groups);
+    const friends = a.friends == null ? "—" : String(a.friends);
+    lines.push(
+      `${name} QQ ${qq} · 群 ${groups} · 好友 ${friends} · 收到 ${a.msgIn} · 发出 ${a.msgOut} · 在线 ${a.session} · 累计 ${a.totalOnline}`,
+    );
+  }
   lines.push(`AI 回复群 ${fmtGroups(s.replyGroupIds, "不限")}`);
   return lines;
 }
@@ -261,6 +283,30 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
     )
     .join("");
 
+  const accountCards = (s.accounts || [])
+    .map((a) => {
+      const name = a.nickname || a.label || "未命名";
+      const face = a.avatar
+        ? `<img class="ava" src="${a.avatar}" alt="" />`
+        : `<div class="ava ph">${escapeShotHtml((a.selfId || name).slice(-2))}</div>`;
+      const groups = a.groups == null ? "—" : String(a.groups);
+      const friends = a.friends == null ? "—" : String(a.friends);
+      return `<article class="acc${a.connected ? "" : " off"}">
+        ${face}
+        <div class="acc-body">
+          <div class="acc-top"><b>${escapeShotHtml(name)}</b><span class="pill ${a.connected ? "on" : "off"}">${a.connected ? "在线" : "离线"}</span></div>
+          <div class="qq">QQ ${escapeShotHtml(a.selfId || "—")}${a.label && a.label !== name ? ` · ${escapeShotHtml(a.label)}` : ""}</div>
+          <div class="nums">群聊 ${escapeShotHtml(groups)} · 好友 ${escapeShotHtml(friends)}</div>
+          <div class="tree">消息
+            <div>├ 收到 ${a.msgIn}</div>
+            <div>└ 发出 ${a.msgOut}</div>
+          </div>
+          <div class="times">在线时间 ${escapeShotHtml(a.session)}<br/>累计在线 ${escapeShotHtml(a.totalOnline)}</div>
+        </div>
+      </article>`;
+    })
+    .join("");
+
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -268,11 +314,23 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>运行状态</title>
 <style>${nexusShotCss()}
-#panel { width: 860px; }
+#panel { width: 920px; }
 .dense { display:grid; gap:6px; }
 .dense li { display:flex; justify-content:space-between; gap:12px; padding:8px 12px; }
 .dense span { color: var(--muted); font-size: 12px; text-align: right; }
 .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+.accs { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.acc { display:flex; gap:10px; align-items:flex-start; padding:10px; border:1px solid var(--line); border-radius:14px; background:#fff; }
+.acc.off { opacity:.78; }
+.ava { width:56px; height:56px; border-radius:50%; object-fit:cover; flex:none; background:#e7f6ef; }
+.ava.ph { display:flex; align-items:center; justify-content:center; font-weight:750; color:#247a5e; font-size:14px; }
+.acc-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.acc-top b { font-size:15px; }
+.pill { font-size:11px; padding:2px 8px; border-radius:999px; }
+.pill.on { background:#e5f6ee; color:#1f7a56; }
+.pill.off { background:#f3f4f3; color:#6b7280; }
+.qq, .nums, .times { color:var(--muted); font-size:12px; margin-top:2px; }
+.tree { margin-top:6px; font-size:12px; line-height:1.45; color:var(--ink); }
 </style>
 </head>
 <body>
@@ -284,6 +342,11 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
         <span class="badge ${statusTone}">${escapeShotHtml(statusLabel)}</span>
       </div>
       <div class="chips">${chips}</div>
+    </div>
+
+    <div class="card">
+      <div class="sec">全部账号</div>
+      <div class="accs">${accountCards || "<p class='foot'>还没有账号</p>"}</div>
     </div>
 
     <div class="card">

@@ -67,6 +67,7 @@ import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update
 import { applyFullUpdate } from "./full-update.js";
 import { ensureGatewayPortOpen } from "./open-port.js";
 import { buildRestartOkLines, buildRestartOkPanelHtml, buildStatusLines, buildStatusPanelHtml, type StatusShotInput } from "./status-shot.js";
+import { addOnlineTotal, collectStatusAccounts, ONLINE_KV, readOnlineTotals } from "./status-accounts.js";
 import { execFileSync } from "node:child_process";
 import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
 import {
@@ -427,6 +428,10 @@ async function bootstrap(): Promise<void> {
   channels.register(new WebhookChannel());
   const onebotCfg = loadOneBotConfig();
   const onebot = new OneBot11Bridge(onebotCfg);
+  onebot.setOfflineHandler((sid, ms) => {
+    const prev = readOnlineTotals(db.getKv(ONLINE_KV));
+    db.setKv(ONLINE_KV, JSON.stringify(addOnlineTotal(prev, sid, ms)));
+  });
   const gatewayPortEarly = () => Number(process.env.PORT ?? profile.gateway.port);
   onebot.setGatewayPort(gatewayPortEarly());
   {
@@ -776,13 +781,30 @@ async function bootstrap(): Promise<void> {
     };
   }
 
+  let lastStatusLines: string[] | null = null;
+
+  async function collectStatusHtml(): Promise<string> {
+    const base = collectStatusInput();
+    const totals = readOnlineTotals(db.getKv(ONLINE_KV));
+    const accounts = await collectStatusAccounts({
+      bots: base.bots,
+      call: (action, botId) => onebot.callAction(action, {}, { botId, timeoutMs: 8000 }),
+      sessionMs: (id) => onebot.sessionMs(id),
+      totalMs: (id) => totals[id] || 0,
+      counts: (id) => db.countMessagesByAccount(id),
+    });
+    const input: StatusShotInput = { ...base, accounts };
+    lastStatusLines = buildStatusLines(input);
+    return buildStatusPanelHtml(input);
+  }
+
   function collectStatusLines(): string[] {
-    return buildStatusLines(collectStatusInput());
+    return lastStatusLines || buildStatusLines(collectStatusInput());
   }
 
   setPluginRuntime({
     statusLines: collectStatusLines,
-    statusHtml: () => buildStatusPanelHtml(collectStatusInput()),
+    statusHtml: () => collectStatusHtml(),
   });
 
   /** Process inbound message: # admin → plugins (first match) → LLM. Never local-echo. */

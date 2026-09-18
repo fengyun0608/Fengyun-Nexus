@@ -15,7 +15,7 @@ import { renderHtmlShot, renderMenuShot } from "./menu-shot.js";
 
 export type PluginRuntimeHooks = {
   statusLines: () => string[];
-  statusHtml: () => string;
+  statusHtml: () => string | Promise<string>;
 };
 
 let runtimeHooks: PluginRuntimeHooks = {

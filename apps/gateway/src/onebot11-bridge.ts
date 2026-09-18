@@ -123,6 +123,8 @@ export class OneBot11Bridge {
   private onInbound?: InboundHandler;
   private onNotice?: NoticeHandler;
   private onSelfId?: (selfId: string, listenPort?: number) => void;
+  private onOffline?: (selfId: string, sessionMs: number) => void;
+  private onlineAt = new Map<string, number>();
   private extra = new Map<number, { server: Server; wss: WebSocketServer }>();
 
   constructor(private cfg: OneBotConfig) {}
@@ -133,6 +135,17 @@ export class OneBot11Bridge {
 
   setNoticeHandler(fn: NoticeHandler): void {
     this.onNotice = fn;
+  }
+
+  setOfflineHandler(fn: (selfId: string, sessionMs: number) => void): void {
+    this.onOffline = fn;
+  }
+
+  /** 这个号本次连上到现在的毫秒。没连上是 0。 */
+  sessionMs(selfId: string): number {
+    const since = this.onlineAt.get(String(selfId || ""));
+    if (!since) return 0;
+    return Math.max(0, Date.now() - since);
   }
 
   setSelfIdHandler(fn: (selfId: string, listenPort?: number) => void): void {
@@ -172,6 +185,7 @@ export class OneBot11Bridge {
     const listenPort = prev.listenPort;
     if (prev.selfId === sid) return;
     this.sockMeta.set(ws, { selfId: sid, listenPort });
+    if (!this.onlineAt.has(sid)) this.onlineAt.set(sid, Date.now());
     const label =
       (this.cfg.bots || []).find((b) => Number(b.listenPort) === listenPort && listenPort)?.label ||
       (this.cfg.bots || []).find((b) => String(b.selfId || "") === sid)?.label ||
@@ -257,6 +271,25 @@ export class OneBot11Bridge {
     return false;
   }
 
+  private dropSocket(ws: WebSocket): void {
+    if (!this.sockets.has(ws)) return;
+    const sid = this.sockMeta.get(ws)?.selfId || "";
+    this.sockets.delete(ws);
+    if (!sid) return;
+    for (const other of this.sockets) {
+      if (other.readyState !== WebSocket.OPEN) continue;
+      if (this.sockMeta.get(other)?.selfId === sid) return;
+    }
+    const since = this.onlineAt.get(sid) || 0;
+    if (!since) return;
+    this.onlineAt.delete(sid);
+    try {
+      this.onOffline?.(sid, Math.max(0, Date.now() - since));
+    } catch {
+      /* 记累计在线失败不影响断开 */
+    }
+  }
+
   private wireSocket(ws: WebSocket, listenPort: number): void {
     this.sockets.add(ws);
     this.sockMeta.set(ws, { selfId: "", listenPort });
@@ -273,11 +306,11 @@ export class OneBot11Bridge {
       void this.onSocketMessage(ws, data.toString());
     });
     ws.on("close", () => {
-      this.sockets.delete(ws);
+      this.dropSocket(ws);
       log.warn(`OneBot 11 断开  ${label || "通道"}  clients=${this.sockets.size}`);
     });
     ws.on("error", () => {
-      this.sockets.delete(ws);
+      this.dropSocket(ws);
     });
   }
 

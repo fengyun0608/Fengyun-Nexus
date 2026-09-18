@@ -179,7 +179,7 @@ export interface PluginContext {
     /** 框架 / 网络 / OneBot / AI / 群等状态行（纯文本回退） */
     statusLines: () => string[];
     /** 状态面板 HTML，配合 shot.renderHtml({ selector: "#panel" }) */
-    statusHtml: () => string;
+    statusHtml: () => string | Promise<string>;
   };
   /** 当前事件用户是否为本通道主人 */
   isMaster?: (userId?: string) => boolean;

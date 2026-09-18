@@ -1,7 +1,7 @@
 {
   "id": "z.status",
   "name": "状态",
-  "version": "0.2.0",
+  "version": "0.3.2",
   "main": "index.ts",
-  "description": "运行状态面板：系统 / 资源环 / 通道群"
+  "description": "运行状态面板：账号头像、群好友、消息、在线时长"
 }

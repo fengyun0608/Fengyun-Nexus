@@ -9,7 +9,7 @@ export class ZStatusPlugin extends Plugin {
   manifest = {
     id: "z.status",
     name: "状态",
-    version: "0.3.1",
+    version: "0.3.2",
     priority: 12,
     category: "basic" as const,
     kind: "framework" as const,
@@ -30,11 +30,11 @@ export class ZStatusPlugin extends Plugin {
   }
 
   async status(e: NexusEvent, ctx: PluginContext) {
-    const html = ctx.runtime.statusHtml();
+    const html = await ctx.runtime.statusHtml();
     const shot = await ctx.shot.renderHtml({
       html,
       selector: "#panel",
-      width: 900,
+      width: 960,
       height: 1680,
     });
     if (!shot.ok) {

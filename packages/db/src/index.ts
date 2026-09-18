@@ -328,6 +328,33 @@ export class NexusDatabase {
     return this.data.kv[key];
   }
 
+  /** 按账号统计入库消息：用户侧算收到，机器人回复算发出 */
+  countMessagesByAccount(accountId: string): { received: number; sent: number } {
+    const id = String(accountId || "");
+    if (!id) return { received: 0, sent: 0 };
+    if (this.sqlite) {
+      const rows = this.sqlite
+        .prepare(`SELECT role, COUNT(*) AS c FROM messages WHERE accountId=? GROUP BY role`)
+        .all(id) as Array<{ role?: string; c?: number }>;
+      let received = 0;
+      let sent = 0;
+      for (const r of rows) {
+        const n = Number(r.c ?? 0);
+        if (String(r.role) === "assistant") sent += n;
+        else received += n;
+      }
+      return { received, sent };
+    }
+    let received = 0;
+    let sent = 0;
+    for (const m of this.data.messages) {
+      if (String(m.accountId || "") !== id) continue;
+      if (m.role === "assistant") sent += 1;
+      else received += 1;
+    }
+    return { received, sent };
+  }
+
   stats(): { messages: number; plugins: number; kv: number } {
     if (this.sqlite) {
       const m = this.sqlite.prepare(`SELECT COUNT(*) AS c FROM messages`).get();

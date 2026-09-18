@@ -9,7 +9,7 @@
 | 目录 | 指令 | 说明 |
 |------|------|------|
 | `plugins/z-menu` | `#菜单` | 菜单图（系统截图） |
-| `plugins/z-status` | `#状态` | 框架 / 网络 / OneBot / AI / 群 |
+| `plugins/z-status` | `#状态` | 账号头像、群好友、消息、在线时长 |
 | `plugins/z-draw` | `#生图` | 菜单图截图发群 |
 | `plugins/z-echo` | `#echo 文本` | 回声示例 |
 | `plugins/z-like` | `#赞我` | QQ 点赞 |
