@@ -26,7 +26,7 @@ import {
 } from "@fengyun/nexus-shared";
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
 import { bootStep, printBootBanner, printBootSuccess } from "./boot-banner.js";
-import { checkPluginUpdates } from "./registry-check.js";
+import { checkPluginUpdates, applyPluginUpdates } from "./registry-check.js";
 import {
   getChannelSettings,
   isChannelMaster,
@@ -258,7 +258,12 @@ async function bootstrap(): Promise<void> {
   const profile = loadEnvProfile(envId);
   let adminCfg = loadAdmin();
   adminCfg.sessionHours = adminCfg.sessionHours || 12;
-  const registry = loadRegistry();
+  const registryLocal = join(ROOT, "configs/registry.local.json");
+  let registry = loadRegistry();
+
+  function persistRegistry(cfg: RegistryConfig): void {
+    writeFileSync(registryLocal, `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
+  }
   await bootStep(`运行姿态 → ${profile.id}（${profile.label}）`);
 
   function currentPassword(): string {
@@ -1405,6 +1410,27 @@ async function bootstrap(): Promise<void> {
     });
   });
 
+  /** 保存插件专仓地址等到 registry.local.json */
+  app.patch("/v1/registry", authMiddleware, (req, res) => {
+    const body = (req.body || {}) as {
+      pluginsRepo?: { url?: string; branch?: string } | null;
+    };
+    if (body.pluginsRepo !== undefined) {
+      const url = String(body.pluginsRepo?.url ?? "").trim();
+      const branch = String(body.pluginsRepo?.branch ?? "main").trim() || "main";
+      registry = {
+        ...registry,
+        pluginsRepo: url ? { url, branch } : { url: "", branch },
+      };
+    }
+    persistRegistry(registry);
+    res.json({
+      ok: true,
+      message: "已保存插件更新配置",
+      pluginsRepo: registry.pluginsRepo || null,
+    });
+  });
+
   /** 对比本地 plugins/ 与远端是否一致 */
   app.get("/v1/registry/plugin-updates", authMiddleware, (_req, res) => {
     try {
@@ -1414,7 +1440,9 @@ async function bootstrap(): Promise<void> {
         pluginsRepoUrl: repoUrl || undefined,
         pluginsRepoBranch: registry.pluginsRepo?.branch || "main",
       });
-      const updates = result.items.filter((i) => i.status === "update").length;
+      const updates = result.items.filter(
+        (i) => i.status === "update" || i.status === "remote-only",
+      ).length;
       res.json({
         ...result,
         summary: {
@@ -1422,11 +1450,39 @@ async function bootstrap(): Promise<void> {
           update: updates,
           same: result.items.filter((i) => i.status === "same").length,
           localOnly: result.items.filter((i) => i.status === "local-only").length,
+          remoteOnly: result.items.filter((i) => i.status === "remote-only").length,
         },
         message:
           updates > 0
-            ? `有 ${updates} 个插件与远端不一致`
+            ? `有 ${updates} 个插件可更新或可拉取`
             : "本地与远端插件目录一致（或暂未配置插件专仓）",
+      });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  /** 从专仓 / 本仓 origin 拉取不一致的插件目录，并热重载 */
+  app.post("/v1/registry/plugin-updates/apply", authMiddleware, async (req, res) => {
+    try {
+      const repoUrl = String(registry.pluginsRepo?.url || "").trim();
+      const dirs = Array.isArray(req.body?.dirs)
+        ? (req.body.dirs as unknown[]).map((d) => String(d))
+        : undefined;
+      const result = applyPluginUpdates(ROOT, {
+        branch: "main",
+        pluginsRepoUrl: repoUrl || undefined,
+        pluginsRepoBranch: registry.pluginsRepo?.branch || "main",
+        dirs,
+      });
+      let reloadMsg = "";
+      if (result.applied.length) {
+        const reload = await reloadPlugins(pluginHotDeps);
+        reloadMsg = reload.ok ? `；已热重载 ${reload.loaded} 个插件` : `；热重载失败：${reload.message}`;
+      }
+      res.json({
+        ...result,
+        message: `${result.message}${reloadMsg}`,
       });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
