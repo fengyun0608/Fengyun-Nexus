@@ -756,14 +756,34 @@ export default function App() {
     setUpdateBusy(true);
     setModalStatus("");
     try {
-      const res = await api<{ ok?: boolean; message?: string }>("/v1/admin/update/apply", {
+      const res = await api<{
+        ok?: boolean;
+        message?: string;
+        reportText?: string;
+        error?: string;
+      }>("/v1/admin/update/apply", {
         method: "POST",
         token,
         body: JSON.stringify({ confirm: true }),
       });
-      flashModal(res.message || tr("updateApplying"), "ok");
+      if (res.ok === false) {
+        const tip = res.error
+          ? res.error.includes("pnpm-lock") || res.error.includes("local changes")
+            ? "本地有改动挡着更新，已尽量硬拉；仍失败就手动 git reset --hard origin/main"
+            : res.error.slice(0, 240)
+          : res.message || "更新失败";
+        flashModal(tip, "error");
+        setUpdateBusy(false);
+        return;
+      }
+      flashModal(res.reportText || res.message || tr("updateApplying"), "ok");
     } catch (e) {
-      flashModal(e instanceof Error ? e.message : String(e), "error");
+      const raw = e instanceof Error ? e.message : String(e);
+      const tip =
+        /pnpm-lock|local changes|would be overwritten/i.test(raw)
+          ? "本地有改动挡着更新。关掉网关后在目录里执行：git fetch && git reset --hard origin/main"
+          : raw.slice(0, 240);
+      flashModal(tip, "error");
       setUpdateBusy(false);
     }
   };
@@ -2912,18 +2932,13 @@ async menu(e) {
           <div className="chips" style={{ padding: 0 }}>
             <div className="chip">
               {tr("frameworkVersion")} <strong>{updateInfo.currentVersion}</strong>
+              {updateInfo.remoteVersion && updateInfo.remoteVersion !== updateInfo.currentVersion
+                ? ` → ${updateInfo.remoteVersion}`
+                : ""}
             </div>
-            <div className="chip">
-              {tr("remoteVersion")} <strong>{updateInfo.remoteVersion || "—"}</strong>
-            </div>
-            {updateInfo.currentCommit ? (
+            {updateInfo.currentCommit || updateInfo.remoteCommit ? (
               <div className="chip">
-                HEAD <strong>{updateInfo.currentCommit}</strong>
-              </div>
-            ) : null}
-            {updateInfo.remoteCommit ? (
-              <div className="chip">
-                remote <strong>{updateInfo.remoteCommit}</strong>
+                {updateInfo.currentCommit || "?"} → {updateInfo.remoteCommit || "?"}
               </div>
             ) : null}
           </div>
