@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
-# Fengyun Nexus — Termux 一键装+启（自动检测）
+# Fengyun Nexus — Linux 服务器一键装+启（自动检测，不问选择题）
 #
 #   git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
-#   bash ~/Fengyun-Nexus/termux-install.sh
+#   bash ~/Fengyun-Nexus/server-install.sh
 #
-# 仓已在：bash ~/Fengyun-Nexus/termux-install.sh
-# 强制重装：NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh
-# 只装不启：NEXUS_SKIP_BOOT=1 bash ~/Fengyun-Nexus/termux-install.sh
+# 仓已在：bash ~/Fengyun-Nexus/server-install.sh
+# 强制重装：NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/server-install.sh
+# 只装不启：NEXUS_SKIP_BOOT=1 bash ~/Fengyun-Nexus/server-install.sh
 set -euo pipefail
 
 REPO_URL="${NEXUS_REPO_URL:-https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git}"
 INSTALL_DIR="${NEXUS_INSTALL_DIR:-$HOME/Fengyun-Nexus}"
 BRANCH="${NEXUS_BRANCH:-main}"
+
+log() { echo ">>> $*"; }
+ok() { echo "OK  $*"; }
+warn() { echo "!!  $*"; }
 
 safe_cd_home() {
   cd "$HOME" 2>/dev/null || cd / 2>/dev/null || true
@@ -21,107 +25,138 @@ is_termux() {
   [ -n "${TERMUX_VERSION:-}" ] || echo "${PREFIX:-}" | grep -q com.termux
 }
 
-log() { echo ">>> $*"; }
-ok() { echo "OK  $*"; }
-warn() { echo "!!  $*"; }
+have_sudo() {
+  if [ "$(id -u)" -eq 0 ]; then
+    return 0
+  fi
+  command -v sudo >/dev/null 2>&1
+}
 
-# 对齐 openssl / libcurl，避免 git HTTPS CANNOT LINK
-pkg_fix_termux_base() {
-  if ! command -v pkg >/dev/null 2>&1; then
+run_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
     return 1
   fi
-  log "对齐 Termux 包"
-  yes | apt update 2>/dev/null || pkg update -y || true
-  yes | apt full-upgrade -y 2>/dev/null || pkg upgrade -y || true
-  pkg install -y openssl ca-certificates libcurl libssh2 git || true
-  pkg reinstall -y openssl libcurl libssh2 ca-certificates git || true
-  local libdir="${PREFIX:-/data/data/com.termux/files/usr}/lib"
-  if [ -d "$libdir/openssl-1.1" ]; then
-    ln -sf openssl-1.1/libssl.so.1.1 "$libdir/libssl.so.1.1" 2>/dev/null || true
-    ln -sf openssl-1.1/libcrypto.so.1.1 "$libdir/libcrypto.so.1.1" 2>/dev/null || true
-  fi
-  return 0
 }
 
-git_https_ok() {
-  command -v git >/dev/null 2>&1 || return 1
-  # 探测 remote-https 能否加载（不真正联网）
-  if ! git remote-https 2>&1 | head -n 1 >/dev/null 2>&1; then
-    # 有的版本无此子命令输出；用 ldd/直接跑一次空探测
-    :
+pkg_install() {
+  # $@ = package names
+  if command -v apt-get >/dev/null 2>&1; then
+    run_root apt-get update -y || true
+    run_root DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+    return $?
   fi
-  # 真正能跑：对假地址短超时；失败则看 CANNOT LINK
-  local out
-  out="$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads https://example.invalid/ 2>&1 || true)"
-  echo "$out" | grep -qi 'CANNOT LINK\|libssl\.so\|libcrypto\.so' && return 1
-  return 0
+  if command -v dnf >/dev/null 2>&1; then
+    run_root dnf install -y "$@"
+    return $?
+  fi
+  if command -v yum >/dev/null 2>&1; then
+    run_root yum install -y "$@"
+    return $?
+  fi
+  if command -v pacman >/dev/null 2>&1; then
+    run_root pacman -Sy --noconfirm "$@"
+    return $?
+  fi
+  if command -v apk >/dev/null 2>&1; then
+    run_root apk add --no-cache "$@"
+    return $?
+  fi
+  return 1
 }
 
-ensure_git() {
-  if command -v pkg >/dev/null 2>&1; then
-    pkg_fix_termux_base || true
+ensure_base_pkgs() {
+  log "检查 git / curl / ca-certificates"
+  local need=()
+  command -v git >/dev/null 2>&1 || need+=(git)
+  command -v curl >/dev/null 2>&1 || need+=(curl)
+  if [ "${#need[@]}" -gt 0 ]; then
+    if ! have_sudo && [ "$(id -u)" -ne 0 ]; then
+      warn "缺 ${need[*]}，且无 root/sudo，请先自行安装"
+    else
+      # 包名在各发行版基本通用
+      pkg_install ca-certificates curl git || pkg_install git curl || true
+    fi
   fi
   if ! command -v git >/dev/null 2>&1; then
-    echo "未找到 git，请先安装"
+    echo "未找到 git"
     exit 1
   fi
-  if ! git_https_ok; then
-    warn "git HTTPS 仍异常，再强制重装一次网络库"
-    pkg reinstall -y openssl libcurl libssh2 git || true
-    if ! git_https_ok; then
-      warn "git HTTPS 探测仍失败，将尝试 zip 下载回退"
+}
+
+node_major() {
+  node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0
+}
+
+ensure_node() {
+  if command -v node >/dev/null 2>&1; then
+    local maj
+    maj="$(node_major)"
+    if [ "$maj" -ge 20 ] 2>/dev/null; then
+      return 0
     fi
+    warn "当前 Node $(node -v)，建议 ≥ 20"
   fi
-}
 
-framework_ok() {
-  [ -f "$INSTALL_DIR/boot.sh" ] &&
-    [ -f "$INSTALL_DIR/package.json" ] &&
-    { [ -f "$INSTALL_DIR/termux-install.sh" ] || [ -f "$INSTALL_DIR/scripts/termux-setup.sh" ]; }
-}
-
-cwd_broken() {
-  ! pwd >/dev/null 2>&1
-}
-
-heal_cwd() {
-  if cwd_broken; then
-    warn "当前目录已失效，切回家目录"
-    safe_cd_home
-  fi
-}
-
-install_env() {
-  log "检测 / 安装运行环境"
-  if is_termux || [ "${NEXUS_FORCE_TERMUX:-}" = "1" ]; then
-    if command -v pkg >/dev/null 2>&1; then
-      pkg_fix_termux_base || true
-      pkg install -y nodejs
+  log "安装 / 升级 Node.js 20+"
+  if command -v apt-get >/dev/null 2>&1 && have_sudo; then
+    # NodeSource 20.x（Debian/Ubuntu）
+    if ! command -v node >/dev/null 2>&1 || [ "$(node_major)" -lt 20 ] 2>/dev/null; then
+      curl -fsSL https://deb.nodesource.com/setup_20.x | run_root bash - || true
+      pkg_install nodejs || true
     fi
+  elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+    pkg_install nodejs npm || true
+  elif command -v pacman >/dev/null 2>&1; then
+    pkg_install nodejs npm || true
+  elif command -v apk >/dev/null 2>&1; then
+    pkg_install nodejs npm || true
   fi
+
   if ! command -v node >/dev/null 2>&1; then
-    echo "未找到 node"
+    echo "未找到 Node.js 20+。请先安装后再跑本脚本。"
     exit 1
   fi
+}
+
+ensure_pnpm() {
+  export NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false
   npm config set allow-scripts=pnpm --location=user >/dev/null 2>&1 || true
   npm config delete manage-package-manager-versions --location=user >/dev/null 2>&1 || true
-  npm config delete package-manager-strict --location=user >/dev/null 2>&1 || true
-  if ! command -v pnpm >/dev/null 2>&1 || ! pnpm -v 2>/dev/null | grep -q '^9\.'; then
+  if ! command -v pnpm >/dev/null 2>&1 || ! pnpm -v 2>/dev/null | grep -qE '^[89]\.'; then
+    log "安装 pnpm@9"
     npm install -g pnpm@9.15.0
   fi
   if ! command -v pnpm >/dev/null 2>&1; then
     echo "未找到 pnpm"
     exit 1
   fi
-  export NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false
   if [ -f "$HOME/.npmrc" ]; then
     sed -i '/^manage-package-manager-versions=/d;/^package-manager-strict=/d' "$HOME/.npmrc" 2>/dev/null || true
   fi
+}
+
+install_env() {
+  if is_termux; then
+    echo "检测到 Termux，请改用：bash ~/Fengyun-Nexus/termux-install.sh"
+    exit 1
+  fi
+  ensure_base_pkgs
+  ensure_node
+  ensure_pnpm
   ok "环境  node=$(node -v)  pnpm=$(pnpm -v)"
 }
 
+framework_ok() {
+  [ -f "$INSTALL_DIR/boot.sh" ] &&
+    [ -f "$INSTALL_DIR/package.json" ] &&
+    { [ -f "$INSTALL_DIR/server-install.sh" ] || [ -f "$INSTALL_DIR/termux-install.sh" ]; }
+}
+
 sync_git_tree() {
-  ensure_git
   git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL" 2>/dev/null || \
     git -C "$INSTALL_DIR" remote add origin "$REPO_URL" 2>/dev/null || true
   git -C "$INSTALL_DIR" fetch --depth 1 origin "$BRANCH" || git -C "$INSTALL_DIR" fetch --depth 1 origin
@@ -134,17 +169,14 @@ sync_git_tree() {
 }
 
 remove_install_dir() {
-  heal_cwd
   safe_cd_home
   if [ -d "$INSTALL_DIR" ]; then
     log "移除旧目录 $INSTALL_DIR"
     rm -rf "$INSTALL_DIR"
   fi
-  safe_cd_home
 }
 
 clone_via_zip() {
-  # GitCode / GitHub 风格 archive；不依赖 git-remote-https
   local zip_urls=(
     "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/repository/archive/${BRANCH}.zip"
     "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/-/archive/${BRANCH}/Fengyun-Nexus-${BRANCH}.zip"
@@ -155,7 +187,7 @@ clone_via_zip() {
   local ok_dl=0
   local u
   for u in "${zip_urls[@]}"; do
-    log "尝试 zip 下载 $u"
+    log "尝试 zip 下载"
     if command -v curl >/dev/null 2>&1 && curl -fsSL --connect-timeout 20 -o "$z" "$u"; then
       ok_dl=1
       break
@@ -169,13 +201,12 @@ clone_via_zip() {
     rm -rf "$tmp"
     return 1
   fi
-  command -v unzip >/dev/null 2>&1 || pkg install -y unzip || true
+  command -v unzip >/dev/null 2>&1 || pkg_install unzip || true
   unzip -q "$z" -d "$tmp/out" || {
     rm -rf "$tmp"
     return 1
   }
   local src=""
-  # Termux busybox find 可能没有 -printf
   while IFS= read -r f; do
     src="$(dirname "$f")"
     break
@@ -192,7 +223,6 @@ clone_via_zip() {
 }
 
 clone_fresh() {
-  heal_cwd
   safe_cd_home
   mkdir -p "$(dirname "$INSTALL_DIR")"
   log "克隆 $REPO_URL"
@@ -208,34 +238,30 @@ clone_fresh() {
   if clone_via_zip; then
     return 0
   fi
-  echo "克隆失败。可先装好 git，再："
+  echo "克隆失败。请检查网络后重试："
   echo "  git clone --depth 1 $REPO_URL \"$INSTALL_DIR\""
-  echo "  bash \"$INSTALL_DIR/termux-install.sh\""
+  echo "  bash \"$INSTALL_DIR/server-install.sh\""
   exit 1
 }
 
 finalize_tree() {
   cd "$INSTALL_DIR"
-  chmod +x boot.sh restart.sh termux-install.sh server-install.sh scripts/termux-setup.sh 2>/dev/null || true
+  chmod +x boot.sh restart.sh server-install.sh termux-install.sh 2>/dev/null || true
   export NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false
-  export NEXUS_ENV="${NEXUS_ENV:-termux}"
-  export NEXUS_BOOT_MODE="${NEXUS_BOOT_MODE:-lite}"
+  export NEXUS_ENV="${NEXUS_ENV:-server}"
   if [ ! -f .npmrc ]; then
     printf 'package-manager-strict=false\n' > .npmrc
   fi
   date -u +%Y-%m-%dT%H:%M:%SZ > "$INSTALL_DIR/.nexus-installed"
-  ok "框架 $(git -C "$INSTALL_DIR" log -1 --oneline 2>/dev/null || echo ready)"
+  ok "框架 $(git -C "$INSTALL_DIR" log -1 --oneline 2>/dev/null || echo ready)  env=$NEXUS_ENV"
 }
 
-# 自动决定：无目录 / 残缺 / 强制重装 / 已装拉齐
 ensure_framework() {
-  heal_cwd
   safe_cd_home
-  ensure_git
   mkdir -p "$(dirname "$INSTALL_DIR")"
 
   if [ "${NEXUS_REINSTALL:-0}" = "1" ]; then
-    log "强制重装框架"
+    log "强制重装"
     remove_install_dir
     clone_fresh
     finalize_tree
@@ -255,7 +281,7 @@ ensure_framework() {
       sync_git_tree || true
     fi
     if ! framework_ok; then
-      warn "拉齐后仍残缺，改名备份后重装"
+      warn "拉齐后仍残缺，备份后重装"
       safe_cd_home
       mv "$INSTALL_DIR" "${INSTALL_DIR}.bak.$(date +%s)" 2>/dev/null || remove_install_dir
       clone_fresh
@@ -273,38 +299,31 @@ ensure_framework() {
 
 boot_now() {
   cd "$INSTALL_DIR"
+  export NEXUS_ENV="${NEXUS_ENV:-server}"
   log "启动  控制台 http://127.0.0.1:8787/"
   exec ./boot.sh
 }
 
-# —— 主流程：全程自动 ——
-heal_cwd
+# —— 主流程 ——
 safe_cd_home
 
 echo ""
-echo "=== Fengyun Nexus · 手机端（自动检测）==="
+echo "=== Fengyun Nexus · 服务器（自动检测）==="
 echo "目录: $INSTALL_DIR"
 echo ""
-
-# 若脚本自身在残缺仓里跑，先尽量把 git 修好再继续
-if [ -d "$INSTALL_DIR/.git" ] && ! framework_ok; then
-  log "仓内文件不齐，优先修复"
-fi
 
 install_env
 ensure_framework
 
 if ! framework_ok; then
-  echo "安装失败：仍缺少关键文件。可强制重装："
-  echo "  cd ~ && NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh"
-  echo "或："
-  echo "  cd ~ && rm -rf \"$INSTALL_DIR\" && git clone --depth 1 $REPO_URL \"$INSTALL_DIR\" && bash \"$INSTALL_DIR/termux-install.sh\""
+  echo "安装失败。可强制重装："
+  echo "  NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/server-install.sh"
   exit 1
 fi
 
 if [ "${NEXUS_SKIP_BOOT:-0}" = "1" ]; then
   ok "已跳过启动（NEXUS_SKIP_BOOT=1）"
-  echo "启动：cd $INSTALL_DIR && ./boot.sh"
+  echo "启动：cd $INSTALL_DIR && NEXUS_ENV=server ./boot.sh"
   exit 0
 fi
 

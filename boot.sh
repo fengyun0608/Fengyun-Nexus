@@ -24,9 +24,10 @@ if ! command -v node >/dev/null 2>&1; then
   if is_termux; then
     echo "请先装环境："
     echo "  bash ~/Fengyun-Nexus/termux-install.sh"
-    echo "不要 curl GitCode /raw/…（常返回 HTML）。"
   else
-    echo "请安装 Node.js 20+，再安装 pnpm 后重试。"
+    echo "服务器可一键装："
+    echo "  bash ~/Fengyun-Nexus/server-install.sh"
+    echo "或自行安装 Node.js 20+ 与 pnpm 后重试。"
   fi
   exit 1
 fi

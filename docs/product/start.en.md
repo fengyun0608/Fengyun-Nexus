@@ -1,10 +1,11 @@
 # Start on each platform
 
-[中文](start.md) | English
+中文 | [English](start.en.md)
 
-**One console only:** open http://127.0.0.1:8787/ after boot. Local configs are never uploaded.
+Open http://127.0.0.1:8787/ after boot.  
+Local `*.local.json` files stay on your machine.
 
-## Deploy from remote
+## One-shot install
 
 ### Windows
 
@@ -14,7 +15,18 @@ cd Fengyun-Nexus
 start.bat
 ```
 
-### Linux / macOS / server
+### Linux server
+
+```bash
+git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
+bash ~/Fengyun-Nexus/server-install.sh
+```
+
+Already cloned: `bash ~/Fengyun-Nexus/server-install.sh`  
+Force reinstall: `NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/server-install.sh`  
+Install only: `NEXUS_SKIP_BOOT=1 bash ~/Fengyun-Nexus/server-install.sh`
+
+### Linux / macOS (Node already installed)
 
 ```bash
 git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
@@ -22,28 +34,25 @@ cd Fengyun-Nexus
 chmod +x boot.sh && ./boot.sh
 ```
 
-### Termux (Android)
-
-**One script only:** `termux-install.sh` — auto-detects missing / broken / installed, repairs, syncs, then boots. No menu prompts.
+### Termux
 
 ```bash
-yes | apt update && yes | apt full-upgrade -y
-pkg reinstall -y openssl libcurl libssh2 ca-certificates git
 git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
 bash ~/Fengyun-Nexus/termux-install.sh
 ```
 
-Already cloned:
+Already cloned: `bash ~/Fengyun-Nexus/termux-install.sh`  
+Force reinstall: `NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`
+
+## Commands
 
 ```bash
-bash ~/Fengyun-Nexus/termux-install.sh
+pnpm nexus setup
+pnpm nexus env desktop|mobile|server|termux
+pnpm nexus status
+pnpm nexus boot
 ```
 
-Force wipe + reinstall: `cd ~ && NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`
+## Default login
 
-Do **not** `curl` GitCode `/raw/` URLs. Use `pnpm@9` on Termux.
-
-## Bootstrap login
-
-- First login: `console` / `console`
-- Then set a permanent username (4–8 letters) and password
+- First run: `console` / `console`

@@ -75,6 +75,7 @@ Fengyun-Nexus/
 ├── configs/              # *.default.json；本机覆盖用 *.local.json
 ├── scripts/boot.mjs      # 依赖检查 → 构建 → 拉网关（支持同窗重启）
 ├── start.bat / boot.sh   # 电脑 / Linux·macOS 入口
+├── server-install.sh     # 服务器一键装+启
 └── termux-install.sh     # 手机 Termux 一键装+启
 ```
 
@@ -94,35 +95,44 @@ Fengyun-Nexus/
 
 ## 快速开始
 
+### Windows
+
+```bat
+git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
+cd Fengyun-Nexus
+start.bat
+```
+
+### Linux 服务器
+
+```bash
+git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
+bash ~/Fengyun-Nexus/server-install.sh
+```
+
+仓已在：`bash ~/Fengyun-Nexus/server-install.sh`  
+强制重装：`NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/server-install.sh`
+
+### Linux / macOS（本机已有 Node）
+
 ```bash
 git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
 cd Fengyun-Nexus
+chmod +x boot.sh && ./boot.sh
 ```
-
-| 平台 | 命令 |
-|------|------|
-| Windows | `start.bat` |
-| Linux / macOS | `chmod +x boot.sh && ./boot.sh` |
-| Termux | 见下方 |
-
-控制台：<http://127.0.0.1:8787/>  
-初始账号：`console` / `console`（登录后请改掉）
 
 ### Termux
 
-先把包对齐（缺 openssl / libcurl 时 git HTTPS 会挂）：
-
 ```bash
-yes | apt update && yes | apt full-upgrade -y
-pkg reinstall -y openssl libcurl libssh2 ca-certificates git
 git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
 bash ~/Fengyun-Nexus/termux-install.sh
 ```
 
-仓已在时直接：`bash ~/Fengyun-Nexus/termux-install.sh`  
-强制重装：`cd ~ && NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`
+仓已在：`bash ~/Fengyun-Nexus/termux-install.sh`  
+强制重装：`NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`
 
-不要用 GitCode `raw` 的 `curl | bash`。
+控制台：<http://127.0.0.1:8787/>  
+初始账号：`console` / `console`（登录后请改掉）
 
 ---
 
