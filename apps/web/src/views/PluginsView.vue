@@ -2,8 +2,6 @@
 import { computed, onMounted, ref } from "vue";
 import {
   NButton,
-  NDrawer,
-  NDrawerContent,
   NInput,
   NList,
   NListItem,
@@ -332,8 +330,10 @@ onMounted(() => void refresh());
             </div>
           </div>
           <n-space>
-            <n-button size="tiny" quaternary @click="openConfig(p)">管理</n-button>
-            <n-button v-if="findDev(p)" size="tiny" quaternary @click="openSource(p)">源码</n-button>
+            <n-button size="tiny" @click="openConfig(p)">管理</n-button>
+            <n-button v-if="findDev(p)" size="tiny" type="primary" secondary @click="openSource(p)">
+              在线编辑
+            </n-button>
             <n-button
               size="tiny"
               :type="p.enabled ? 'warning' : 'primary'"
@@ -349,14 +349,20 @@ onMounted(() => void refresh());
 
       <div v-else-if="layer.step === 'docs'" class="docs">
         <template v-if="layer.kind === 'framework'">
-          <p>系统插件：`kind=framework`，`adapterScope=all`。菜单 / 生图 / Echo 属于这一包。</p>
+          <p><strong>系统插件</strong>：`kind=framework`，`adapterScope=all`。菜单 / 生图 / Echo 属于这一包。</p>
           <p>可放在「系统插件包」与「本通道插件」两边同时显示。</p>
           <p>支持模块化目录：`plugin/*.ts`，以及 adapter / workflow / http / events / www。</p>
+          <p>
+            <strong>生图（#生图）</strong>：用框架自带浏览器把<strong>菜单/网页</strong>渲出来再截图发群，
+            <strong>不是</strong> AI 文生图。依赖控制台「环境配置」里的浏览器运行时（Playwright Chromium）。
+          </p>
+          <p>列表里点「在线编辑」可改本机插件源码，保存后按需热重载。</p>
         </template>
         <template v-else>
           <p>通道插件：`kind=channel`，`adapterScope=channel` 或 `specified`，并用 `channels` 绑定通道。</p>
           <p>指令以 `#` 开头；主人配置在通道层，不在插件列表里。</p>
           <p>`id` 必须英文；`name` 写中文显示名。</p>
+          <p>需要网页截图时，复用系统插件「生图」同一套浏览器截图能力，不要自己再装一套。</p>
         </template>
       </div>
     </n-spin>
@@ -385,23 +391,30 @@ onMounted(() => void refresh());
       </template>
     </n-modal>
 
-    <n-drawer v-model:show="showSource" :width="560" placement="right">
-      <n-drawer-content :title="`源码 · ${activeDir}`" closable>
-        <n-list v-if="!filePath" hoverable clickable>
-          <n-list-item v-for="f in files" :key="f.path" @click="loadFile(f.path)">
-            <n-thing :title="f.path" :description="`${f.size} B`" />
-          </n-list-item>
-        </n-list>
-        <div v-else>
-          <p><code>{{ filePath }}</code></p>
-          <textarea v-model="fileContent" class="code" rows="22" />
-          <n-space style="margin-top: 10px">
-            <n-button type="primary" :loading="saving" @click="saveFile">保存</n-button>
-            <n-button @click="filePath = ''">返回列表</n-button>
-          </n-space>
-        </div>
-      </n-drawer-content>
-    </n-drawer>
+    <n-modal
+      v-model:show="showSource"
+      preset="card"
+      :title="`在线编辑 · ${activeDir}`"
+      :style="{ width: 'min(720px, 96vw)' }"
+      :segmented="{ content: true, footer: 'soft' }"
+    >
+      <n-list v-if="!filePath" hoverable clickable>
+        <n-list-item v-for="f in files" :key="f.path" @click="loadFile(f.path)">
+          <n-thing :title="f.path" :description="`${f.size} B`" />
+        </n-list-item>
+      </n-list>
+      <div v-else>
+        <p class="hint"><code>{{ filePath }}</code></p>
+        <textarea v-model="fileContent" class="code" rows="20" />
+      </div>
+      <template #footer>
+        <n-space justify="end">
+          <n-button v-if="filePath" @click="filePath = ''">返回文件列表</n-button>
+          <n-button @click="showSource = false">关闭</n-button>
+          <n-button v-if="filePath" type="primary" :loading="saving" @click="saveFile">保存</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -427,6 +440,9 @@ onMounted(() => void refresh());
   gap: 10px;
   color: var(--muted);
   line-height: 1.55;
+}
+.docs strong {
+  color: var(--amber);
 }
 .code {
   width: 100%;

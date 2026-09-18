@@ -1,17 +1,67 @@
 <script setup lang="ts">
-import { nextTick, ref } from "vue";
-import { NButton, NInput, useMessage } from "naive-ui";
+import { nextTick, onMounted, ref } from "vue";
+import { NButton, NInput, NSpace, useMessage } from "naive-ui";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type Msg = { role: "user" | "assistant"; content: string; at?: string };
+type FeedRow = {
+  id: string;
+  channel: string;
+  chatId: string;
+  userId: string;
+  role: string;
+  content: string;
+  createdAt: string;
+};
 
+const CHAT_ID = "console-main";
 const auth = useAuthStore();
 const message = useMessage();
 const input = ref("");
 const busy = ref(false);
-const msgs = ref<Msg[]>([{ role: "assistant", content: "发消息或 #帮助。群里要 @ 或呼唤前缀才会 AI。" }]);
+const loadingHistory = ref(true);
+const msgs = ref<Msg[]>([]);
 const box = ref<HTMLElement | null>(null);
+
+function pushWelcome() {
+  if (!msgs.value.length) {
+    msgs.value.push({
+      role: "assistant",
+      content: "发消息或 #帮助。群里要 @ 或呼唤前缀才会 AI。",
+    });
+  }
+}
+
+async function loadHistory() {
+  loadingHistory.value = true;
+  try {
+    const res = await api<{ items: FeedRow[] }>(
+      `/v1/messages/recent?chatId=${encodeURIComponent(CHAT_ID)}&limit=80`,
+      { token: auth.token },
+    );
+    const rows = res.items || [];
+    if (rows.length) {
+      msgs.value = rows
+        .filter((r) => r.role === "user" || r.role === "assistant")
+        .map((r) => ({
+          role: r.role === "user" ? "user" : "assistant",
+          content: r.content,
+          at: r.createdAt,
+        }));
+    } else {
+      msgs.value = [];
+      pushWelcome();
+    }
+  } catch {
+    msgs.value = [];
+    pushWelcome();
+  } finally {
+    loadingHistory.value = false;
+    await nextTick();
+    box.value?.scrollTo({ top: box.value.scrollHeight });
+  }
+}
 
 async function send() {
   const text = input.value.trim();
@@ -23,7 +73,7 @@ async function send() {
     const res = await api<{ assistant?: string; replies?: Array<{ content?: string }> }>("/v1/chat", {
       method: "POST",
       token: auth.token,
-      body: JSON.stringify({ content: text, chatId: "console-main", userId: "console" }),
+      body: JSON.stringify({ content: text, chatId: CHAT_ID, userId: "console" }),
     });
     const out =
       res.assistant ||
@@ -38,17 +88,28 @@ async function send() {
     box.value?.scrollTo({ top: box.value.scrollHeight });
   }
 }
+
+onMounted(() => void loadHistory());
 </script>
 
 <template>
   <div class="page chat-page">
     <header class="page-head">
-      <h1>对话</h1>
-      <p class="muted">控制台直连网关，不用去群里试指令也能看效果。</p>
+      <div>
+        <h1>对话</h1>
+        <p class="muted">控制台直连网关；历史从本机库回放，刷新还在。</p>
+      </div>
+      <n-space>
+        <n-button size="small" quaternary :loading="loadingHistory" @click="loadHistory">刷新历史</n-button>
+      </n-space>
     </header>
     <div ref="box" class="chat-box">
+      <p v-if="loadingHistory" class="muted pad">加载历史…</p>
       <div v-for="(m, i) in msgs" :key="i" class="bubble" :class="m.role">
-        <strong>{{ m.role === "user" ? "你" : "Nexus" }}</strong>
+        <div class="bubble-meta">
+          <strong>{{ m.role === "user" ? "你" : "Nexus" }}</strong>
+          <span v-if="m.at" class="at">{{ m.at.replace("T", " ").slice(0, 19) }}</span>
+        </div>
         <pre>{{ m.content }}</pre>
       </div>
     </div>
@@ -66,6 +127,12 @@ async function send() {
 </template>
 
 <style scoped>
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
 .page-head h1 {
   margin: 0 0 4px;
   font-family: var(--font-display);
@@ -73,6 +140,7 @@ async function send() {
   color: var(--amber);
 }
 .muted { color: var(--muted); margin: 0 0 12px; }
+.pad { padding: 12px; }
 .chat-page {
   display: flex;
   flex-direction: column;
@@ -95,6 +163,16 @@ async function send() {
 }
 .bubble.user {
   background: rgba(232, 165, 75, 0.12);
+}
+.bubble-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bubble-meta .at {
+  color: var(--muted);
+  font-size: 0.75rem;
 }
 .bubble pre {
   margin: 6px 0 0;

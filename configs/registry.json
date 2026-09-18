@@ -9,5 +9,9 @@
   "update": {
     "enabled": true,
     "checkOnStart": true
+  },
+  "pluginsRepo": {
+    "url": "",
+    "branch": "main"
   }
 }

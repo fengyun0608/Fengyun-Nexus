@@ -26,6 +26,7 @@ import {
 } from "@fengyun/nexus-shared";
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
 import { bootStep, printBootBanner, printBootSuccess } from "./boot-banner.js";
+import { checkPluginUpdates } from "./registry-check.js";
 import {
   getChannelSettings,
   isChannelMaster,
@@ -1331,7 +1332,10 @@ async function bootstrap(): Promise<void> {
   app.get("/v1/messages/recent", authMiddleware, (req, res) => {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 60)));
     const channel = typeof req.query.channel === "string" ? req.query.channel : "";
-    let items = db.recentAllMessages(limit);
+    const chatId = typeof req.query.chatId === "string" ? req.query.chatId : "";
+    let items = chatId
+      ? db.recentMessages(chatId, limit) // 旧 → 新，适合对话回放
+      : db.recentAllMessages(limit); // 新 → 旧，适合动态流
     if (channel) items = items.filter((m) => m.channel === channel);
     res.json({
       ok: true,
@@ -1408,12 +1412,41 @@ async function bootstrap(): Promise<void> {
       tokenConfigured: Boolean(process.env[registry.tokenEnv]),
       tokenEnv: registry.tokenEnv,
       update: registry.update,
+      pluginsRepo: registry.pluginsRepo || null,
       categories: Object.entries(registry.categories).map(([id, c]) => ({
         id,
         label: c.label,
         path: c.path,
       })),
     });
+  });
+
+  /** 对比本地 plugins/ 与远端是否一致 */
+  app.get("/v1/registry/plugin-updates", authMiddleware, (_req, res) => {
+    try {
+      const repoUrl = String(registry.pluginsRepo?.url || "").trim();
+      const result = checkPluginUpdates(ROOT, {
+        branch: "main",
+        pluginsRepoUrl: repoUrl || undefined,
+        pluginsRepoBranch: registry.pluginsRepo?.branch || "main",
+      });
+      const updates = result.items.filter((i) => i.status === "update").length;
+      res.json({
+        ...result,
+        summary: {
+          total: result.items.length,
+          update: updates,
+          same: result.items.filter((i) => i.status === "same").length,
+          localOnly: result.items.filter((i) => i.status === "local-only").length,
+        },
+        message:
+          updates > 0
+            ? `有 ${updates} 个插件与远端不一致`
+            : "本地与远端插件目录一致（或暂未配置插件专仓）",
+      });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   app.post("/v1/registry/publish", authMiddleware, (req, res) => {

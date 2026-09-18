@@ -3,7 +3,6 @@ import { onMounted, ref } from "vue";
 import {
   NButton,
   NCard,
-  NInput,
   NSelect,
   NSpace,
   NSpin,
@@ -17,20 +16,35 @@ type RegistryInfo = {
   baseUrl?: string;
   tokenConfigured?: boolean;
   tokenEnv?: string;
+  pluginsRepo?: { url?: string; branch?: string } | null;
   categories?: Array<{ id: string; label: string; path: string }>;
 };
 
 type PluginItem = { id: string; name?: string };
 
+type UpdateItem = {
+  id: string;
+  dir: string;
+  name?: string;
+  localFingerprint?: string;
+  remoteFingerprint?: string;
+  status: "same" | "update" | "local-only" | "unknown";
+  message?: string;
+};
+
 const auth = useAuthStore();
 const message = useMessage();
 const loading = ref(true);
 const publishing = ref(false);
+const checking = ref(false);
 const err = ref("");
 const info = ref<RegistryInfo | null>(null);
 const plugins = ref<PluginItem[]>([]);
 const pluginId = ref("");
 const category = ref("");
+const updateItems = ref<UpdateItem[]>([]);
+const updateMsg = ref("");
+const updateSource = ref("");
 
 async function load() {
   loading.value = true;
@@ -51,6 +65,25 @@ async function load() {
   }
 }
 
+async function checkUpdates() {
+  checking.value = true;
+  try {
+    const res = await api<{
+      items?: UpdateItem[];
+      message?: string;
+      source?: string;
+    }>("/v1/registry/plugin-updates", { token: auth.token });
+    updateItems.value = res.items || [];
+    updateMsg.value = res.message || "";
+    updateSource.value = res.source || "";
+    message.info(res.message || "已检测");
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    checking.value = false;
+  }
+}
+
 async function publish() {
   publishing.value = true;
   try {
@@ -67,6 +100,13 @@ async function publish() {
   }
 }
 
+function statusLabel(s: UpdateItem["status"]) {
+  if (s === "same") return "一致";
+  if (s === "update") return "有更新";
+  if (s === "local-only") return "仅本地";
+  return "未知";
+}
+
 onMounted(() => void load());
 </script>
 
@@ -74,25 +114,48 @@ onMounted(() => void load());
   <div class="page">
     <header class="page-head">
       <h1>插件更新</h1>
-      <p class="muted">远端登记与本地发布意图。令牌走环境变量，不写进仓库。</p>
+      <p class="muted">检测远端与本地 plugins/ 是否一致；专仓地址配在 registry.json。</p>
     </header>
     <n-spin :show="loading">
       <p v-if="err" class="err">{{ err }}</p>
       <template v-else>
-        <n-card title="远端" size="small" style="margin-bottom: 14px">
-          <p>地址：{{ info?.baseUrl || "—" }}</p>
-          <p>
-            令牌
-            <n-tag size="small" :type="info?.tokenConfigured ? 'success' : 'warning'">
-              {{ info?.tokenConfigured ? "已配置" : "未配置" }}
+        <div class="admin-row surface">
+          <div>
+            <strong>远程一致性</strong>
+            <p class="muted">
+              对照
+              {{
+                info?.pluginsRepo?.url
+                  ? info.pluginsRepo.url
+                  : "本仓 origin 的 plugins/（专仓 url 空着时）"
+              }}
+            </p>
+          </div>
+          <n-button type="primary" :loading="checking" @click="checkUpdates">检测更新</n-button>
+        </div>
+
+        <n-card v-if="updateMsg" size="small" style="margin: 14px 0" title="检测结果">
+          <p>{{ updateMsg }}</p>
+          <p v-if="updateSource" class="hint">来源：{{ updateSource }}</p>
+          <div v-for="u in updateItems" :key="u.dir" class="upd-row">
+            <div>
+              <strong>{{ u.name || u.id }}</strong>
+              <span class="hint"> {{ u.dir }} · {{ u.localFingerprint || "?" }} → {{ u.remoteFingerprint || "?" }}</span>
+            </div>
+            <n-tag
+              size="small"
+              :type="u.status === 'update' ? 'warning' : u.status === 'same' ? 'success' : 'default'"
+            >
+              {{ statusLabel(u.status) }}
             </n-tag>
-            <span class="hint"> {{ info?.tokenEnv }}</span>
-          </p>
-          <n-space style="margin-top: 8px">
-            <n-tag v-for="c in info?.categories || []" :key="c.id" size="small">{{ c.label }}</n-tag>
-          </n-space>
+          </div>
         </n-card>
-        <n-card title="登记发布" size="small">
+
+        <n-card title="登记发布意图" size="small" style="margin-top: 14px">
+          <p class="hint">
+            令牌 {{ info?.tokenConfigured ? "已配置" : "未配置" }}
+            <span v-if="info?.tokenEnv"> · {{ info.tokenEnv }}</span>
+          </p>
           <label class="field">
             插件
             <n-select
@@ -120,4 +183,17 @@ onMounted(() => void load());
 
 <style scoped>
 @import "@/styles/page.css";
+.surface {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+}
+.upd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
 </style>
