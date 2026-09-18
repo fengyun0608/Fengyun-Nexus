@@ -1772,32 +1772,6 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  app.post("/v1/registry/publish", authMiddleware, (req, res) => {
-    const pluginId = String(req.body?.pluginId ?? "");
-    const category = String(req.body?.category ?? "demo");
-    if (!pluginId) {
-      res.status(400).json({ error: "请指定 pluginId" });
-      return;
-    }
-    if (!registry.categories[category]) {
-      res.status(400).json({ error: `未知分类：${category}` });
-      return;
-    }
-    const tokenOk = Boolean(process.env[registry.tokenEnv]);
-    db.setKv(
-      `registry:lastPublish`,
-      JSON.stringify({ pluginId, category, at: nowIso(), tokenOk }),
-    );
-    res.json({
-      ok: true,
-      queued: true,
-      tokenConfigured: tokenOk,
-      message: tokenOk
-        ? `已登记上传意图：${pluginId} → ${category}（远端推送由维护者流水线处理，细节不对公开展示）`
-        : `已本地登记 ${pluginId} → ${category}。请先配置 ${registry.tokenEnv}（pnpm nexus set registry-token）后再推送。`,
-    });
-  });
-
   app.get("/v1/admin/llm", authMiddleware, (_req, res) => {
     const snap = llm.snapshot();
     res.json({

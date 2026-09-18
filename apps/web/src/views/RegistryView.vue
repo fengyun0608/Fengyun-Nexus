@@ -1,14 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import {
-  NButton,
-  NCard,
-  NSelect,
-  NSpace,
-  NSpin,
-  NTag,
-  useMessage,
-} from "naive-ui";
+import { NButton, NCard, NSpace, NSpin, NTag, useMessage } from "naive-ui";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 
@@ -20,8 +12,6 @@ type RegistryInfo = {
   pluginsRepoLocked?: boolean;
   categories?: Array<{ id: string; label: string; path: string }>;
 };
-
-type PluginItem = { id: string; name?: string };
 
 type UpdateItem = {
   id: string;
@@ -37,14 +27,10 @@ type UpdateItem = {
 const auth = useAuthStore();
 const message = useMessage();
 const loading = ref(true);
-const publishing = ref(false);
 const checking = ref(false);
 const applying = ref(false);
 const err = ref("");
 const info = ref<RegistryInfo | null>(null);
-const plugins = ref<PluginItem[]>([]);
-const pluginId = ref("");
-const category = ref("");
 const updateItems = ref<UpdateItem[]>([]);
 const updateMsg = ref("");
 const updateSource = ref("");
@@ -53,14 +39,7 @@ async function load() {
   loading.value = true;
   err.value = "";
   try {
-    const [r, p] = await Promise.all([
-      api<RegistryInfo>("/v1/registry", { token: auth.token }),
-      api<{ items: PluginItem[] }>("/v1/plugins", { token: auth.token }),
-    ]);
-    info.value = r;
-    plugins.value = p.items || [];
-    if (!pluginId.value && plugins.value[0]) pluginId.value = plugins.value[0].id;
-    if (!category.value && r.categories?.[0]) category.value = r.categories[0].id;
+    info.value = await api<RegistryInfo>("/v1/registry", { token: auth.token });
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -112,22 +91,6 @@ async function applyUpdates() {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {
     applying.value = false;
-  }
-}
-
-async function publish() {
-  publishing.value = true;
-  try {
-    const res = await api<{ message?: string }>("/v1/registry/publish", {
-      method: "POST",
-      token: auth.token,
-      body: JSON.stringify({ pluginId: pluginId.value, category: category.value }),
-    });
-    message.success(res.message || "已登记");
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e));
-  } finally {
-    publishing.value = false;
   }
 }
 
@@ -214,32 +177,6 @@ onMounted(() => void load());
             </n-tag>
           </div>
           <p v-if="!updateItems.length" class="hint">没有待更新的插件，无更新的已跳过。</p>
-        </n-card>
-
-        <n-card title="登记发布意图" size="small" style="margin-top: 14px">
-          <p class="hint">
-            令牌 {{ info?.tokenConfigured ? "已配置" : "未配置" }}
-            <span v-if="info?.tokenEnv"> · {{ info.tokenEnv }}</span>
-          </p>
-          <label class="field">
-            插件
-            <n-select
-              v-model:value="pluginId"
-              :options="plugins.map((p) => ({ label: p.name || p.id, value: p.id }))"
-              filterable
-            />
-          </label>
-          <label class="field">
-            分类
-            <n-select
-              v-model:value="category"
-              :options="(info?.categories || []).map((c) => ({ label: c.label, value: c.id }))"
-            />
-          </label>
-          <n-space>
-            <n-button type="primary" :loading="publishing" @click="publish">登记</n-button>
-            <n-button @click="load">刷新</n-button>
-          </n-space>
         </n-card>
       </template>
     </n-spin>
