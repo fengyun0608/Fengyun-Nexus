@@ -703,16 +703,6 @@ async function bootstrap(): Promise<void> {
     });
     // 插件匹配用去掉呼唤前缀后的文本（nexus帮助 → #帮助）
     const pluginMsg = trimmed !== trimmedRaw ? { ...msg, content: trimmed } : msg;
-    sessions.append(session, "user", trimmed);
-    db.insertMessage({
-      id: msg.id,
-      channel: msg.channel,
-      chatId: msg.chatId,
-      userId: msg.userId,
-      role: "user",
-      content: trimmed,
-      createdAt: msg.createdAt,
-    });
 
     const pluginReplies = await Promise.race([
       plugins.onMessage(pluginMsg, (id) => ({
@@ -740,6 +730,16 @@ async function bootstrap(): Promise<void> {
     });
 
     if (pluginReplies.length) {
+      sessions.append(session, "user", trimmed);
+      db.insertMessage({
+        id: msg.id,
+        channel: msg.channel,
+        chatId: msg.chatId,
+        userId: msg.userId,
+        role: "user",
+        content: trimmed,
+        createdAt: msg.createdAt,
+      });
       const texts = pluginReplies.map((r) => {
         if (r.type === "image") {
           const url = r.attachments?.[0]?.url;
@@ -795,17 +795,23 @@ async function bootstrap(): Promise<void> {
     );
     if (!userAsk) return [];
 
+    sessions.append(session, "user", userAsk);
+    db.insertMessage({
+      id: msg.id,
+      channel: msg.channel,
+      chatId: msg.chatId,
+      userId: msg.userId,
+      role: "user",
+      content: userAsk,
+      createdAt: msg.createdAt,
+    });
+
     history.push(
       ...session.turns.slice(-12).map((t) => ({
         role: t.role as "user" | "assistant" | "system",
         content: t.content,
       })),
     );
-    if (history.length && history[history.length - 1]?.role === "user") {
-      history[history.length - 1] = { role: "user", content: userAsk };
-    } else {
-      history.push({ role: "user", content: userAsk });
-    }
     const assistant = (
       await Promise.race([
         llm.chat(history),

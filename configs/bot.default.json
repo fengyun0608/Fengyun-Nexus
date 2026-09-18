@@ -1,6 +1,6 @@
 {
   "name": "Nexus",
-  "wakePrefixes": [],
+  "wakePrefixes": ["nexus"],
   "commandPrefix": "#",
-  "note": "群聊触发 AI：@机器人，或开头呼唤词（wakePrefixes）。私聊不限制。#指令不受影响。"
+  "note": "群聊触发 AI：@机器人，或开头呼唤词（默认 nexus）。私聊不限制。#指令不受影响。未配呼唤=群里只能@"
 }
