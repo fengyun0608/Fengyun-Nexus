@@ -75,26 +75,42 @@ export function applyFullUpdate(
         (i) => i.status === "update" || i.status === "remote-only",
       );
       if (need.length) {
+        const beforeFp = new Map(
+          need.map((i) => [i.dir, i.localFingerprint || ""]),
+        );
         const applied = applyPluginUpdates(root, {
           pluginsRepoUrl: repoUrl,
           pluginsRepoBranch: opts?.pluginsRepoBranch || "main",
           dirs: need.map((i) => i.dir),
         });
         if (applied.applied.length) {
-          pluginsUpdated = true;
-          pluginDirs.push(...applied.applied);
-          const labels = need
-            .filter((i) => applied.applied.includes(i.dir))
-            .map((i) => {
-              const ver =
-                i.remoteVersion && i.remoteVersion !== i.localVersion
-                  ? ` ${i.localVersion || "?"}→${i.remoteVersion}`
-                  : i.remoteVersion
-                    ? ` ${i.remoteVersion}`
-                    : "";
-              return `${i.name || i.id || i.dir}${ver}`;
-            });
-          pushNodes(nodes, "系统插件已更新", labels.join("\n"));
+          // 再比对一次：源码指纹没变就不算更新、不重启
+          const after = checkPluginUpdates(root, {
+            pluginsRepoUrl: repoUrl,
+            pluginsRepoBranch: opts?.pluginsRepoBranch || "main",
+          });
+          const changed = applied.applied.filter((dir) => {
+            const item = after.items.find((i) => i.dir === dir);
+            return (item?.localFingerprint || "") !== (beforeFp.get(dir) || "");
+          });
+          if (changed.length) {
+            pluginsUpdated = true;
+            pluginDirs.push(...changed);
+            const labels = need
+              .filter((i) => changed.includes(i.dir))
+              .map((i) => {
+                const ver =
+                  i.remoteVersion && i.remoteVersion !== i.localVersion
+                    ? ` ${i.localVersion || "?"}→${i.remoteVersion}`
+                    : i.remoteVersion
+                      ? ` ${i.remoteVersion}`
+                      : "";
+                return `${i.name || i.id || i.dir}${ver}`;
+              });
+            pushNodes(nodes, "系统插件已更新", labels.join("\n"));
+          } else {
+            pushNodes(nodes, "系统插件已是最新");
+          }
         }
         if (applied.failed.length) {
           pluginError = applied.failed.map((f) => `${f.dir}：${f.error}`).join("\n");
@@ -117,7 +133,11 @@ export function applyFullUpdate(
   }
 
   const anyUpdated = Boolean(fw.updated) || pluginsUpdated;
-  if (anyUpdated) pushNodes(nodes, "正在重启");
+  if (anyUpdated) {
+    pushNodes(nodes, "正在重启");
+  } else {
+    pushNodes(nodes, "无需重启");
+  }
 
   const reportText = nodes.join("\n\n");
   const bits: string[] = [];
@@ -127,7 +147,7 @@ export function applyFullUpdate(
     ? `已更新：${bits.join(" + ")}，正在重启`
     : pluginError
       ? `框架已是最新；插件异常：${pluginError}`
-      : `已是最新 ${fw.version || ""}`;
+      : `已是最新 ${fw.version || ""}，无需重启`;
 
   return {
     ok: Boolean(fw.ok) && !(pluginError && !anyUpdated),
@@ -136,6 +156,7 @@ export function applyFullUpdate(
     forwardNodes: nodes,
     version: fw.version,
     updated: anyUpdated,
+    /** 只有框架或插件源码真有变化才重启 */
     shouldExit: anyUpdated,
     overwritten: fw.overwritten,
     beforeCommit: fw.beforeCommit,

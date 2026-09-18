@@ -79,6 +79,30 @@ function shouldSkipName(name: string): boolean {
   );
 }
 
+/** 比对时忽略：依赖清单 / monorepo 兼容再导出，避免每次 #更新都误判要重启 */
+function shouldSkipFile(relPath: string): boolean {
+  const n = relPath.replace(/\\/g, "/").split("/").pop() || "";
+  if (
+    n === "package.json" ||
+    n === "package-lock.json" ||
+    n === "pnpm-lock.yaml" ||
+    n === "yarn.lock" ||
+    n === "screenshot.ts" ||
+    n === "screenshot.js"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function hashText(buf: Buffer | string): string {
+  const text = (Buffer.isBuffer(buf) ? buf.toString("utf8") : String(buf)).replace(
+    /\r\n/g,
+    "\n",
+  );
+  return createHash("sha256").update(text).digest("hex");
+}
+
 /** 工作区目录内容指纹（与仓无关，同内容同 hash） */
 function localContentFingerprint(absDir: string): string {
   if (!existsSync(absDir)) return "";
@@ -102,8 +126,9 @@ function localContentFingerprint(absDir: string): string {
       const rel = prefix ? `${prefix}/${name}` : name;
       if (st.isDirectory()) walk(p, rel);
       else {
+        if (shouldSkipFile(rel)) continue;
         try {
-          const h = createHash("sha256").update(readFileSync(p)).digest("hex");
+          const h = hashText(readFileSync(p));
           lines.push(`${rel.replace(/\\/g, "/")}\0${h}`);
         } catch {
           /* skip */
@@ -132,6 +157,7 @@ function remoteContentFingerprint(
     const path = m[1].replace(/\\/g, "/");
     if (path.includes("/node_modules/") || path.includes("/dist/")) continue;
     const relPath = path.startsWith(`${rel}/`) ? path.slice(rel.length + 1) : path;
+    if (shouldSkipFile(relPath)) continue;
     let buf: Buffer;
     try {
       buf = execFileSync("git", ["show", `${remoteRef}:${path}`], {
@@ -143,7 +169,7 @@ function remoteContentFingerprint(
     } catch {
       continue;
     }
-    const h = createHash("sha256").update(buf).digest("hex");
+    const h = hashText(buf);
     lines.push(`${relPath}\0${h}`);
   }
   if (!lines.length) return "";
@@ -336,14 +362,16 @@ export function applyPluginUpdates(
         continue;
       }
       if (existsSync(dest)) {
-        // 清掉旧源码文件但保留 node_modules
+        // 清掉旧源码，保留 node_modules / package.json / screenshot 兼容层
         for (const name of readdirSync(dest)) {
           if (shouldSkipName(name)) continue;
+          if (shouldSkipFile(name)) continue;
           rmSync(join(dest, name), { recursive: true, force: true });
         }
       } else {
         mkdirSync(dest, { recursive: true });
       }
+      let wrote = false;
       for (const remotePath of list.split("\n").filter(Boolean)) {
         const norm = remotePath.replace(/\\/g, "/");
         if (norm.includes("/node_modules/") || norm.includes("/dist/")) continue;
@@ -351,6 +379,8 @@ export function applyPluginUpdates(
           ? norm.slice(remoteRel.length + 1)
           : relative(remoteRel, norm);
         if (!relInside || relInside.startsWith("..")) continue;
+        // 不覆盖本地 package.json / screenshot（比对也不看它们）
+        if (shouldSkipFile(relInside)) continue;
         const outPath = join(dest, relInside);
         mkdirSync(dirname(outPath), { recursive: true });
         const buf = execFileSync("git", ["show", `${remoteRef}:${norm}`], {
@@ -360,8 +390,10 @@ export function applyPluginUpdates(
           maxBuffer: 8 * 1024 * 1024,
         }) as Buffer;
         writeFileSync(outPath, buf);
+        wrote = true;
       }
-      applied.push(dir);
+      if (wrote) applied.push(dir);
+      else failed.push({ dir, error: "远端无可同步源码" });
     } catch (e) {
       failed.push({ dir, error: e instanceof Error ? e.message : String(e) });
     }
