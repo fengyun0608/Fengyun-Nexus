@@ -65,7 +65,6 @@ const err = ref("");
 const info = ref<OneBotInfo | null>(null);
 
 const enabled = ref(false);
-const accessToken = ref("");
 const reverseWsPath = ref("/onebot/v11/ws");
 const httpPath = ref("/onebot/v11");
 const botCards = ref<BotDraft[]>([]);
@@ -78,7 +77,6 @@ async function load(quiet = false) {
     info.value = await api<OneBotInfo>("/v1/channels/onebot11", { token: auth.token });
     if (quiet) return;
     enabled.value = Boolean(info.value.config?.enabled ?? info.value.enabled);
-    accessToken.value = info.value.config?.accessToken || "";
     reverseWsPath.value = info.value.config?.reverseWsPath || info.value.reverseWsPath || "/onebot/v11/ws";
     httpPath.value = info.value.config?.httpPath || info.value.httpPath || "/onebot/v11";
     const bots = info.value.config?.bots || [];
@@ -111,7 +109,7 @@ async function save() {
       token: auth.token,
       body: JSON.stringify({
         enabled: enabled.value,
-        accessToken: accessToken.value,
+        accessToken: "",
         reverseWsPath: reverseWsPath.value,
         httpPath: httpPath.value,
         bots,
@@ -223,7 +221,6 @@ onUnmounted(() => {
             启用
             <n-switch v-model:value="enabled" />
           </label>
-          <label class="field">共用令牌 <n-input v-model:value="accessToken" type="password" show-password-on="click" placeholder="某个号单独填了就以那个号为准" /></label>
           <label class="field">反向 WS 路径 <n-input v-model:value="reverseWsPath" /></label>
           <label class="field">HTTP 路径 <n-input v-model:value="httpPath" /></label>
           <BotAccountCards

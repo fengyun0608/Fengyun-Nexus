@@ -92,7 +92,6 @@ const plugins = ref<PluginItem[]>([]);
 const devItems = ref<DevPlugin[]>([]);
 const onebot = ref<OneBotInfo | null>(null);
 const obEnabled = ref(false);
-const obToken = ref("");
 const obWs = ref("");
 const obHttp = ref("/onebot/v11");
 const obBotCards = ref<BotDraft[]>([]);
@@ -166,7 +165,6 @@ async function loadOnebot() {
   if (id.value !== "onebot11") return;
   onebot.value = await api<OneBotInfo>("/v1/channels/onebot11", { token: auth.token });
   obEnabled.value = Boolean(onebot.value.config?.enabled);
-  obToken.value = onebot.value.config?.accessToken || "";
   obWs.value = onebot.value.config?.reverseWsPath || "/onebot/v11/ws";
   obHttp.value = onebot.value.config?.httpPath || "/onebot/v11";
   const bots = onebot.value.config?.bots || [];
@@ -416,7 +414,7 @@ async function saveOnebot() {
       token: auth.token,
       body: JSON.stringify({
         enabled: obEnabled.value,
-        accessToken: obToken.value,
+        accessToken: "",
         reverseWsPath: obWs.value,
         httpPath: obHttp.value,
         bots,
@@ -650,7 +648,6 @@ watch(showOnebot, (open) => {
         · QQ {{ onebot?.selfId || "—" }}
       </p>
       <label class="field row-switch">启用 <n-switch v-model:value="obEnabled" /></label>
-      <label class="field">共用令牌 <n-input v-model:value="obToken" type="password" show-password-on="click" placeholder="某个号单独填了就以那个号为准" /></label>
       <label class="field">反向 WS 路径 <n-input v-model:value="obWs" /></label>
       <label class="field">HTTP 路径 <n-input v-model:value="obHttp" /></label>
       <BotAccountCards

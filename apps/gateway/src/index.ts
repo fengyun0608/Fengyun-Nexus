@@ -473,9 +473,9 @@ async function bootstrap(): Promise<void> {
       reverseWsUrl: buildReverseWsUrl({
         port: gatewayPortEarly(),
         path: cfg.reverseWsPath || "/onebot/v11/ws",
-        token: cfg.accessToken,
+        token: "",
       }),
-      token: cfg.accessToken || "",
+      token: "",
     };
   });
   setNapCatAfterInstall(() => {
@@ -497,12 +497,13 @@ async function bootstrap(): Promise<void> {
     }
     const label = bots[idx]?.label || "未备注";
     const port = Math.floor(Number(bots[idx]?.listenPort) || listenPort || gatewayPortEarly());
+    const token = onebot.tokenFor(port);
     const url = buildReverseWsUrl({
       port,
       path: cfg.reverseWsPath || "/onebot/v11/ws",
-      token: cfg.accessToken,
+      token,
     });
-    const file = wireNapCatForAccount(ROOT, sid, url, cfg.accessToken || "");
+    const file = wireNapCatForAccount(ROOT, sid, url, token);
     if (file) log.ok(`已把 ${label} 的反向地址写成 ${url}`);
     bots[idx] = { ...bots[idx], selfId: sid };
     const next = { ...cfg, enabled: true, bots };
@@ -1959,7 +1960,7 @@ async function bootstrap(): Promise<void> {
     const reverseWsUrl = buildReverseWsUrl({
       port: gwPort,
       path,
-      token: cfg.accessToken,
+      token: onebot.tokenFor(0),
     });
     const napcat = getNapCatStatus({
       root: ROOT,
@@ -1988,7 +1989,7 @@ async function bootstrap(): Promise<void> {
     const reverseWsUrl = buildReverseWsUrl({
       port: Number(process.env.PORT ?? profile.gateway.port),
       path: cfg.reverseWsPath || "/onebot/v11/ws",
-      token: cfg.accessToken,
+      token: onebot.tokenFor(0),
     });
     const st = onebot.status();
     res.json({
@@ -2013,7 +2014,7 @@ async function bootstrap(): Promise<void> {
     const reverseWsUrl = buildReverseWsUrl({
       port: Number(process.env.PORT ?? profile.gateway.port),
       path: cfg.reverseWsPath || "/onebot/v11/ws",
-      token: cfg.accessToken,
+      token: onebot.tokenFor(0),
     });
     const marker = readNapCatMarker(ROOT);
     const home = marker?.home;
@@ -2021,7 +2022,7 @@ async function bootstrap(): Promise<void> {
       res.status(400).json({ error: "尚未安装 NapCat，请先到环境配置安装" });
       return;
     }
-    const files = wireNapCatConfigs(home, reverseWsUrl, cfg.accessToken || "");
+    const files = wireNapCatConfigs(home, reverseWsUrl, onebot.tokenFor(0));
     const next = { ...cfg, enabled: true };
     persistOneBotConfig(next);
     onebot.updateConfig(next);

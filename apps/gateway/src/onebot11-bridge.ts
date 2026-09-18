@@ -391,23 +391,23 @@ export class OneBot11Bridge {
     this.syncListenPorts();
   }
 
-  private expectedToken(listenPort: number): string {
+  /** 只认这个端口上那个号自己的令牌。没填就是空，不做校验。 */
+  tokenFor(listenPort: number): string {
     const bots = this.cfg.bots || [];
-    if (listenPort > 0) {
-      const exact = bots.find((b) => Math.floor(Number(b.listenPort) || 0) === listenPort);
-      const own = String(exact?.accessToken || "").trim();
-      if (own) return own;
-    }
-    if (!listenPort || listenPort === this.gatewayPort) {
-      const shared = bots.find((b) => !Number(b.listenPort) && String(b.accessToken || "").trim());
-      const own = String(shared?.accessToken || "").trim();
-      if (own) return own;
-    }
-    return String(this.cfg.accessToken || "").trim();
+    const port = Math.floor(Number(listenPort) || 0);
+    const gateway = this.gatewayPort;
+    const exact =
+      port > 0 && port !== gateway
+        ? bots.find((b) => Math.floor(Number(b.listenPort) || 0) === port)
+        : bots.find((b) => {
+            const p = Math.floor(Number(b.listenPort) || 0);
+            return p === 0 || p === gateway;
+          });
+    return String(exact?.accessToken || "").trim();
   }
 
   private authOk(authorization?: string, queryToken?: string | null, listenPort = 0): boolean {
-    const token = this.expectedToken(listenPort);
+    const token = this.tokenFor(listenPort);
     if (!token) return true;
     const bearer = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
     return bearer === token || queryToken === token;
@@ -578,7 +578,7 @@ export class OneBot11Bridge {
     const apiBase = this.napcatApi(bot?.apiBase);
     if (apiBase) {
       try {
-        const token = bot?.accessToken || this.cfg.accessToken || "";
+        const token = String(bot?.accessToken || "").trim();
         const headers: Record<string, string> = {
           "content-type": "application/json",
         };

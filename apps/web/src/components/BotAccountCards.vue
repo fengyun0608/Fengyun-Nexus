@@ -109,7 +109,7 @@ async function copyUrl(url: string) {
 
 <template>
   <div class="bot-cards">
-    <p class="hint">每个号自己的端口和令牌。添加时只写备注，QQ 号连上后写入。</p>
+    <p class="hint">每个号自己的端口和令牌。令牌留空就不校验。添加时只写备注，QQ 号连上后写入。</p>
     <article v-for="(b, i) in modelValue" :key="`${b.label}-${i}`" class="bot-card">
       <header>
         <strong>{{ b.label.trim() || "未备注" }}</strong>
@@ -124,7 +124,7 @@ async function copyUrl(url: string) {
           :value="b.accessToken"
           type="password"
           show-password-on="click"
-          placeholder="空着就用共用令牌"
+          placeholder="空着就不校验令牌"
           @update:value="(v) => patch(i, { accessToken: v })"
         />
       </label>
