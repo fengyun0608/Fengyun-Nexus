@@ -5,69 +5,126 @@ type LikeCfg = {
   maxTimes: number;
   randomMin: number;
   randomMax: number;
-  /** 点赞成功；一行一句，每次随机 */
-  repliesOk: string;
-  /** 点赞失败（接口报错等） */
-  repliesFail: string;
-  /** 今日已达上限 */
-  repliesLimit: string;
+  /** 主人 · 成功 */
+  repliesOkMaster: string;
+  /** 普通人 · 成功（好听，但不压过主人） */
+  repliesOkGuest: string;
+  repliesFailMaster: string;
+  repliesFailGuest: string;
+  repliesLimitMaster: string;
+  repliesLimitGuest: string;
   friendsOnly: boolean;
   mastersOnly: boolean;
   triggerWords: string;
   botId: string;
 };
 
-const DEFAULT_OK = [
-  "哼，杂鱼也想被赞吗…勉为其难赞了你 {n} 下。",
-  "好啦好啦，赞你 {n} 下，别得寸进尺哦。",
-  "杂鱼大叔伸手要赞？行吧，给你 {n} 下，记着谢我。",
-  "才、才不是想夸你呢…顺手赞了 {n} 下而已！",
-  "啧，这么粘人。赞了 {n} 下，够了吧杂鱼。",
-  "摸摸头——不对，是点赞。给你 {n} 下，乖一点。",
-  "杂鱼的请求也要认真对待嘛…赞了你 {n} 下。",
-  "今天心情好，破例给杂鱼大叔 {n} 个赞。",
-  "嗯…算你识相。赞了 {n} 下，下次记得带零食。",
-  "杂鱼浓度过高警告——仍旧赞了你 {n} 下。",
-  "别笑得那么傻，只是赞了 {n} 下而已啦。",
-  "大叔也要被夸吗？那赞你 {n} 下，开心了没。",
-  "哼哼，被赞的感觉怎么样？一共 {n} 下哦。",
-  "杂鱼专用赞到账：{n}。去炫耀吧。",
-  "行行行，赞了。{n} 下，别再刷屏要了。",
-  "轻轻赞了你 {n} 下…再吵就把你拉黑哦，骗人的啦。",
-  "杂鱼大叔今日份夸奖：赞 ×{n}。收下吧。",
-  "本来想无视的…算了，赞你 {n} 下。",
-  "哇，居然主动要赞。给你 {n} 下，别飘。",
-  "点赞完毕。杂鱼指数 +{n}。",
+/** 主人称呼：亲密、偏宠，杂鱼主人一类 */
+const DEFAULT_OK_MASTER = [
+  "哼，杂鱼主人也要赞吗…好啦，宠你 {n} 下。",
+  "遵命，杂鱼主人。已赞 {n} 下，尾巴都要翘起来了。",
+  "小主人伸手了？那就赞 {n} 下，不许后悔哦。",
+  "才、才不是特别给你赞的…顺手 {n} 下而已，主人！",
+  "杂鱼主人今日份夸奖：赞 ×{n}。请开心一点。",
+  "摸摸…不对，是点赞。给亲爱的主人 {n} 下。",
+  "主人一喊就到。赞了 {n} 下，记得夸我乖。",
+  "好的好的，杂鱼主人最优先。赞 {n} 下到账。",
+  "啧，粘人的主人。赞了 {n} 下，够宠了吧？",
+  "为小主人破例啦——赞 {n} 下，别告诉别人这么甜。",
+  "杂鱼主人专属通道：赞 {n}。请签收♡",
+  "嗯…只有主人可以这么任性。赞了你 {n} 下。",
+  "亲爱的主人，赞 {n} 下。今天也要被我罩着哦。",
+  "主人要赞就赞，谁敢说不？一共 {n} 下。",
+  "杂鱼主人浓度超标…仍旧认真赞了 {n} 下。",
+  "好啦主人，赞完了。{n} 下，去炫耀也行。",
+  "给你最高待遇：赞 ×{n}。杂鱼主人请慢用。",
+  "小主人今天也很可爱。奖励赞 {n} 下。",
+  "哼哼，被主人使唤的感觉…赞了 {n} 下啦。",
+  "专属夸奖已送达：主人，{n} 个赞，不许分给别人。",
 ].join("\n");
 
-const DEFAULT_FAIL = [
-  "点赞失败了…杂鱼今天运气不太好呢。",
-  "唔，没赞上。可能是接口不开心，稍后再试。",
-  "失败了啦。不是我不想赞你，是 QQ 不让。",
-  "啧，赞飞了。杂鱼大叔等会儿再来一次？",
-  "这次没成。先摸摸你的头安慰一下…口头的。",
-  "点赞卡住了。不是嫌弃你，是网络抽风。",
-  "失败！杂鱼计划搁浅。过会儿再喊我。",
-  "哎，没赞上。你先自己开心一下？",
-  "接口说不行。我也没办法呀，杂鱼。",
+/** 普通人：好听、礼貌亲近，但不叫主人、不更宠 */
+const DEFAULT_OK_GUEST = [
+  "好呀，赞了你 {n} 下，开心一点哦。",
+  "行啦，给你 {n} 个赞，别太得意。",
+  "朋友伸手要赞？那就 {n} 下，收下吧。",
+  "嗯，赞了你 {n} 下。今天运气不错嘛。",
+  "轻轻赞了 {n} 下，记得说谢谢呀。",
+  "好的，点赞完成：{n}。去过好日子吧。",
+  "给你鼓鼓掌——哦不，是赞 {n} 下。",
+  "熟人优惠：赞 ×{n}。别天天来刷就行。",
+  "赞了哦。{n} 下，算我请客。",
+  "好嘞，{n} 个赞送到。保持可爱就行。",
+  "给你点亮一下：赞 {n}。下次也要乖。",
+  "唔，可以呀。赞了你 {n} 下，别飘太高。",
+  "朋友份夸奖：赞 {n} 下。收好。",
+  "点赞完毕。你这家伙，{n} 下够不够？",
+  "行，赞了。一共 {n} 下，去笑一个。",
+  "给你体面一点的赞：{n}。请慢用。",
+  "好呀好呀，赞 {n} 下。今天也顺利哦。",
+  "熟人通道通过～赞了你 {n} 下。",
+  "嗯嗯，已赞 {n}。下次见。",
+  "给你鼓劲：赞 ×{n}。加油呀。",
+].join("\n");
+
+const DEFAULT_FAIL_MASTER = [
+  "杂鱼主人…这次没赞上，不是我不宠你，是接口抽风。",
+  "失败了啦，小主人。稍后再喊我一次好不好？",
+  "唔，赞飞了。主人先喝口水，我再试。",
+  "亲爱的主人，这次 QQ 不配合。绝不是嫌弃你。",
+  "杂鱼主人专属安慰：失败了，但明天还宠你。",
+  "没成…主人别生气，过会儿再来，我等着。",
+  "接口说不行。主人，我们换个时间继续被宠。",
+  "赞丢了。小主人先忍忍，我马上补上——大概。",
+  "失败了。主人今天运气一般，抱抱（口头）。",
+  "啧，连主人的赞都丢？气死了。稍后再来。",
+  "没赞上。杂鱼主人请稍候再试一次。",
+  "卡住了。主人先忙别的，我盯着接口呢。",
+].join("\n");
+
+const DEFAULT_FAIL_GUEST = [
+  "这次没赞上，稍后再试一下呀。",
+  "唔，失败了。不是不想赞你，是网络抽风。",
+  "赞飞了。等会儿再喊我一次吧。",
+  "哎，没成。你先自己开心一下？",
+  "接口不开心。过会儿再来，朋友。",
+  "失败了啦。再试一次通常就好。",
+  "没赞上。先喝口水，别着急。",
+  "卡住了。稍后再点一次就行。",
   "赞丢了…下次一定！大概。",
-  "失败了。今天风太大，赞被吹走了。",
-  "没成。可能对方设置太严，杂鱼也救不了。",
+  "今天风太大，赞被吹走了。再试呗。",
+  "失败。可能设置太严，我也没办法。",
+  "没成。你先忙，回头再赞。",
 ].join("\n");
 
-const DEFAULT_LIMIT = [
-  "今日点赞已达上限啦，杂鱼大叔明天再来。",
-  "赞满了满了！明天再宠你，好不好。",
-  "今天的赞额度用光了。杂鱼也要懂得节制哦。",
-  "上限到了。明日再战，杂鱼加油。",
-  "已经赞不动了…QQ 说停。明天见。",
-  "今日份夸奖售罄。杂鱼大叔请明日再来排队。",
-  "赞库存清空。先去喝口水，明天继续。",
-  "到上限啦。不是不爱赞你，是没次数了。",
-  "今日额度耗尽。明天再给你当夸夸机。",
-  "满了哦。杂鱼先忍一忍，太阳下山再…不，明天。",
-  "点赞条数见底。回见，大叔。",
-  "上限警告：今天不能再赞了。乖乖等明天。",
+const DEFAULT_LIMIT_MASTER = [
+  "杂鱼主人，今日赞额度用光啦。明天继续宠你。",
+  "上限到了，小主人。先存着想念，明日再赞。",
+  "亲爱的主人，今天的赞卖完了。明天见哦。",
+  "满了满了。主人也要懂得节制…明天再来。",
+  "今日份专属夸奖售罄。杂鱼主人请明日排队。",
+  "额度见底。小主人先去忙，太阳一出来再宠。",
+  "到上限啦。不是不宠你，是 QQ 不给次数了。",
+  "主人今日已赞满。留下一个吻面…口头的，明天见。",
+  "赞库存清空。杂鱼主人，我们约明天。",
+  "上限警告：今天不能再宠了。主人乖乖等日出。",
+  "今日额度耗尽。明天见，最优先还是你。",
+  "满了哦。小主人先忍一忍，明日继续最高待遇。",
+].join("\n");
+
+const DEFAULT_LIMIT_GUEST = [
+  "今天赞次数用完啦，明天再来呀。",
+  "上限到了。先歇歇，明日继续。",
+  "今日额度见底。明天见，朋友。",
+  "赞满了。明天再给你鼓劲哦。",
+  "没有次数了。先去干点别的吧。",
+  "今日份夸奖售罄。明天再排队。",
+  "到上限啦。不是不想赞，是没次数了。",
+  "赞库存清空。明天见。",
+  "今天到此为止。明日再喊我。",
+  "满了哦。先忍一忍，明天继续。",
+  "额度耗尽。回去喝口水，明天见。",
+  "上限警告：今天不能再赞了。明天见。",
 ].join("\n");
 
 function pickLine(raw: string, fallback: string, times?: number): string {
@@ -94,19 +151,19 @@ function looksLikeLimit(msg: string): boolean {
   return /上限|次数|limit|too many|已达|用完|售罄|明日|明天再/.test(s);
 }
 
-/** QQ 点赞：#赞我；也可配触发词。成功/失败/上限词库各一行一句，控制台可改。 */
+/** QQ 点赞：主人 / 普通人两套词库，一行一句，控制台可改。 */
 export class ZLikePlugin extends Plugin {
   manifest = {
     id: "z.like",
     name: "点赞",
-    version: "0.2.0",
+    version: "0.3.0",
     priority: 900,
     category: "basic" as const,
     kind: "channel" as const,
     adapterScope: "channel" as const,
     channels: ["onebot11"],
     permissions: ["channel.send" as const, "onebot.api" as const],
-    description: "给自己点赞：#赞我；成功/失败/上限词库可在控制台改，一行一句随机",
+    description: "给自己点赞：#赞我；主人与普通人词库分开，一行一句随机",
   };
 
   rule = [
@@ -129,25 +186,46 @@ export class ZLikePlugin extends Plugin {
     { key: "randomMin", label: "随机最少", type: "number" as const, default: 1 },
     { key: "randomMax", label: "随机最多", type: "number" as const, default: 10 },
     {
-      key: "repliesOk",
-      label: "成功词库",
+      key: "repliesOkMaster",
+      label: "成功 · 主人",
       type: "textarea" as const,
-      default: DEFAULT_OK,
-      description: "一行一句；每次随机。可用 {n} 表示次数",
+      default: DEFAULT_OK_MASTER,
+      description: "主人触发时；一行一句。可用 {n}",
     },
     {
-      key: "repliesFail",
-      label: "失败词库",
+      key: "repliesOkGuest",
+      label: "成功 · 普通人",
       type: "textarea" as const,
-      default: DEFAULT_FAIL,
-      description: "一行一句；点赞接口失败时随机",
+      default: DEFAULT_OK_GUEST,
+      description: "非主人；好听但不压过主人。一行一句",
     },
     {
-      key: "repliesLimit",
-      label: "上限词库",
+      key: "repliesFailMaster",
+      label: "失败 · 主人",
       type: "textarea" as const,
-      default: DEFAULT_LIMIT,
-      description: "一行一句；今日已达上限时随机",
+      default: DEFAULT_FAIL_MASTER,
+      description: "一行一句",
+    },
+    {
+      key: "repliesFailGuest",
+      label: "失败 · 普通人",
+      type: "textarea" as const,
+      default: DEFAULT_FAIL_GUEST,
+      description: "一行一句",
+    },
+    {
+      key: "repliesLimitMaster",
+      label: "上限 · 主人",
+      type: "textarea" as const,
+      default: DEFAULT_LIMIT_MASTER,
+      description: "一行一句",
+    },
+    {
+      key: "repliesLimitGuest",
+      label: "上限 · 普通人",
+      type: "textarea" as const,
+      default: DEFAULT_LIMIT_GUEST,
+      description: "一行一句",
     },
     { key: "friendsOnly", label: "仅好友可赞", type: "boolean" as const, default: false },
     { key: "mastersOnly", label: "仅给主人点赞", type: "boolean" as const, default: false },
@@ -156,7 +234,7 @@ export class ZLikePlugin extends Plugin {
       label: "触发词",
       type: "string" as const,
       default: "赞我,点个赞,给我点赞",
-      description: "逗号分隔；消息含这些词也会点赞",
+      description: "逗号分隔",
     },
     {
       key: "botId",
@@ -172,9 +250,12 @@ export class ZLikePlugin extends Plugin {
     maxTimes: 10,
     randomMin: 1,
     randomMax: 10,
-    repliesOk: DEFAULT_OK,
-    repliesFail: DEFAULT_FAIL,
-    repliesLimit: DEFAULT_LIMIT,
+    repliesOkMaster: DEFAULT_OK_MASTER,
+    repliesOkGuest: DEFAULT_OK_GUEST,
+    repliesFailMaster: DEFAULT_FAIL_MASTER,
+    repliesFailGuest: DEFAULT_FAIL_GUEST,
+    repliesLimitMaster: DEFAULT_LIMIT_MASTER,
+    repliesLimitGuest: DEFAULT_LIMIT_GUEST,
     friendsOnly: false,
     mastersOnly: false,
     triggerWords: "赞我,点个赞,给我点赞",
@@ -186,16 +267,35 @@ export class ZLikePlugin extends Plugin {
   }
 
   setConfig(next: Record<string, unknown>) {
-    // 兼容旧配置：只有 replies 时当作成功词库
-    const legacy = typeof next.replies === "string" ? String(next.replies) : "";
+    const legacyOk = String(next.repliesOk ?? next.replies ?? "");
+    const legacyFail = String(next.repliesFail ?? "");
+    const legacyLimit = String(next.repliesLimit ?? "");
     this.cfg = {
       enabled: next.enabled !== false,
       maxTimes: Math.max(1, Number(next.maxTimes ?? 10) || 10),
       randomMin: Math.max(1, Number(next.randomMin ?? 1) || 1),
       randomMax: Math.max(1, Number(next.randomMax ?? 10) || 10),
-      repliesOk: String(next.repliesOk ?? legacy || this.cfg.repliesOk || DEFAULT_OK),
-      repliesFail: String(next.repliesFail ?? this.cfg.repliesFail || DEFAULT_FAIL),
-      repliesLimit: String(next.repliesLimit ?? this.cfg.repliesLimit || DEFAULT_LIMIT),
+      repliesOkMaster: String(
+        next.repliesOkMaster || this.cfg.repliesOkMaster || legacyOk || DEFAULT_OK_MASTER,
+      ),
+      repliesOkGuest: String(
+        next.repliesOkGuest || this.cfg.repliesOkGuest || legacyOk || DEFAULT_OK_GUEST,
+      ),
+      repliesFailMaster: String(
+        next.repliesFailMaster || this.cfg.repliesFailMaster || legacyFail || DEFAULT_FAIL_MASTER,
+      ),
+      repliesFailGuest: String(
+        next.repliesFailGuest || this.cfg.repliesFailGuest || legacyFail || DEFAULT_FAIL_GUEST,
+      ),
+      repliesLimitMaster: String(
+        next.repliesLimitMaster ||
+          this.cfg.repliesLimitMaster ||
+          legacyLimit ||
+          DEFAULT_LIMIT_MASTER,
+      ),
+      repliesLimitGuest: String(
+        next.repliesLimitGuest || this.cfg.repliesLimitGuest || legacyLimit || DEFAULT_LIMIT_GUEST,
+      ),
       friendsOnly: Boolean(next.friendsOnly),
       mastersOnly: Boolean(next.mastersOnly),
       triggerWords: String(next.triggerWords ?? ""),
@@ -226,6 +326,25 @@ export class ZLikePlugin extends Plugin {
     await this.doLike(e, ctx);
   }
 
+  private bank(
+    master: boolean,
+    kind: "ok" | "fail" | "limit",
+  ): { raw: string; fallback: string } {
+    if (kind === "ok") {
+      return master
+        ? { raw: this.cfg.repliesOkMaster, fallback: "杂鱼主人，赞了你 {n} 下～" }
+        : { raw: this.cfg.repliesOkGuest, fallback: "赞了你 {n} 下～" };
+    }
+    if (kind === "fail") {
+      return master
+        ? { raw: this.cfg.repliesFailMaster, fallback: "杂鱼主人，这次没赞上，稍后再试" }
+        : { raw: this.cfg.repliesFailGuest, fallback: "点赞失败，稍后再试" };
+    }
+    return master
+      ? { raw: this.cfg.repliesLimitMaster, fallback: "杂鱼主人，今日已达上限，明天再来" }
+      : { raw: this.cfg.repliesLimitGuest, fallback: "今日点赞已达上限，明天再来吧" };
+  }
+
   private async doLike(e: NexusEvent, ctx: PluginContext) {
     if (this.cfg.enabled === false) {
       await e.reply("点赞已关闭");
@@ -235,7 +354,8 @@ export class ZLikePlugin extends Plugin {
       await e.reply("当前通道不支持点赞");
       return;
     }
-    if (this.cfg.mastersOnly && !ctx.isMaster?.(e.userId)) {
+    const asMaster = Boolean(ctx.isMaster?.(e.userId));
+    if (this.cfg.mastersOnly && !asMaster) {
       await e.reply("只给主人点赞哦");
       return;
     }
@@ -252,9 +372,8 @@ export class ZLikePlugin extends Plugin {
         (x) => String((x as { user_id?: unknown }).user_id) === String(e.userId),
       );
       if (!ok) {
-        await e.reply(
-          pickLine(this.cfg.repliesFail, "还不是好友，赞不了你啦"),
-        );
+        const b = this.bank(asMaster, "fail");
+        await e.reply(pickLine(b.raw, "还不是好友，赞不了你啦"));
         return;
       }
     }
@@ -271,15 +390,16 @@ export class ZLikePlugin extends Plugin {
     if (!r.ok) {
       const tip = r.message || "";
       if (looksLikeLimit(tip)) {
-        await e.reply(pickLine(this.cfg.repliesLimit, "今日点赞已达上限，明天再来吧"));
+        const b = this.bank(asMaster, "limit");
+        await e.reply(pickLine(b.raw, b.fallback));
       } else {
-        await e.reply(
-          pickLine(this.cfg.repliesFail, tip || "点赞失败，稍后再试"),
-        );
+        const b = this.bank(asMaster, "fail");
+        await e.reply(pickLine(b.raw, tip || b.fallback));
       }
       return;
     }
-    await e.reply(pickLine(this.cfg.repliesOk, `赞了你 ${times} 下～`, times));
+    const b = this.bank(asMaster, "ok");
+    await e.reply(pickLine(b.raw, b.fallback, times));
   }
 }
 
