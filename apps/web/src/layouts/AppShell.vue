@@ -85,23 +85,43 @@ async function onLogin() {
 
 <template>
   <div v-if="!auth.loggedIn" class="login-wrap">
+    <div class="login-bg" aria-hidden="true">
+      <span class="orb orb-a" />
+      <span class="orb orb-b" />
+      <span class="orb orb-c" />
+      <span class="grid-fade" />
+    </div>
     <div class="login-card">
+      <div class="brand-mark" aria-hidden="true">
+        <span class="brand-ring" />
+        <span class="brand-core" />
+      </div>
       <h1>Fengyun Nexus</h1>
-      <p class="muted">后台控制台 · Vue3</p>
-      <n-form @submit.prevent="onLogin">
+      <p class="muted">后台控制台</p>
+      <n-form class="login-form" @submit.prevent="onLogin">
         <n-form-item label="用户名">
-          <n-input v-model:value="user" autocomplete="username" />
+          <n-input v-model:value="user" autocomplete="username" size="large" />
         </n-form-item>
         <n-form-item label="密码">
           <n-input
             v-model:value="pass"
             type="password"
+            size="large"
             show-password-on="click"
             autocomplete="current-password"
             @keyup.enter="onLogin"
           />
         </n-form-item>
-        <n-button type="primary" block :loading="auth.busy" @click="onLogin">登录</n-button>
+        <n-button
+          class="login-btn"
+          type="primary"
+          block
+          size="large"
+          :loading="auth.busy"
+          @click="onLogin"
+        >
+          进入控制台
+        </n-button>
       </n-form>
     </div>
   </div>
@@ -138,23 +158,223 @@ async function onLogin() {
 
 <style scoped>
 .login-wrap {
+  position: relative;
+  isolation: isolate;
   min-height: 100%;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 28px 20px;
+  overflow: hidden;
+}
+.login-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 110%, rgba(143, 173, 122, 0.12), transparent 55%),
+    linear-gradient(165deg, #0e100d 0%, #161a14 48%, #121410 100%);
+}
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(48px);
+  opacity: 0.55;
+  will-change: transform;
+}
+.orb-a {
+  width: min(42vw, 380px);
+  height: min(42vw, 380px);
+  left: 8%;
+  top: 12%;
+  background: rgba(232, 165, 75, 0.28);
+  animation: orb-drift-a 14s ease-in-out infinite;
+}
+.orb-b {
+  width: min(48vw, 420px);
+  height: min(48vw, 420px);
+  right: 4%;
+  bottom: 8%;
+  background: rgba(143, 173, 122, 0.22);
+  animation: orb-drift-b 18s ease-in-out infinite;
+}
+.orb-c {
+  width: min(28vw, 240px);
+  height: min(28vw, 240px);
+  left: 42%;
+  top: 38%;
+  background: rgba(232, 165, 75, 0.12);
+  animation: orb-drift-c 11s ease-in-out infinite;
+}
+.grid-fade {
+  position: absolute;
+  inset: 0;
+  opacity: 0.18;
+  background-image:
+    linear-gradient(rgba(242, 239, 230, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(242, 239, 230, 0.05) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 20%, transparent 75%);
+  animation: grid-breathe 8s ease-in-out infinite;
 }
 .login-card {
-  width: min(360px, 100%);
-  padding: 28px 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: rgba(26, 31, 24, 0.92);
+  position: relative;
+  z-index: 1;
+  width: min(400px, 100%);
+  padding: 36px 30px 30px;
+  border: 1px solid rgba(232, 165, 75, 0.28);
+  border-radius: 18px;
+  background: rgba(22, 26, 20, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow:
+    0 0 0 1px rgba(143, 173, 122, 0.06) inset,
+    0 24px 60px rgba(0, 0, 0, 0.35);
+  text-align: center;
+  animation: card-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.brand-mark {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 16px;
+}
+.brand-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(232, 165, 75, 0.45);
+  animation: ring-spin 10s linear infinite;
+}
+.brand-ring::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  top: -4px;
+  left: calc(50% - 3.5px);
+  box-shadow: 0 0 10px rgba(232, 165, 75, 0.55);
+}
+.brand-core {
+  position: absolute;
+  inset: 12px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(242, 239, 230, 0.35), transparent 45%),
+    linear-gradient(145deg, rgba(232, 165, 75, 0.55), rgba(143, 173, 122, 0.35));
+  animation: core-pulse 3.2s ease-in-out infinite;
 }
 .login-card h1 {
-  margin: 0 0 4px;
+  margin: 0 0 6px;
   font-family: var(--font-display);
   color: var(--amber);
-  font-size: 1.6rem;
+  font-size: clamp(1.75rem, 4vw, 2.05rem);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  animation: title-in 0.85s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
+}
+.login-card .muted {
+  margin: 0 0 22px;
+  animation: title-in 0.85s cubic-bezier(0.22, 1, 0.36, 1) 0.22s both;
+}
+.login-form {
+  text-align: left;
+  animation: title-in 0.85s cubic-bezier(0.22, 1, 0.36, 1) 0.32s both;
+}
+.login-btn {
+  margin-top: 4px;
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+.login-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes title-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes orb-drift-a {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(28px, 36px) scale(1.08);
+  }
+}
+@keyframes orb-drift-b {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-36px, -24px) scale(1.06);
+  }
+}
+@keyframes orb-drift-c {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(18px, -28px);
+  }
+}
+@keyframes grid-breathe {
+  0%,
+  100% {
+    opacity: 0.14;
+  }
+  50% {
+    opacity: 0.22;
+  }
+}
+@keyframes ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes core-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .grid-fade,
+  .brand-ring,
+  .brand-core,
+  .login-card,
+  .login-card h1,
+  .login-card .muted,
+  .login-form {
+    animation: none !important;
+  }
 }
 .shell {
   display: grid;
