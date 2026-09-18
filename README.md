@@ -112,7 +112,7 @@ curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/r
 irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.ps1?ref=main" | iex
 ```
 
-> 注意：`gitcode.com/.../raw/...` 会返回网页，要用上面的 `api.gitcode.com` 地址。
+> 地址规律同手机端：`…/raw/…` 后是仓内路径（本脚本在 `scripts/get.sh`）。网页 raw 是 HTML，用上面的 `api.gitcode.com`。
 
 强制重装环境+目录：`NEXUS_REINSTALL=1` 加在命令前。  
 更多开关见 [上手](docs/product/start.md)。

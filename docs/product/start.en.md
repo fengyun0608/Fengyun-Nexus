@@ -10,7 +10,9 @@ Local `*.local.json` files stay on your machine.
 One command: detect OS, install Git / Node 20+ / pnpm, sync the repo, then boot.  
 The installer is always fetched from `main`.
 
-> GitCode web `/raw/...` returns HTML. Use the `api.gitcode.com` raw endpoint.
+> **URL rule** (same as the old Termux raw link): everything after `…/raw/main/` (or api `…/raw/…?ref=main`) is the **repo-relative path**.  
+> e.g. `…/scripts/termux-setup.sh` → file `scripts/termux-setup.sh`; installer → `scripts/get.sh` / `scripts/get.ps1`.  
+> Web `gitcode.com/.../raw/...` returns HTML; `raw.gitcode.com/.../raw/main/...` often 403 — use the api URLs below (same path).
 
 ### Linux / macOS / Termux
 

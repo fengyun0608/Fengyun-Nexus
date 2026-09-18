@@ -10,7 +10,11 @@
 一条命令：自动检测环境、装 Git / Node 20+ / pnpm、拉齐仓库并启动。  
 每次从远程拉最新安装逻辑。
 
-> GitCode 网页上的 `/raw/...` 会返回 HTML，**必须**走 `api.gitcode.com` 的 raw 接口。
+> **地址规律**（和手机端旧引用同一套）：  
+> `…/raw/main/`（或 api 的 `…/raw/…?ref=main`）后面跟的就是**仓库里的相对路径**。  
+> 例：手机端 `…/raw/main/scripts/termux-setup.sh` → 文件在 `scripts/termux-setup.sh`。  
+> 统一安装器同理 → `scripts/get.sh` / `scripts/get.ps1`。  
+> 网页 `gitcode.com/.../raw/...` 会下到 HTML；`raw.gitcode.com/.../raw/main/...` 目前常 403，**管道请用下面 api 地址**（路径不变）。
 
 ### Linux / macOS / Termux
 

@@ -3,7 +3,8 @@
 #
 #   curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
 #
-# 说明：gitcode.com/.../raw/... 会返回网页，必须用 api.gitcode.com 的 raw 接口。
+# 地址规律（同手机端）：raw 后面跟仓内路径 → 本文件即 scripts/get.sh
+# 网页 gitcode.com/.../raw/... 是 HTML；raw.gitcode.com/.../raw/main/... 常 403；管道用上面 api。
 #
 # 开关：
 #   NEXUS_REINSTALL=1     重装运行环境，并清空后重装框架目录
