@@ -556,13 +556,13 @@ export async function installNapCat(opts: {
     progress(15);
     const script = join(home, "napcat.termux.nexus.sh");
     writeTermuxInstallScript(script, url, token);
-    log("Termux 安装：proot-distro 拉 Debian 常被墙，将自动试本机代理端口");
-    log("若手机开了 Clash/梯子，请开「允许局域网」或系统代理，Termux 才能走 7890");
+    log("Termux 安装：先试 Docker Hub（可走本机代理），失败则改拉国内 LXC Debian");
+    log("有 Clash 时请开「允许局域网」；也可 export HTTPS_PROXY=http://127.0.0.1:7890");
     progress(25);
     const code = await runShell(script, home, log);
     if (code !== 0) {
       throw new Error(
-        "Termux NapCat 安装失败。多半是 Docker Hub 拉不到 Debian。请在手机开梯子并允许局域网，或设置 HTTPS_PROXY 后重试",
+        "Termux NapCat 安装失败。已尝试代理与国内 LXC 源。可先 export HTTPS_PROXY=http://127.0.0.1:7890 再重试",
       );
     }
     const shellDir =
@@ -695,7 +695,7 @@ function findTermuxNapCatRoot(): string | null {
   return null;
 }
 
-/** Termux 专用：自动探测本机 HTTP 代理，避免 Docker Hub Network is unreachable */
+/** Termux 专用：代理探测 + Docker Hub 失败时改拉国内 LXC Debian rootfs */
 function writeTermuxInstallScript(scriptPath: string, reverseWsUrl: string, _token: string): void {
   const ws = reverseWsUrl.replace(/"/g, '\\"');
   const body = `#!/data/data/com.termux/files/usr/bin/bash
@@ -708,41 +708,53 @@ NC='\\033[0m'
 echo -e "准备 proot-distro / screen…"
 if ! command -v proot-distro >/dev/null 2>&1; then
   pkg update -y || apt update -y
-  pkg install -y proot-distro screen || apt install -y proot-distro screen
+  pkg install -y proot-distro screen curl || apt install -y proot-distro screen curl
 else
-  pkg install -y screen >/dev/null 2>&1 || true
+  pkg install -y screen curl >/dev/null 2>&1 || true
 fi
 
 ROOTFS="$PREFIX/var/lib/proot-distro/installed-rootfs/napcat"
+CACHE_DIR="\${HOME}/.cache/fengyun-nexus"
+mkdir -p "$CACHE_DIR"
+
 has_napcat() {
   [ -d "$ROOTFS" ] && [ -f "$ROOTFS/etc/os-release" ]
 }
 
-# 探测本机常见代理（Clash / v2rayN 等）
-pick_proxy() {
-  if [ -n "$HTTPS_PROXY$https_proxy$HTTP_PROXY$http_proxy$ALL_PROXY$all_proxy" ]; then
-    echo "\${HTTPS_PROXY:-\${https_proxy:-\${HTTP_PROXY:-\${http_proxy:-\${ALL_PROXY:-\$all_proxy}}}}}"
-    return 0
+port_open() {
+  local host="$1" port="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --connect-timeout 1 "http://\${host}:\${port}" >/dev/null 2>&1 && return 0
   fi
+  (echo >/dev/tcp/\${host}/\${port}) >/dev/null 2>&1
+}
+
+# 探测本机 / 局域网 IP 上的代理（Clash 允许局域网后常见）
+pick_proxy() {
   if [ -n "$NEXUS_HTTP_PROXY" ]; then
     echo "$NEXUS_HTTP_PROXY"
     return 0
   fi
-  for p in 7890 7891 10809 10808 2080 8080 6152; do
-    if command -v curl >/dev/null 2>&1; then
-      if curl -fsS --connect-timeout 1 "http://127.0.0.1:$p" >/dev/null 2>&1 \\
-        || curl -fsS --connect-timeout 1 -x "http://127.0.0.1:$p" "https://www.baidu.com" -o /dev/null >/dev/null 2>&1; then
-        echo "http://127.0.0.1:$p"
+  if [ -n "$HTTPS_PROXY$https_proxy$HTTP_PROXY$http_proxy$ALL_PROXY$all_proxy" ]; then
+    echo "\${HTTPS_PROXY:-\${https_proxy:-\${HTTP_PROXY:-\${http_proxy:-\${ALL_PROXY:-\$all_proxy}}}}}"
+    return 0
+  fi
+  local hosts="127.0.0.1"
+  local ip
+  for ip in \$(ip -4 -o addr show 2>/dev/null | awk '{print \$4}' | cut -d/ -f1); do
+    case "$ip" in
+      127.*|169.254.*) ;;
+      *) hosts="$hosts $ip" ;;
+    esac
+  done
+  local h p
+  for h in $hosts; do
+    for p in 7890 7891 10809 10808 2080 8080 6152; do
+      if port_open "$h" "$p"; then
+        echo "http://\${h}:\${p}"
         return 0
       fi
-    fi
-    # 端口开着也算（部分代理不回 HTTP）
-    if command -v bash >/dev/null 2>&1; then
-      if (echo >/dev/tcp/127.0.0.1/$p) >/dev/null 2>&1; then
-        echo "http://127.0.0.1:$p"
-        return 0
-      fi
-    fi
+    done
   done
   return 1
 }
@@ -753,12 +765,20 @@ export_proxy() {
   echo -e "\${GREEN}使用代理 $px\${NC}"
 }
 
-try_install_debian() {
-  echo -e "安装 napcat 容器（debian）…"
-  # 半截失败先清掉
+clear_proxy() {
+  unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
+}
+
+ensure_clean_slot() {
   if [ -d "$ROOTFS" ] && ! has_napcat; then
+    echo "清理半截容器…"
     proot-distro remove napcat >/dev/null 2>&1 || rm -rf "$ROOTFS" || true
   fi
+}
+
+try_install_debian_docker() {
+  echo -e "安装 napcat 容器（proot-distro / Docker Hub）…"
+  ensure_clean_slot
   if has_napcat; then
     echo -e "\${GREEN}已有 napcat 容器，跳过拉取\${NC}"
     return 0
@@ -769,35 +789,108 @@ try_install_debian() {
   return 1
 }
 
+# Docker Hub 不通时：从国内高校 LXC 镜像拉 rootfs.tar.xz 再本地安装
+try_install_debian_lxc() {
+  echo -e "改用国内 LXC Debian rootfs（不走 Docker Hub）…"
+  ensure_clean_slot
+  if has_napcat; then
+    return 0
+  fi
+  clear_proxy
+  local arch lxc_arch
+  arch=\$(uname -m)
+  case "$arch" in
+    aarch64) lxc_arch=arm64 ;;
+    armv7l|armv8l|arm) lxc_arch=armhf ;;
+    x86_64) lxc_arch=amd64 ;;
+    i686) lxc_arch=i386 ;;
+    *) lxc_arch=arm64 ;;
+  esac
+  local tarball="$CACHE_DIR/debian-bookworm-\${lxc_arch}-rootfs.tar.xz"
+  local mirrors=(
+    "https://mirrors.tuna.tsinghua.edu.cn/lxc-images/images/debian/bookworm/\${lxc_arch}/default"
+    "https://mirrors.ustc.edu.cn/lxc-images/images/debian/bookworm/\${lxc_arch}/default"
+    "https://mirrors.nju.edu.cn/lxc-images/images/debian/bookworm/\${lxc_arch}/default"
+    "https://mirrors.sjtu.edu.cn/lxc-images/images/debian/bookworm/\${lxc_arch}/default"
+    "https://images.linuxcontainers.org/images/debian/bookworm/\${lxc_arch}/default"
+  )
+  local base listing build build_enc url
+  for base in "\${mirrors[@]}"; do
+    echo "探测 $base"
+    listing=\$(curl -fsSL --connect-timeout 20 --max-time 60 "$base/" 2>/dev/null || true)
+    if [ -z "$listing" ]; then
+      continue
+    fi
+    build=\$(printf '%s\\n' "$listing" | grep -oE '[0-9]{8}_[0-9]{2}:[0-9]{2}' | sort -u | tail -1)
+    if [ -z "$build" ]; then
+      continue
+    fi
+    build_enc=\$(printf '%s' "$build" | sed 's/:/%3A/g')
+    url="$base/\${build_enc}/rootfs.tar.xz"
+    echo -e "下载 rootfs \${GREEN}$build\${NC}"
+    echo "$url"
+    if ! curl -fL --connect-timeout 20 --max-time 900 -o "$tarball" "$url"; then
+      echo "下载失败，换源…"
+      rm -f "$tarball"
+      continue
+    fi
+    if [ ! -s "$tarball" ]; then
+      rm -f "$tarball"
+      continue
+    fi
+    echo "本地安装 rootfs…"
+    if proot-distro install --override-alias napcat "$tarball" \\
+      || proot-distro install "$tarball" --override-alias napcat; then
+      echo -e "\${GREEN}LXC rootfs 安装成功\${NC}"
+      return 0
+    fi
+    echo "proot-distro 未能识别该 rootfs，换源重试…"
+    rm -f "$tarball"
+    ensure_clean_slot
+  done
+  return 1
+}
+
 PROXY=""
 PROXY="\$(pick_proxy || true)"
 if [ -n "$PROXY" ]; then
   export_proxy "$PROXY"
+else
+  echo -e "未检测到本机代理，先直连；失败会改走国内 LXC 源"
 fi
 
-if ! try_install_debian; then
-  echo -e "\${RED}直连 Docker Hub 失败，正在重试代理…\${NC}"
-  # 再扫一遍端口
-  for p in 7890 7891 10809 10808 2080 8080; do
-    if (echo >/dev/tcp/127.0.0.1/$p) >/dev/null 2>&1; then
-      export_proxy "http://127.0.0.1:$p"
-      if try_install_debian; then
-        break
+if ! try_install_debian_docker; then
+  echo -e "\${RED}Docker Hub 拉取失败\${NC}"
+  if [ -z "$PROXY" ]; then
+    echo "再扫一遍本机/局域网代理端口…"
+    for p in 7890 7891 10809 10808 2080 8080; do
+      if port_open 127.0.0.1 "$p"; then
+        export_proxy "http://127.0.0.1:$p"
+        try_install_debian_docker && break
       fi
-    fi
-  done
+    done
+  fi
 fi
 
 if ! has_napcat; then
-  echo -e "\${RED}debian 容器安装失败：Network unreachable 多半是 Docker Hub 被墙。\${NC}"
-  echo -e "请任选其一后重试："
-  echo -e "  1) 手机 Clash 开「允许局域网」，Termux 执行: export HTTPS_PROXY=http://127.0.0.1:7890"
-  echo -e "  2) 或设置 NEXUS_HTTP_PROXY 后重新点安装"
-  exit 1
+  if ! try_install_debian_lxc; then
+    echo -e "\${RED}debian 容器安装失败。\${NC}"
+    echo -e "可手动：手机 Clash 开允许局域网后执行"
+    echo -e "  export HTTPS_PROXY=http://127.0.0.1:7890"
+    echo -e "再回控制台重装 NapCat。"
+    exit 1
+  fi
 fi
 
 echo -e "\${GREEN}正在初始化 napcat 容器…\${NC}"
-# --proxy 1：官方安装脚本国内镜像；失败再试 --proxy 0
+# 容器内 apt 尽量用国内源会更快；失败不阻断
+proot-distro sh napcat -- bash -c '
+  if [ -f /etc/apt/sources.list ]; then
+    sed -i "s|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g" /etc/apt/sources.list 2>/dev/null || true
+  fi
+' || true
+
+# --proxy 1：官方安装脚本国内镜像
 init_cmd='apt update -y && apt install -y sudo curl libgcrypt20 ca-certificates && \\
 curl -fsSL -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh || \\
 curl -fsSL -o napcat.sh https://cdn.jsdelivr.net/gh/NapNeko/NapCat-Installer@main/script/install.sh && \\

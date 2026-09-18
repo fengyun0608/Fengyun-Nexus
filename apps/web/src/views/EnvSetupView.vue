@@ -168,8 +168,9 @@ onUnmounted(() => {
             />
           </label>
           <p v-if="r.id === 'napcat'" class="hint">
+            Termux 装 Debian 可能被墙：会自动试本机代理，再不行改拉国内 LXC 源。有 Clash 请开「允许局域网」。
             官网：
-            <a href="https://napneko.github.io/guide/boot/Shell" target="_blank" rel="noreferrer">Shell 安装说明</a>
+            <a href="https://napneko.github.io/guide/boot/Shell" target="_blank" rel="noreferrer">Shell 说明</a>
           </p>
         </n-card>
       </div>
