@@ -198,8 +198,10 @@ export class OneBot11Bridge {
     );
     const texts = await this.onInbound(msg);
     let n = 0;
-    for (const text of texts) {
+    for (let i = 0; i < texts.length; i++) {
+      const text = texts[i];
       if (!text.trim()) continue;
+      if (i > 0) await sleep(220 + Math.floor(Math.random() * 180));
       await this.sendText(text, msg, prefer);
       n += 1;
     }
@@ -295,4 +297,8 @@ export class OneBot11Bridge {
     };
     return this.sendText(text, ctx);
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }

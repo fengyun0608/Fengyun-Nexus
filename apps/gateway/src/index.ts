@@ -61,6 +61,7 @@ import {
 } from "./plugin-files.js";
 import { pathToFileURL } from "node:url";
 import { renderMenuShot } from "./menu-shot.js";
+import { splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
   buildRestartingMessage,
@@ -793,17 +794,19 @@ async function bootstrap(): Promise<void> {
     ).trim();
     if (!assistant) return [];
 
-    sessions.append(session, "assistant", assistant);
+    const parts = splitAiSegments(assistant);
+    const storeAs = parts.join("\n\n");
+    sessions.append(session, "assistant", storeAs);
     db.insertMessage({
       id: newId("msg"),
       channel: msg.channel,
       chatId: msg.chatId,
       userId: "nexus",
       role: "assistant",
-      content: assistant,
+      content: storeAs,
       createdAt: nowIso(),
     });
-    return [assistant];
+    return parts.length ? parts : [assistant];
   }
 
   function tokenIsAdmin(req: express.Request): boolean {

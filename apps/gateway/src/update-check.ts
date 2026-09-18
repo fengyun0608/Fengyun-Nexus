@@ -23,12 +23,8 @@ export type UpdateApplyResult = {
   updated?: boolean;
   beforeCommit?: string;
   afterCommit?: string;
-  commits?: string[];
-  files?: string[];
   overwritten?: boolean;
-  /** 纯文本整段（控制台 / 终端） */
   reportText?: string;
-  /** 合并转发各节点正文（QQ 匿名用户风格） */
   forwardNodes?: string[];
 };
 
@@ -52,16 +48,6 @@ function git(root: string, args: string[]): string {
   }).trim();
 }
 
-function gitLines(root: string, args: string[]): string[] {
-  try {
-    const out = git(root, args);
-    if (!out) return [];
-    return out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
 function parseVersionFromPackageJson(raw: string): string | undefined {
   try {
     const pkg = JSON.parse(raw) as { version?: string };
@@ -75,39 +61,27 @@ function short(sha: string): string {
   return sha.slice(0, 7);
 }
 
-/** 组装「已更新什么 / 覆盖了什么 / 正在重启」报告（师父手感） */
+/** 更新回执：只报加减，不列提交/文件名 */
 export function buildUpdateReport(opts: {
   version: string;
   updated: boolean;
   before: string;
   after: string;
-  commits: string[];
-  files: string[];
+  shortStat: string;
   overwritten: boolean;
 }): { reportText: string; forwardNodes: string[]; message: string } {
-  const { version, updated, before, after, commits, files, overwritten } = opts;
+  const { version, updated, before, after, shortStat, overwritten } = opts;
   const head = updated
-    ? `已更新到 ${version}\n提交 ${short(before)} → ${short(after)}`
-    : `已是最新 ${version}\n提交 ${short(after)}`;
+    ? `已更新到 ${version}\n${short(before)} → ${short(after)}`
+    : `已是最新 ${version}\n${short(after)}`;
 
-  const commitBlock = updated
-    ? commits.length
-      ? `更新内容\n${commits.map((c) => `· ${c}`).join("\n")}`
-      : "更新内容\n· （无提交摘要）"
-    : "更新内容\n· 无新提交";
+  const statLine = updated
+    ? shortStat || "有改动，统计拿不到"
+    : "没有新东西";
 
-  const fileBlock = updated
-    ? files.length
-      ? `覆盖文件 ${files.length} 个\n${files.map((f) => `· ${f}`).join("\n")}`
-      : "覆盖文件\n· （无文件列表）"
-    : "覆盖文件\n· 无";
-
-  const overwriteNote = overwritten ? "本地改动已对齐远程" : "";
-  const restartLine = updated ? "正在重启" : "";
-
-  const forwardNodes = [head, commitBlock, fileBlock];
-  if (overwriteNote) forwardNodes.push(overwriteNote);
-  if (restartLine) forwardNodes.push(restartLine);
+  const forwardNodes = [head, statLine];
+  if (overwritten) forwardNodes.push("本地被远程盖掉了");
+  if (updated) forwardNodes.push("正在重启");
 
   const reportText = forwardNodes.join("\n\n");
   const message = updated
@@ -115,6 +89,24 @@ export function buildUpdateReport(opts: {
     : `已是最新 ${version}`;
 
   return { reportText, forwardNodes, message };
+}
+
+/** git shortstat →「3 个文件  +12  −4」 */
+export function formatShortStat(raw: string): string {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const files = s.match(/(\d+)\s+files?\s+changed/i);
+  const ins = s.match(/(\d+)\s+insertions?\(\+\)/i);
+  const del = s.match(/(\d+)\s+deletions?\(-\)/i);
+  const nFiles = files ? Number(files[1]) : 0;
+  const nIns = ins ? Number(ins[1]) : 0;
+  const nDel = del ? Number(del[1]) : 0;
+  if (!nFiles && !nIns && !nDel) return s;
+  const bits = [`${nFiles || 0} 个文件`];
+  if (nIns) bits.push(`+${nIns}`);
+  if (nDel) bits.push(`−${nDel}`);
+  if (!nIns && !nDel) bits.push("没改行数？");
+  return bits.join("  ");
 }
 
 /** Compare local checkout with origin. */
@@ -212,21 +204,13 @@ export function applyRemoteUpdate(root: string): UpdateApplyResult {
     const version = readLocalVersion(root);
     const updated = before !== after;
 
-    let commits: string[] = [];
-    let files: string[] = [];
+    let shortStat = "";
     if (updated) {
-      commits = gitLines(root, [
-        "log",
-        "--oneline",
-        "--no-decorate",
-        `${before}..${after}`,
-      ]).slice(0, 12);
-      files = gitLines(root, [
-        "diff",
-        "--name-status",
-        before,
-        after,
-      ]).slice(0, 24);
+      try {
+        shortStat = formatShortStat(git(root, ["diff", "--shortstat", before, after]));
+      } catch {
+        shortStat = "";
+      }
     }
 
     const built = buildUpdateReport({
@@ -234,8 +218,7 @@ export function applyRemoteUpdate(root: string): UpdateApplyResult {
       updated,
       before,
       after,
-      commits,
-      files,
+      shortStat,
       overwritten,
     });
 
@@ -246,8 +229,6 @@ export function applyRemoteUpdate(root: string): UpdateApplyResult {
       overwritten,
       beforeCommit: short(before),
       afterCommit: short(after),
-      commits,
-      files,
       shouldExit: updated,
       message: built.message,
       reportText: built.reportText,
