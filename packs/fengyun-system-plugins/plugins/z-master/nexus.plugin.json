@@ -1,0 +1,13 @@
+{
+  "id": "z.master",
+  "name": "主人管理",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "priority": 800,
+  "hooks": ["onMessage", "onReady"],
+  "permissions": ["channel.send", "channel.master"],
+  "category": "basic",
+  "kind": "channel",
+  "adapterScope": "channel",
+  "channels": ["onebot11"]
+}

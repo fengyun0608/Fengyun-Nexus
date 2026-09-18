@@ -1,0 +1,13 @@
+{
+  "id": "z.like",
+  "name": "点赞",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "priority": 900,
+  "hooks": ["onMessage", "onReady"],
+  "permissions": ["channel.send", "onebot.api"],
+  "category": "basic",
+  "kind": "channel",
+  "adapterScope": "channel",
+  "channels": ["onebot11"]
+}

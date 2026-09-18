@@ -229,6 +229,24 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  plugins/z-group-admin:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/z-like:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/z-master:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   plugins/z-menu:
     dependencies:
       '@fengyun/nexus-plugin-sdk':

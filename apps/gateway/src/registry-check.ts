@@ -12,6 +12,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -318,6 +319,52 @@ export function checkPluginUpdates(
   return { ok: true, source, branch, items };
 }
 
+/** 远程拉下来的插件没有 pnpm 链接时，补上 @fengyun/nexus-plugin-sdk → packages/plugin-sdk */
+export function ensurePluginSdkLink(root: string, pluginDirName: string): boolean {
+  const pluginRoot = join(root, "plugins", pluginDirName);
+  const pkgPath = join(pluginRoot, "package.json");
+  if (!existsSync(pkgPath)) return false;
+  let needs = false;
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    needs = Boolean(deps["@fengyun/nexus-plugin-sdk"]);
+  } catch {
+    return false;
+  }
+  if (!needs) return false;
+  const link = join(pluginRoot, "node_modules", "@fengyun", "nexus-plugin-sdk");
+  if (existsSync(link)) return false;
+  const sdk = join(root, "packages", "plugin-sdk");
+  if (!existsSync(sdk)) return false;
+  mkdirSync(dirname(link), { recursive: true });
+  try {
+    symlinkSync(sdk, link, process.platform === "win32" ? "junction" : "dir");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function ensurePluginSdkLinks(root: string, dirs?: string[]): string[] {
+  const linked: string[] = [];
+  const names =
+    dirs?.length ?
+      dirs
+    : existsSync(join(root, "plugins"))
+      ? readdirSync(join(root, "plugins")).filter(
+          (n) => n !== "templates" && !n.startsWith(".") && statSync(join(root, "plugins", n)).isDirectory(),
+        )
+      : [];
+  for (const name of names) {
+    if (ensurePluginSdkLink(root, name)) linked.push(name);
+  }
+  return linked;
+}
+
 export function applyPluginUpdates(
   root: string,
   opts?: {
@@ -398,8 +445,10 @@ export function applyPluginUpdates(
         writeFileSync(outPath, buf);
         wrote = true;
       }
-      if (wrote) applied.push(dir);
-      else failed.push({ dir, error: "远端无可同步源码" });
+      if (wrote) {
+        applied.push(dir);
+        ensurePluginSdkLink(root, dir);
+      } else failed.push({ dir, error: "远端无可同步源码" });
     } catch (e) {
       failed.push({ dir, error: e instanceof Error ? e.message : String(e) });
     }

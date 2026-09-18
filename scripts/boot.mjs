@@ -2,7 +2,7 @@
 /**
  * Fengyun Nexus boot — detect deps, build packages + Vite console, start gateway.
  */
-import { existsSync, readFileSync, unlinkSync, cpSync, statSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, cpSync, statSync, mkdirSync, readdirSync } from "node:fs";
 import { spawn, execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,6 +77,30 @@ function which(bin) {
   }
 }
 
+/** 新拷进来的插件常缺 node_modules/@fengyun/* 链接，加载会报 Cannot find package */
+function pluginsMissingSdkLinks() {
+  const pluginsRoot = join(root, "plugins");
+  if (!existsSync(pluginsRoot)) return false;
+  for (const name of readdirSync(pluginsRoot)) {
+    if (name === "templates" || name.startsWith(".")) continue;
+    const dir = join(pluginsRoot, name);
+    const pkgPath = join(dir, "package.json");
+    if (!existsSync(pkgPath)) continue;
+    let deps = {};
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+      deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    } catch {
+      continue;
+    }
+    if (!deps["@fengyun/nexus-plugin-sdk"]) continue;
+    if (!existsSync(join(dir, "node_modules", "@fengyun", "nexus-plugin-sdk"))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function nodeMajor() {
   const m = process.versions.node.split(".")[0];
   return Number(m);
@@ -92,9 +116,12 @@ function run(args) {
     const child = spawn(pnpmCmd, args, {
       cwd: root,
       stdio: "inherit",
-      shell: isWin,
+      // Windows 用 pnpm.cmd 时不必再 shell:true，避免 DEP0190
+      shell: false,
       env,
+      windowsHide: true,
     });
+    child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) resolve(0);
       else reject(new Error(`pnpm ${args.join(" ")} exited ${code}`));
@@ -112,9 +139,11 @@ function runCode(args) {
     const child = spawn(pnpmCmd, args, {
       cwd: root,
       stdio: "inherit",
-      shell: isWin,
+      shell: false,
       env,
+      windowsHide: true,
     });
+    child.on("error", () => resolve(1));
     child.on("exit", (code, signal) => {
       if (signal) resolve(1);
       else resolve(code ?? 0);
@@ -165,6 +194,10 @@ async function detectDeps() {
     bootLog("INFO", ANSI.cyan, "installing workspace dependencies…");
     await run(["install"]);
     bootLog("OK", ANSI.green, "dependencies installed");
+  } else if (pluginsMissingSdkLinks()) {
+    bootLog("INFO", ANSI.cyan, "检测到新插件未链接 SDK，正在 pnpm install…");
+    await run(["install"]);
+    bootLog("OK", ANSI.green, "插件依赖已链接");
   } else {
     bootLog("OK", ANSI.green, "node_modules present");
   }

@@ -26,7 +26,7 @@ import {
 } from "@fengyun/nexus-shared";
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
 import { bootStep, printBootBanner, printBootSuccess } from "./boot-banner.js";
-import { checkPluginUpdates, applyPluginUpdates } from "./registry-check.js";
+import { checkPluginUpdates, applyPluginUpdates, ensurePluginSdkLinks } from "./registry-check.js";
 import {
   getChannelSettings,
   isChannelMaster,
@@ -347,6 +347,14 @@ async function bootstrap(): Promise<void> {
   const plugins = new PluginHost();
   await bootStep("初始化：扫描插件目录 plugins/ …");
   try {
+    const linked = ensurePluginSdkLinks(ROOT);
+    if (linked.length) {
+      await bootStep(`  · 已补插件 SDK 链接：${linked.join("、")}`);
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
     const repoUrl = String(registry.pluginsRepo?.url || "").trim();
     if (repoUrl) {
       const probe = checkPluginUpdates(ROOT, {
@@ -362,6 +370,7 @@ async function bootstrap(): Promise<void> {
         });
         if (pulled.applied.length) {
           await bootStep(`  · 已自动安装系统插件：${pulled.applied.join("、")}`);
+          ensurePluginSdkLinks(ROOT, pulled.applied);
         }
       }
     }
