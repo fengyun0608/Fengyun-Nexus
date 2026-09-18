@@ -1,6 +1,6 @@
 /**
  * #状态 面板：系统信息 + 资源环（出图用 HTML）。
- * 重启成功报告仍用行列表。
+ * server 姿态不展示本机 IP；mobile / desktop / termux 可展示。
  */
 import {
   cpus,
@@ -47,6 +47,11 @@ function escapeHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** server 部署不展示本机 IP，其它姿态可展示 */
+export function shouldExposeLocalIp(envId: string): boolean {
+  return String(envId || "").toLowerCase() !== "server";
 }
 
 function localIpv4List(): string[] {
@@ -105,7 +110,7 @@ function cpuPercent(): number {
 
 function ringColor(p: number): string {
   if (p >= 90) return "#c45c4a";
-  if (p >= 70) return "#e8a54b";
+  if (p >= 70) return "#d4923a";
   return "#6f9b6a";
 }
 
@@ -152,10 +157,32 @@ export function collectOsMetrics(): OsMetrics {
   };
 }
 
+function networkDisplay(s: StatusShotInput): { main: string; sub: string } {
+  const showIp = shouldExposeLocalIp(s.envId);
+  const ips = showIp ? localIpv4List() : [];
+  const port = s.gatewayPort ? `:${s.gatewayPort}` : "";
+  if (showIp && ips.length) {
+    return {
+      main: ips[0],
+      sub: port ? `网关 ${port}` : "本机地址",
+    };
+  }
+  if (s.gatewayPort) {
+    return {
+      main: `网关 ${port}`,
+      sub: showIp ? "未检测到外网卡地址" : "服务器姿态 · 地址已隐藏",
+    };
+  }
+  return {
+    main: showIp ? "—" : "已隐藏",
+    sub: showIp ? "无网络信息" : "服务器姿态",
+  };
+}
+
 /** 纯文本回退 */
 export function buildStatusLines(s: StatusShotInput): string[] {
   const os = collectOsMetrics();
-  const ips = localIpv4List();
+  const net = networkDisplay(s);
   const lines: string[] = [];
   lines.push(`框架 Fengyun Nexus ${s.version}`);
   if (s.commit) lines.push(`提交 ${s.commit}`);
@@ -163,13 +190,7 @@ export function buildStatusLines(s: StatusShotInput): string[] {
   lines.push(s.powerOff ? "电源 已关机" : `电源 运行中 · ${s.uptime}`);
   lines.push(`系统 ${os.osMain} · 主机 ${os.host}`);
   lines.push(`资源 CPU ${os.cpuPct}% · 内存 ${os.memPct}% · Node ${os.nodePct}%`);
-  if (s.gatewayPort) {
-    lines.push(
-      ips.length
-        ? `网络 ${ips[0]} · 网关 :${s.gatewayPort}`
-        : `网络 网关 :${s.gatewayPort}`,
-    );
-  }
+  lines.push(`网络 ${net.main}${net.sub ? ` · ${net.sub}` : ""}`);
   if (s.onebot.enabled) {
     lines.push(
       s.onebot.connected
@@ -210,13 +231,151 @@ function cell(label: string, main: string, sub?: string): string {
 </div>`;
 }
 
+function panelChromeCss(): string {
+  return `
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 28px;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #243028;
+    background:
+      radial-gradient(900px 420px at 8% -10%, rgba(232,165,75,.22), transparent 55%),
+      radial-gradient(720px 380px at 100% 0%, rgba(143,173,122,.2), transparent 50%),
+      linear-gradient(165deg, #e8eee8 0%, #d3ddd6 48%, #c4d0c8 100%);
+  }
+  #panel {
+    width: 780px; margin: 0 auto;
+    display: grid; gap: 14px;
+  }
+  .box {
+    position: relative;
+    background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(252,250,246,.94));
+    border-radius: 18px;
+    padding: 18px 20px;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,.7) inset,
+      0 12px 32px rgba(36,48,40,.1);
+    border: 1px solid rgba(90,110,90,.08);
+  }
+  .bot {
+    display: flex; align-items: center; gap: 16px;
+    overflow: hidden;
+  }
+  .bot::before {
+    content: "";
+    position: absolute; left: 0; top: 0; bottom: 0; width: 5px;
+    background: linear-gradient(180deg, #e8a54b, #8fad7a);
+    border-radius: 18px 0 0 18px;
+  }
+  .avatar {
+    width: 72px; height: 72px; border-radius: 22px;
+    background: linear-gradient(145deg, #e8a54b 0%, #c4842f 42%, #8fad7a 100%);
+    display: grid; place-items: center;
+    color: #fff; font-weight: 800; font-size: 26px;
+    letter-spacing: -.02em;
+    position: relative; flex-shrink: 0;
+    box-shadow: 0 8px 18px rgba(196,132,47,.28);
+  }
+  .dot {
+    position: absolute; right: -2px; bottom: -2px;
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 3px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,.12);
+  }
+  .dot.on { background: #5f9658; }
+  .dot.wait { background: #e0a045; }
+  .dot.off { background: #9a9a9a; }
+  .bot-copy { min-width: 0; flex: 1; }
+  .brand {
+    margin: 0 0 2px;
+    font-size: 11px; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase; color: #8a7a5a;
+  }
+  .bot h1 {
+    margin: 0 0 8px; font-size: 24px; font-weight: 750;
+    letter-spacing: -.02em; color: #1f2822;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .chip {
+    font-size: 12px; padding: 4px 11px; border-radius: 999px;
+    background: rgba(244,239,230,.9); color: #5a5040;
+    border: 1px solid rgba(196,132,47,.12);
+  }
+  .badge {
+    margin-left: auto;
+    font-size: 12px; padding: 5px 12px; border-radius: 999px;
+    font-weight: 700; white-space: nowrap;
+  }
+  .badge.on { background: #e5f2e3; color: #2f6a32; }
+  .badge.wait { background: #f8ecd9; color: #8a5a20; }
+  .badge.off { background: #ececec; color: #666; }
+  .grid4 {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    padding: 16px 16px 14px;
+  }
+  .cell {
+    padding: 4px 6px 2px;
+    border-left: 2px solid rgba(143,173,122,.35);
+    padding-left: 12px;
+  }
+  .cell-label {
+    font-size: 11px; color: #7a857a; margin-bottom: 6px;
+    letter-spacing: .06em; font-weight: 600;
+  }
+  .cell-main {
+    font-size: 15px; font-weight: 720; line-height: 1.35;
+    color: #1f2822; word-break: break-all;
+  }
+  .cell-sub { font-size: 11px; color: #8a9088; margin-top: 4px; line-height: 1.4; }
+  .sec-title {
+    font-size: 12px; font-weight: 750; color: #5a635a;
+    margin-bottom: 14px; letter-spacing: .08em;
+  }
+  .rings {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  }
+  .ring-card {
+    display: flex; align-items: center; gap: 14px;
+    padding: 8px 10px; border-radius: 14px;
+    background: rgba(245,248,245,.7);
+  }
+  .ring {
+    --p: 0; --c: #6f9b6a;
+    width: 92px; height: 92px; border-radius: 50%; flex-shrink: 0;
+    background: conic-gradient(var(--c) calc(var(--p) * 1%), #e6ebe4 0);
+    display: grid; place-items: center;
+    filter: drop-shadow(0 4px 10px rgba(40,60,40,.08));
+  }
+  .ring::before {
+    content: ""; width: 66px; height: 66px; border-radius: 50%;
+    background: #fff; grid-area: 1 / 1;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.04);
+  }
+  .ring span {
+    grid-area: 1 / 1; z-index: 1; font-weight: 800; font-size: 17px;
+    color: #243028;
+  }
+  .ring-meta strong { display: block; font-size: 15px; margin-bottom: 4px; color: #1f2822; }
+  .ring-meta p { margin: 0; font-size: 11px; color: #7a827a; line-height: 1.45; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 10px 20px;
+    font-size: 12px; color: #5a635a; align-items: center;
+  }
+  .foot b { color: #1f2822; font-weight: 700; }
+  .stamp {
+    margin-left: auto; font-size: 11px; color: #8a9088;
+  }
+`;
+}
+
 /** 状态面板 HTML（截 #panel） */
 export function buildStatusPanelHtml(s: StatusShotInput): string {
   const os = collectOsMetrics();
-  const ips = localIpv4List();
+  const net = networkDisplay(s);
   const online = !s.powerOff && (!s.onebot.enabled || s.onebot.connected);
   const statusLabel = s.powerOff ? "已关机" : online ? "运行中" : "待连接";
   const statusTone = s.powerOff ? "off" : online ? "on" : "wait";
+  const stamp = new Date().toLocaleString("zh-CN", { hour12: false });
 
   const botChips = [
     `v${s.version}`,
@@ -238,122 +397,35 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
     ? `${s.ai.activeName || "AI"}${s.ai.model ? ` · ${s.ai.model}` : ""}`
     : "未配置密钥";
 
-  const netLine = ips.length
-    ? `${ips[0]}${s.gatewayPort ? ` · :${s.gatewayPort}` : ""}`
-    : s.gatewayPort
-      ? `网关 :${s.gatewayPort}`
-      : "—";
-
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>运行状态</title>
-<style>
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 28px;
-    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: linear-gradient(160deg, #dfe6df 0%, #c5d0c8 45%, #b8c4bc 100%);
-    color: #2c322c;
-  }
-  #panel {
-    width: 760px; margin: 0 auto;
-    display: grid; gap: 12px;
-  }
-  .box {
-    background: rgba(255,255,255,.92);
-    border-radius: 16px;
-    padding: 16px 18px;
-    box-shadow: 0 10px 28px rgba(40,50,40,.12);
-  }
-  .bot {
-    display: flex; align-items: center; gap: 14px;
-  }
-  .avatar {
-    width: 64px; height: 64px; border-radius: 50%;
-    background: linear-gradient(145deg, #e8a54b, #8fad7a);
-    display: grid; place-items: center;
-    color: #fff; font-weight: 800; font-size: 22px;
-    position: relative; flex-shrink: 0;
-  }
-  .dot {
-    position: absolute; right: 2px; bottom: 2px;
-    width: 14px; height: 14px; border-radius: 50%;
-    border: 2px solid #fff;
-  }
-  .dot.on { background: #6f9b6a; }
-  .dot.wait { background: #e8a54b; }
-  .dot.off { background: #9a9a9a; }
-  .bot h1 {
-    margin: 0 0 6px; font-size: 22px; font-weight: 700;
-  }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chip {
-    font-size: 12px; padding: 3px 10px; border-radius: 999px;
-    background: #f4efe6; color: #5a5040;
-  }
-  .badge {
-    display: inline-block; margin-top: 8px;
-    font-size: 12px; padding: 2px 10px; border-radius: 999px;
-    font-weight: 600;
-  }
-  .badge.on { background: #e5f2e3; color: #3d6b3a; }
-  .badge.wait { background: #f8ecd9; color: #8a5a20; }
-  .badge.off { background: #ececec; color: #666; }
-  .grid4 {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
-  }
-  .cell-label { font-size: 12px; color: #7a827a; margin-bottom: 4px; }
-  .cell-main { font-size: 15px; font-weight: 700; line-height: 1.35; }
-  .cell-sub { font-size: 11px; color: #8a9088; margin-top: 2px; }
-  .sec-title {
-    font-size: 13px; font-weight: 700; color: #5a635a;
-    margin-bottom: 12px; letter-spacing: .04em;
-  }
-  .rings {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
-  }
-  .ring-card { display: flex; align-items: center; gap: 12px; }
-  .ring {
-    --p: 0; --c: #6f9b6a;
-    width: 88px; height: 88px; border-radius: 50%; flex-shrink: 0;
-    background: conic-gradient(var(--c) calc(var(--p) * 1%), #e8ebe6 0);
-    display: grid; place-items: center;
-  }
-  .ring::before {
-    content: ""; width: 64px; height: 64px; border-radius: 50%;
-    background: #fff; grid-area: 1 / 1;
-    box-shadow: inset 0 0 0 1px rgba(0,0,0,.04);
-  }
-  .ring span {
-    grid-area: 1 / 1; z-index: 1; font-weight: 800; font-size: 16px;
-  }
-  .ring-meta strong { display: block; font-size: 14px; margin-bottom: 4px; }
-  .ring-meta p { margin: 0; font-size: 11px; color: #7a827a; line-height: 1.4; }
-  .foot {
-    display: flex; flex-wrap: wrap; gap: 8px 16px;
-    font-size: 12px; color: #5a635a;
-  }
-  .foot b { color: #2c322c; }
+<style>${panelChromeCss()}
+  .bot .badge { margin-left: 8px; }
+  .head-row { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
 </style>
 </head>
 <body>
   <div id="panel">
     <div class="box bot">
       <div class="avatar">N<span class="dot ${statusTone}"></span></div>
-      <div>
-        <h1>Fengyun Nexus</h1>
+      <div class="bot-copy">
+        <div class="brand">Fengyun Nexus</div>
+        <div class="head-row">
+          <h1>运行状态</h1>
+          <span class="badge ${statusTone}">${escapeHtml(statusLabel)}</span>
+        </div>
         <div class="chips">${botChips}</div>
-        <span class="badge ${statusTone}">${escapeHtml(statusLabel)}</span>
       </div>
     </div>
 
     <div class="box grid4">
       ${cell("系统", os.osMain, os.osSecondary)}
-      ${cell("主机", os.host, `系统已运行 ${os.sysUptime}`)}
-      ${cell("网络", netLine, qqLine)}
+      ${cell("主机", os.host, `已运行 ${os.sysUptime}`)}
+      ${cell("网络", net.main, `${net.sub} · ${qqLine}`)}
       ${cell("AI / 插件", aiLine, `${s.pluginsEnabled}/${s.pluginsTotal} 已启用`)}
     </div>
 
@@ -369,6 +441,7 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
     <div class="box foot">
       <span>AI 回复群 <b>${escapeHtml(fmtGroups(s.replyGroupIds, "不限"))}</b></span>
       <span>通知群 <b>${escapeHtml(fmtGroups(s.notifyGroupIds, "无"))}</b></span>
+      <span class="stamp">${escapeHtml(stamp)}</span>
     </div>
   </div>
 </body>
@@ -459,75 +532,26 @@ export function buildRestartOkPanelHtml(
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>重启成功</title>
-<style>
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 28px;
-    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: linear-gradient(160deg, #dfe6df 0%, #c5d0c8 45%, #b8c4bc 100%);
-    color: #2c322c;
-  }
-  #panel {
-    width: 760px; margin: 0 auto;
-    display: grid; gap: 12px;
-  }
-  .box {
-    background: rgba(255,255,255,.92);
-    border-radius: 16px;
-    padding: 16px 18px;
-    box-shadow: 0 10px 28px rgba(40,50,40,.12);
-  }
-  .bot {
-    display: flex; align-items: center; gap: 14px;
-  }
-  .avatar {
-    width: 64px; height: 64px; border-radius: 50%;
-    background: linear-gradient(145deg, #e8a54b, #8fad7a);
-    display: grid; place-items: center;
-    color: #fff; font-weight: 800; font-size: 22px;
-    position: relative; flex-shrink: 0;
-  }
-  .dot {
-    position: absolute; right: 2px; bottom: 2px;
-    width: 14px; height: 14px; border-radius: 50%;
-    border: 2px solid #fff; background: #6f9b6a;
-  }
-  .bot h1 {
-    margin: 0 0 6px; font-size: 22px; font-weight: 700;
-  }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chip {
-    font-size: 12px; padding: 3px 10px; border-radius: 999px;
-    background: #f4efe6; color: #5a5040;
-  }
-  .badge {
-    display: inline-block; margin-top: 8px;
-    font-size: 12px; padding: 2px 10px; border-radius: 999px;
-    font-weight: 600; background: #e5f2e3; color: #3d6b3a;
-  }
-  .sec-title {
-    font-size: 13px; font-weight: 700; color: #5a635a;
-    margin-bottom: 12px; letter-spacing: .04em;
-  }
+<style>${panelChromeCss()}
   .list {
     margin: 0; padding-left: 18px;
     font-size: 14px; line-height: 1.55;
   }
   .list .more { color: #7a827a; list-style: none; margin-left: -18px; }
-  .foot {
-    font-size: 12px; color: #5a635a;
-  }
-  .foot b { color: #2c322c; }
+  .bot h1 { margin-bottom: 8px; }
 </style>
 </head>
 <body>
   <div id="panel">
     <div class="box bot">
-      <div class="avatar">N<span class="dot"></span></div>
-      <div>
-        <h1>重启成功</h1>
+      <div class="avatar">N<span class="dot on"></span></div>
+      <div class="bot-copy">
+        <div class="brand">Fengyun Nexus</div>
+        <div class="head-row" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <h1>重启成功</h1>
+          <span class="badge on">已加载新版本</span>
+        </div>
         <div class="chips">${chips}</div>
-        <span class="badge">已加载新版本</span>
       </div>
     </div>
     ${summaryHtml}
