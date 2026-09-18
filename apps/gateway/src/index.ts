@@ -46,6 +46,7 @@ import {
   initEnvTasks,
   listRuntimes,
   listTasks,
+  removeTask,
   setNapCatWireProvider,
   setNapCatAfterInstall,
   setTaskStatus,
@@ -2143,7 +2144,14 @@ async function bootstrap(): Promise<void> {
 
   app.post("/v1/admin/env-tasks/:id/status", authMiddleware, (req, res) => {
     const status = String(req.body?.status ?? "") as EnvTaskStatus;
-    const allowed: EnvTaskStatus[] = ["pending", "running", "paused", "done", "failed"];
+    const allowed: EnvTaskStatus[] = [
+      "pending",
+      "running",
+      "paused",
+      "done",
+      "failed",
+      "cancelled",
+    ];
     if (!allowed.includes(status)) {
       res.status(400).json({ error: "状态无效" });
       return;
@@ -2154,6 +2162,34 @@ async function bootstrap(): Promise<void> {
       return;
     }
     res.json({ ok: true, task, counts: taskCounts(), items: listTasks() });
+  });
+
+  app.delete("/v1/admin/env-tasks/:id", authMiddleware, (req, res) => {
+    const result = removeTask(String(req.params.id));
+    if (!result.ok) {
+      res.status(404).json({ error: result.message });
+      return;
+    }
+    res.json({
+      ok: true,
+      message: result.message,
+      counts: taskCounts(),
+      items: listTasks(),
+    });
+  });
+
+  app.post("/v1/admin/env-tasks/:id/remove", authMiddleware, (req, res) => {
+    const result = removeTask(String(req.params.id));
+    if (!result.ok) {
+      res.status(404).json({ error: result.message });
+      return;
+    }
+    res.json({
+      ok: true,
+      message: result.message,
+      counts: taskCounts(),
+      items: listTasks(),
+    });
   });
 
   app.get("/v1/admin/update/check", authMiddleware, (_req, res) => {

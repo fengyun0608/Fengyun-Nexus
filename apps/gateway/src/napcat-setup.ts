@@ -197,35 +197,61 @@ export function writeNapCatMarker(
   );
 }
 
-function mirrorUrls(githubUrl: string): string[] {
-  const path = githubUrl.replace(/^https?:\/\/github\.com\//i, "");
-  return [
-    githubUrl,
-    `https://ghfast.top/${githubUrl}`,
-    `https://mirror.ghproxy.com/${githubUrl}`,
-    `https://github.moeyy.xyz/${githubUrl}`,
-    `https://ghproxy.net/${githubUrl}`,
-    // nclatest 对 installer 脚本友好；release 资产仍优先 github
-    githubUrl.includes("raw.githubusercontent.com")
-      ? githubUrl
-      : `https://nclatest.znin.net/${path}`,
-  ].filter((u, i, a) => a.indexOf(u) === i);
+function mirrorUrls(url: string): string[] {
+  // 已是镜像/官方 CDN：只试原地址，禁止再套一层 github 代理（否则会变成 ghfast.top/https://nclatest...）
+  if (
+    !/^https?:\/\/(github\.com|raw\.githubusercontent\.com)\//i.test(url)
+  ) {
+    return [url];
+  }
+  const path = url.replace(/^https?:\/\/(github\.com|raw\.githubusercontent\.com)\//i, "");
+  const list = [
+    url,
+    `https://ghfast.top/${url}`,
+    `https://mirror.ghproxy.com/${url}`,
+    `https://github.moeyy.xyz/${url}`,
+    `https://ghproxy.net/${url}`,
+  ];
+  if (/^https?:\/\/github\.com\//i.test(url)) {
+    list.push(`https://nclatest.znin.net/${path}`);
+  } else if (/raw\.githubusercontent\.com/i.test(url)) {
+    // raw → nclatest 路径规则不同，跳过
+  }
+  return list.filter((u, i, a) => a.indexOf(u) === i);
 }
 
 async function downloadFile(
   url: string,
   dest: string,
   onProgress?: (msg: string) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   mkdirSync(dirname(dest), { recursive: true });
   const urls = mirrorUrls(url);
   let lastErr: Error | null = null;
   for (const u of urls) {
+    if (signal?.aborted) throw new Error("已取消");
     try {
       onProgress?.(`下载 ${u}`);
+      const timeout = AbortSignal.timeout(180_000);
+      let combined: AbortSignal = timeout;
+      if (signal) {
+        if (typeof AbortSignal.any === "function") {
+          combined = AbortSignal.any([signal, timeout]);
+        } else {
+          const ac = new AbortController();
+          const forward = () => ac.abort();
+          if (signal.aborted || timeout.aborted) ac.abort();
+          else {
+            signal.addEventListener("abort", forward, { once: true });
+            timeout.addEventListener("abort", forward, { once: true });
+          }
+          combined = ac.signal;
+        }
+      }
       const res = await fetch(u, {
         redirect: "follow",
-        signal: AbortSignal.timeout(180_000),
+        signal: combined,
       });
       if (!res.ok || !res.body) {
         lastErr = new Error(`HTTP ${res.status} ${u}`);
@@ -238,9 +264,29 @@ async function downloadFile(
       return;
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
+      if (signal?.aborted) throw new Error("已取消");
     }
   }
   throw lastErr || new Error("下载失败");
+}
+
+async function downloadFirst(
+  urls: string[],
+  dest: string,
+  onProgress?: (msg: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  let last: Error | null = null;
+  for (const u of urls) {
+    try {
+      await downloadFile(u, dest, onProgress, signal);
+      return;
+    } catch (e) {
+      last = e instanceof Error ? e : new Error(String(e));
+      if (signal?.aborted) throw last;
+    }
+  }
+  throw last || new Error("下载失败");
 }
 
 async function unzip(zipPath: string, dest: string, onLog?: (m: string) => void): Promise<void> {
@@ -402,9 +448,11 @@ export async function installNapCat(opts: {
   token?: string;
   onLog?: InstallNapCatLog;
   onProgress?: (n: number) => void;
+  signal?: AbortSignal;
 }): Promise<{ home: string; flavor: string; version: string; launchCmd: string }> {
   const log = opts.onLog || (() => undefined);
   const progress = opts.onProgress || (() => undefined);
+  const signal = opts.signal;
   const flavor = resolveFlavor(opts.flavor);
   const home = napcatHome(opts.root);
   mkdirSync(home, { recursive: true });
@@ -432,10 +480,14 @@ export async function installNapCat(opts: {
   if (flavor === "termux") {
     progress(15);
     const script = join(home, "napcat.termux.sh");
-    await downloadFile(
-      "https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.termux.sh",
+    await downloadFirst(
+      [
+        "https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.termux.sh",
+        "https://raw.githubusercontent.com/NapNeko/NapCat-Installer/main/script/install.termux.sh",
+      ],
       script,
       log,
+      signal,
     );
     progress(55);
     log("执行 Termux 官方安装脚本…");
@@ -457,20 +509,16 @@ export async function installNapCat(opts: {
   if (flavor === "linux") {
     progress(15);
     const script = join(home, "napcat.sh");
-    // 国内优先 moeyy 镜像，失败再官方 raw
-    try {
-      await downloadFile(
+    // 国内优先 moeyy 镜像，失败再官方 raw（downloadFile 不会再二次套镜像）
+    await downloadFirst(
+      [
         "https://github.moeyy.xyz/https://raw.githubusercontent.com/NapNeko/napcat-linux-installer/refs/heads/main/install.sh",
-        script,
-        log,
-      );
-    } catch {
-      await downloadFile(
         "https://raw.githubusercontent.com/NapNeko/napcat-linux-installer/refs/heads/main/install.sh",
-        script,
-        log,
-      );
-    }
+      ],
+      script,
+      log,
+      signal,
+    );
     progress(50);
     log("执行 Linux Launcher 安装脚本（工作目录内，不破坏系统 QQ）…");
     const code = await runShell(script, home, log);
@@ -504,7 +552,7 @@ export async function installNapCat(opts: {
     log(`选用 ${asset.name}（${asset.tag}）`);
     const zip = join(home, asset.name);
     progress(25);
-    await downloadFile(asset.url, zip, log);
+    await downloadFile(asset.url, zip, log, signal);
     progress(60);
     await unzip(zip, shellDir, log);
     // 若 zip 内多一层目录，下钻

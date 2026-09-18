@@ -13,7 +13,7 @@ import {
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 
-type EnvTaskStatus = "pending" | "running" | "paused" | "done" | "failed";
+type EnvTaskStatus = "pending" | "running" | "paused" | "done" | "failed" | "cancelled";
 type EnvTask = {
   id: string;
   runtime: string;
@@ -30,6 +30,7 @@ const STATUS_LABEL: Record<EnvTaskStatus, string> = {
   paused: "已暂停",
   done: "已完成",
   failed: "失败",
+  cancelled: "已取消",
 };
 
 const auth = useAuthStore();
@@ -47,6 +48,9 @@ async function load() {
   try {
     const res = await api<{ items: EnvTask[] }>("/v1/admin/env-tasks", { token: auth.token });
     items.value = res.items || [];
+    if (activeId.value && !items.value.some((t) => t.id === activeId.value)) {
+      activeId.value = items.value[0]?.id || "";
+    }
     if (!activeId.value && items.value.length) activeId.value = items.value[0].id;
     err.value = "";
   } catch (e) {
@@ -63,11 +67,30 @@ async function setStatus(id: string, status: EnvTaskStatus) {
       token: auth.token,
       body: JSON.stringify({ status }),
     });
-    message.success("已更新状态");
+    message.success(status === "cancelled" ? "已取消" : "已更新状态");
     await load();
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   }
+}
+
+async function remove(id: string) {
+  try {
+    await api(`/v1/admin/env-tasks/${encodeURIComponent(id)}/remove`, {
+      method: "POST",
+      token: auth.token,
+      body: "{}",
+    });
+    message.success("已删除");
+    if (activeId.value === id) activeId.value = "";
+    await load();
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  }
+}
+
+function canCancel(t: EnvTask) {
+  return t.status === "pending" || t.status === "running" || t.status === "paused";
 }
 
 onMounted(() => {
@@ -83,7 +106,7 @@ onUnmounted(() => {
   <div class="page">
     <header class="page-head">
       <h1>环境任务</h1>
-      <p class="muted">安装进度与命令输出会刷在下方。</p>
+      <p class="muted">安装进度与命令输出会刷在下方。排队或安装中可取消/删除。</p>
     </header>
     <n-space style="margin-bottom: 12px">
       <n-button @click="router.push('/env-setup')">环境配置</n-button>
@@ -101,11 +124,24 @@ onUnmounted(() => {
             :class="{ on: active?.id === t.id }"
             @click="activeId = t.id"
           >
-            <div>
+            <div class="task-main">
               <strong>{{ t.runtime }} {{ t.version }}</strong>
               <p class="hint">{{ t.mode }} · {{ t.id }}</p>
             </div>
-            <n-tag size="small">{{ STATUS_LABEL[t.status] || t.status }}</n-tag>
+            <div class="task-actions" @click.stop>
+              <n-tag size="small">{{ STATUS_LABEL[t.status] || t.status }}</n-tag>
+              <n-button
+                v-if="canCancel(t)"
+                size="tiny"
+                quaternary
+                @click="setStatus(t.id, 'cancelled')"
+              >
+                取消
+              </n-button>
+              <n-button size="tiny" quaternary type="error" @click="remove(t.id)">
+                删除
+              </n-button>
+            </div>
           </div>
         </n-card>
         <n-card v-if="active" title="实时安装" size="small">
@@ -125,6 +161,16 @@ onUnmounted(() => {
             >
               继续
             </n-button>
+            <n-button
+              size="small"
+              :disabled="!canCancel(active)"
+              @click="setStatus(active.id, 'cancelled')"
+            >
+              取消
+            </n-button>
+            <n-button size="small" type="error" secondary @click="remove(active.id)">
+              删除
+            </n-button>
           </n-space>
           <pre class="mono">{{ (active.logs || []).join("\n") || "等待安装输出…" }}</pre>
         </n-card>
@@ -138,6 +184,7 @@ onUnmounted(() => {
 .task-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 8px;
   padding: 10px 8px;
   border-radius: 8px;
@@ -147,5 +194,15 @@ onUnmounted(() => {
 .task-row.on,
 .task-row:hover {
   background: rgba(47, 155, 120, 0.1);
+}
+.task-main {
+  min-width: 0;
+  flex: 1;
+}
+.task-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 </style>

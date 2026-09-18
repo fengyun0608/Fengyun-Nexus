@@ -2,7 +2,7 @@
  * Go / Python / browser / NapCat install queue.
  * Uninstalled runtimes auto-enqueue（NapCat 除外，需手动点安装）; worker runs one-by-one with live logs.
  */
-import { spawn, execSync } from "node:child_process";
+import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -13,7 +13,7 @@ import {
 } from "./napcat-setup.js";
 
 export type EnvRuntimeId = "go" | "python" | "browser" | "napcat";
-export type EnvTaskStatus = "pending" | "running" | "paused" | "done" | "failed";
+export type EnvTaskStatus = "pending" | "running" | "paused" | "done" | "failed" | "cancelled";
 
 export type EnvRuntimeDef = {
   id: EnvRuntimeId;
@@ -94,6 +94,8 @@ let workerBusy = false;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
 /** Print install lines to the backend terminal (not only web). */
 let consoleSink: ((line: string) => void) | null = null;
+const taskAborts = new Map<string, AbortController>();
+const taskChildren = new Map<string, ChildProcess>();
 
 function now() {
   return new Date().toISOString();
@@ -307,6 +309,15 @@ export function autoQueueMissing(): { queued: EnvTask[]; skipped: string[] } {
 export function setTaskStatus(id: string, status: EnvTaskStatus): EnvTask | null {
   const t = tasks.find((x) => x.id === id);
   if (!t) return null;
+  if (status === "cancelled") {
+    abortTaskProcess(t);
+    t.status = "cancelled";
+    t.updatedAt = now();
+    appendLog(t, "已取消");
+    workerBusy = false;
+    kickWorker();
+    return { ...t, logs: [...t.logs] };
+  }
   t.status = status;
   t.updatedAt = now();
   appendLog(t, `状态 → ${status}`);
@@ -316,6 +327,42 @@ export function setTaskStatus(id: string, status: EnvTaskStatus): EnvTask | null
   }
   if (status === "pending" || status === "running") kickWorker();
   return { ...t, logs: [...t.logs] };
+}
+
+/** 取消进行中的下载/子进程 */
+function abortTaskProcess(task: EnvTask): void {
+  const ac = taskAborts.get(task.id);
+  if (ac && !ac.signal.aborted) ac.abort();
+  const child = taskChildren.get(task.id);
+  if (child && !child.killed) {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      /* ignore */
+    }
+  }
+  taskAborts.delete(task.id);
+  taskChildren.delete(task.id);
+}
+
+/**
+ * 删除任务：队列中直接移除；安装中先中止再移除；完成/失败也可清掉。
+ */
+export function removeTask(id: string): { ok: boolean; message: string } {
+  const idx = tasks.findIndex((x) => x.id === id);
+  if (idx < 0) return { ok: false, message: "任务未找到" };
+  const t = tasks[idx]!;
+  const wasRunning = t.status === "running";
+  if (t.status === "pending" || t.status === "running" || t.status === "paused") {
+    abortTaskProcess(t);
+    appendLog(t, "已取消并删除");
+  }
+  tasks.splice(idx, 1);
+  if (wasRunning) {
+    workerBusy = false;
+    kickWorker();
+  }
+  return { ok: true, message: "已删除" };
 }
 
 function markInstalled(task: EnvTask): void {
@@ -342,6 +389,7 @@ export function taskCounts() {
     paused: all.filter((t) => t.status === "paused").length,
     done: all.filter((t) => t.status === "done").length,
     failed: all.filter((t) => t.status === "failed").length,
+    cancelled: all.filter((t) => t.status === "cancelled").length,
   };
 }
 
@@ -362,10 +410,17 @@ async function runWorker(): Promise<void> {
   next.status = "running";
   setProgress(next, 2);
   appendLog(next, "开始安装…");
+  const ac = new AbortController();
+  taskAborts.set(next.id, ac);
 
   try {
-    await executeInstall(next);
-    // executeInstall 可能把状态改成 paused
+    await executeInstall(next, ac.signal);
+    if (!tasks.includes(next)) return;
+    if (ac.signal.aborted || next.status === "cancelled") {
+      next.status = "cancelled";
+      appendLog(next, "已取消");
+      return;
+    }
     if ((next.status as EnvTaskStatus) === "paused") {
       appendLog(next, "已暂停");
     } else {
@@ -375,12 +430,20 @@ async function runWorker(): Promise<void> {
       appendLog(next, "安装完成");
     }
   } catch (e) {
+    if (!tasks.includes(next)) return;
+    if (ac.signal.aborted || next.status === "cancelled") {
+      next.status = "cancelled";
+      appendLog(next, "已取消");
+      return;
+    }
     next.status = "failed";
     next.error = e instanceof Error ? e.message : String(e);
     appendLog(next, `失败：${next.error}`);
   } finally {
+    taskAborts.delete(next.id);
+    taskChildren.delete(next.id);
     workerBusy = false;
-    next.updatedAt = now();
+    if (tasks.includes(next)) next.updatedAt = now();
     kickWorker();
   }
 }
@@ -393,10 +456,8 @@ function runCmd(
 ): Promise<number> {
   return new Promise((resolve, reject) => {
     appendLog(task, `$ ${command} ${args.join(" ")}`);
-    // Windows：路径含空格时 shell:true 会把 D:\Program Files\... 拆断；
-    // 对 .cmd 走 cmd.exe /d /s /c，并给参数加引号。
     const win = process.platform === "win32";
-    let child;
+    let child: ChildProcess;
     if (win) {
       const q = (s: string) => (`"${String(s).replace(/"/g, '\\"')}"`);
       const line = [q(command), ...args.map(q)].join(" ");
@@ -411,6 +472,16 @@ function runCmd(
         env: { ...process.env, ...opts?.env },
       });
     }
+    taskChildren.set(task.id, child);
+    const onAbort = () => {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        /* ignore */
+      }
+    };
+    const ac = taskAborts.get(task.id);
+    ac?.signal.addEventListener("abort", onAbort, { once: true });
     child.stdout?.on("data", (buf: Buffer) => {
       for (const line of buf.toString("utf8").split(/\r?\n/)) {
         if (line.trim()) appendLog(task, line);
@@ -421,15 +492,28 @@ function runCmd(
         if (line.trim()) appendLog(task, line);
       }
     });
-    child.on("error", (err) => reject(err));
-    child.on("close", (code) => resolve(code ?? 1));
+    child.on("error", (err) => {
+      ac?.signal.removeEventListener("abort", onAbort);
+      taskChildren.delete(task.id);
+      reject(err);
+    });
+    child.on("close", (code) => {
+      ac?.signal.removeEventListener("abort", onAbort);
+      taskChildren.delete(task.id);
+      if (ac?.signal.aborted) {
+        reject(new Error("已取消"));
+        return;
+      }
+      resolve(code ?? 1);
+    });
   });
 }
 
-async function executeInstall(task: EnvTask): Promise<void> {
+async function executeInstall(task: EnvTask, signal?: AbortSignal): Promise<void> {
   mkdirSync(runtimeHome(task.runtime), { recursive: true });
   setProgress(task, 8);
   appendLog(task, `目标目录 ${runtimeHome(task.runtime)}`);
+  if (signal?.aborted) throw new Error("已取消");
 
   if (task.runtime === "browser") {
     await installBrowser(task);
@@ -444,13 +528,13 @@ async function executeInstall(task: EnvTask): Promise<void> {
     return;
   }
   if (task.runtime === "napcat") {
-    await installNapCatTask(task);
+    await installNapCatTask(task, signal);
     return;
   }
   throw new Error("未知运行时");
 }
 
-async function installNapCatTask(task: EnvTask): Promise<void> {
+async function installNapCatTask(task: EnvTask, signal?: AbortSignal): Promise<void> {
   setProgress(task, 10);
   const wire = napcatWire?.() || {
     reverseWsUrl: "ws://127.0.0.1:8787/onebot/v11/ws",
@@ -464,6 +548,7 @@ async function installNapCatTask(task: EnvTask): Promise<void> {
     flavor,
     reverseWsUrl: wire.reverseWsUrl,
     token: wire.token,
+    signal,
     onLog: (line) => appendLog(task, line),
     onProgress: (n) => setProgress(task, n),
   });
