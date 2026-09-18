@@ -5,6 +5,8 @@ import { NButton, NInput, NForm, NFormItem, useMessage } from "naive-ui";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 import { useConsoleStore } from "@/stores/console";
+import ConsoleSidebar from "@/layouts/ConsoleSidebar.vue";
+import type { NavGroup, NavItem } from "@/layouts/ConsoleSidebar.vue";
 
 const auth = useAuthStore();
 const consoleUi = useConsoleStore();
@@ -41,9 +43,6 @@ watch(navOpen, (open) => {
   }
   document.body.style.overflow = open ? "hidden" : "";
 });
-
-type NavItem = { to: string; label: string; names?: string[] };
-type NavGroup = { title: string; items: NavItem[] };
 
 const channelNav = ref<NavItem[]>([]);
 
@@ -215,40 +214,33 @@ async function onLogin() {
       <strong>Fengyun Nexus</strong>
     </div>
     <div class="shell">
-      <Teleport to="body" :disabled="!isMobile">
-        <aside class="sidebar" :class="{ 'drawer-open': !isMobile || navOpen }">
-          <div class="sidebar-brand">
-            <strong>Fengyun Nexus</strong>
-            <span>{{ auth.username || "已登录" }}</span>
-          </div>
-          <nav class="nav">
-            <div v-for="g in navGroups" :key="g.title" class="nav-group">
-              <div class="nav-group-title">{{ g.title }}</div>
-              <router-link
-                v-for="item in g.items"
-                :key="item.to"
-                :to="item.to"
-                class="nav-item"
-                :class="{ active: isActive(item) }"
-                @click="navOpen = false"
-              >
-                {{ item.label }}
-              </router-link>
-            </div>
-          </nav>
-          <div class="sidebar-foot">
-            <n-button quaternary size="small" @click="auth.logout()">退出</n-button>
-          </div>
-        </aside>
-      </Teleport>
-      <Teleport to="body">
-        <button
-          v-if="isMobile && navOpen"
-          type="button"
-          class="nav-mask"
-          aria-label="关闭菜单"
-          @click="navOpen = false"
+      <aside v-if="!isMobile" class="sidebar">
+        <ConsoleSidebar
+          :username="auth.username || ''"
+          :nav-groups="navGroups"
+          :is-active="isActive"
+          @navigate="navOpen = false"
+          @logout="auth.logout()"
         />
+      </aside>
+      <Teleport to="body">
+        <div v-if="isMobile && navOpen" class="mnav" role="dialog" aria-modal="true">
+          <aside class="sidebar mnav-panel">
+            <ConsoleSidebar
+              :username="auth.username || ''"
+              :nav-groups="navGroups"
+              :is-active="isActive"
+              @navigate="navOpen = false"
+              @logout="auth.logout()"
+            />
+          </aside>
+          <button
+            type="button"
+            class="mnav-scrim"
+            aria-label="关闭菜单"
+            @click="navOpen = false"
+          />
+        </div>
       </Teleport>
       <main class="main">
         <router-view />
@@ -507,55 +499,6 @@ async function onLogin() {
   max-height: 100vh;
   overflow: auto;
 }
-.sidebar-brand {
-  padding: 16px 14px 10px;
-  display: grid;
-  gap: 4px;
-  border-bottom: 1px solid var(--line);
-}
-.sidebar-brand strong {
-  font-family: var(--font-display);
-  color: var(--amber);
-  font-size: 1.05rem;
-}
-.sidebar-brand span {
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-.nav {
-  display: flex;
-  flex-direction: column;
-  padding: 8px;
-  gap: 10px;
-  flex: 1;
-}
-.nav-group-title {
-  padding: 6px 12px 2px;
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.nav-item {
-  display: block;
-  padding: 8px 12px;
-  border-radius: 8px;
-  color: var(--ink);
-  text-decoration: none;
-  font-size: 0.92rem;
-  opacity: 0.78;
-}
-.nav-item:hover,
-.nav-item.active {
-  opacity: 1;
-  color: var(--amber-deep);
-  background: rgba(47, 155, 120, 0.12);
-  font-weight: 600;
-}
-.sidebar-foot {
-  padding: 12px;
-  border-top: 1px solid var(--line);
-}
 .main {
   min-width: 0;
   min-height: 0;
@@ -566,9 +509,41 @@ async function onLogin() {
   color: var(--muted);
   margin: 0 0 16px;
 }
-.mobile-bar,
-.nav-mask {
+.mobile-bar {
   display: none;
+}
+/* 手机抽屉：侧栏与遮罩左右并排，互不重叠，点菜单不会点到蒙层 */
+.mnav {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+.mnav-panel {
+  position: relative !important;
+  top: auto !important;
+  z-index: 1;
+  flex: 0 0 auto;
+  width: min(280px, 86vw);
+  height: 100%;
+  min-height: 100%;
+  max-height: 100dvh;
+  overflow: auto;
+  box-shadow: 8px 0 28px rgba(20, 40, 32, 0.12);
+  pointer-events: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.mnav-scrim {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: rgba(20, 40, 32, 0.42);
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
 }
 @media (max-width: 860px) {
   .shell {
@@ -596,35 +571,6 @@ async function onLogin() {
     border-radius: 8px;
     padding: 6px 12px;
     font-weight: 700;
-  }
-  /* 抽屉 Teleport 到 body，避开壁纸/壳层叠上下文 */
-  .nav-mask {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 10050;
-    border: 0;
-    padding: 0;
-    margin: 0;
-    background: rgba(20, 40, 32, 0.42);
-    -webkit-tap-highlight-color: transparent;
-  }
-  .sidebar {
-    position: fixed;
-    z-index: 10060;
-    top: 0;
-    left: 0;
-    width: min(280px, 86vw);
-    height: 100dvh;
-    max-height: 100dvh;
-    min-height: 0;
-    transform: translateX(-105%);
-    transition: transform 0.2s ease;
-    box-shadow: 8px 0 28px rgba(20, 40, 32, 0.12);
-    pointer-events: auto;
-  }
-  .sidebar.drawer-open {
-    transform: translateX(0);
   }
   .main {
     padding: 14px 12px 28px;
