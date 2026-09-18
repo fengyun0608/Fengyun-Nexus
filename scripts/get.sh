@@ -578,16 +578,35 @@ ensure_framework() {
   finalize_tree
 }
 
+public_ipv4() {
+  local ip=""
+  ip="$(curl -fsS --max-time 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)"
+  if ! printf '%s' "$ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    ip="$(curl -fsS --max-time 2 http://100.100.100.200/latest/meta-data/eipv4 2>/dev/null || true)"
+  fi
+  if ! printf '%s' "$ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    ip="$(curl -4 -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+  fi
+  printf '%s' "$ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || ip=""
+  case "$ip" in
+    127.*|10.*|192.168.*|169.254.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) ip="" ;;
+  esac
+  printf '%s' "$ip"
+}
+
 boot_now() {
   cd "$INSTALL_DIR"
   export NEXUS_ENV
   log "启动  姿态=$NEXUS_ENV"
-  if [ "$NEXUS_ENV" = "server" ] || [ "$NEXUS_ENV" = "termux" ] || [ "$NEXUS_ENV" = "mobile" ]; then
-    log "控制台监听 0.0.0.0:8787。本机用 http://127.0.0.1:8787/ ，外网用本机公网 IP:8787"
-    log "云服务器请在安全组放行 TCP 8787，只开别的端口连不上"
+  log "进程绑定 0.0.0.0:8787，外网网卡都能进。127.0.0.1 只是本机快捷方式"
+  local pub
+  pub="$(public_ipv4)"
+  if [ -n "$pub" ]; then
+    log "外网打开 http://${pub}:8787/"
   else
-    log "控制台 http://127.0.0.1:8787/"
+    log "外网打开 http://公网IP:8787/ （公网 IP 看云控制台，网卡地址多半是内网）"
   fi
+  log "云服务器请在安全组放行 TCP 8787，只开别的端口连不上"
   exec ./boot.sh
 }
 

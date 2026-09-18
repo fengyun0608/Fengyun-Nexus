@@ -217,11 +217,45 @@ function resolveEnvId(): NexusEnvId {
   return "desktop";
 }
 
+function isPublicIpv4(ip: string): boolean {
+  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip)) return false;
+  if (ip.startsWith("127.") || ip.startsWith("10.") || ip.startsWith("192.168.") || ip.startsWith("169.254.")) {
+    return false;
+  }
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) return false;
+  return true;
+}
+
+async function lookupPublicIpv4(): Promise<string> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 2500);
+  const targets = [
+    "http://169.254.169.254/latest/meta-data/public-ipv4",
+    "http://100.100.100.200/latest/meta-data/eipv4",
+    "https://api.ipify.org",
+  ];
+  try {
+    for (const u of targets) {
+      try {
+        const res = await fetch(u, { signal: ctl.signal });
+        const text = (await res.text()).trim();
+        if (isPublicIpv4(text)) return text;
+      } catch {
+        /* 换下一个 */
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+  return "";
+}
+
 function consoleUrls(port: number, host: string): string[] {
-  const urls = [`http://127.0.0.1:${port}/`];
+  const urls: string[] = [];
   const open = host === "0.0.0.0" || host === "::" || host === "[::]";
   if (!open) {
     if (host && host !== "127.0.0.1" && host !== "localhost") urls.push(`http://${host}:${port}/`);
+    urls.push(`http://127.0.0.1:${port}/`);
     return urls;
   }
   for (const list of Object.values(networkInterfaces())) {
@@ -231,6 +265,7 @@ function consoleUrls(port: number, host: string): string[] {
       urls.push(`http://${n.address}:${port}/`);
     }
   }
+  urls.push(`http://127.0.0.1:${port}/`);
   return urls;
 }
 
@@ -2491,6 +2526,8 @@ async function bootstrap(): Promise<void> {
 
   await bootStep("初始化：监听端口…");
   const urls = consoleUrls(port, host);
+  const publicIp = host === "0.0.0.0" || host === "::" ? await lookupPublicIpv4() : "";
+  if (publicIp) urls.unshift(`http://${publicIp}:${port}/`);
   const publicUrl = urls.find((u) => !u.includes("127.0.0.1")) || urls[0]!;
   const server = app.listen(port, host, () => {
     onebot.attach(server);
@@ -2500,7 +2537,10 @@ async function bootstrap(): Promise<void> {
     } else {
       log.info(`进程只绑定 ${host}:${port}。外网要改成不设 HOST，或 HOST=0.0.0.0`);
     }
-    for (const u of urls) log.info(`控制台 ${u}`);
+    for (const u of urls) {
+      if (u.includes("127.0.0.1")) log.info(`本机快捷方式 ${u}`);
+      else log.info(`控制台 ${u}`);
+    }
     void printBootSuccess({
       url: publicUrl,
       env: profile.id,
