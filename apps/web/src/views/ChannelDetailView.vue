@@ -204,7 +204,7 @@ watch(id, () => void load());
       <div v-else class="layer-grid tight">
         <button type="button" class="layer-card" @click="showSettings = true">
           <strong>通道设置</strong>
-          <span>主人、回复群、系统提示等。</span>
+          <span>主人、AI 回复群、系统提示等。</span>
         </button>
         <button type="button" class="layer-card" @click="showPlugins = true">
           <strong>本通道插件管理</strong>
@@ -234,7 +234,11 @@ watch(id, () => void load());
         仅主人可触发
         <n-switch v-model:value="onlyMasters" />
       </label>
-      <label class="field">回复群 <n-input v-model:value="replyGroupIds" placeholder="空=全部" /></label>
+      <label class="field">
+        AI 回复群
+        <n-input v-model:value="replyGroupIds" placeholder="空=全部群；只限制 AI，不挡 # 指令" />
+      </label>
+      <p class="hint">框架 / 插件的 # 指令在任何群都能回；这里只管 AI 闲聊回哪些群。</p>
       <label class="field">通知群 <n-input v-model:value="notifyGroupIds" /></label>
       <label class="field">系统提示 <n-input v-model:value="systemPrompt" type="textarea" :rows="4" /></label>
       <label class="field">备注 <n-input v-model:value="note" /></label>

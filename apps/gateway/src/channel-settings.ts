@@ -8,7 +8,8 @@ export type ChannelSettings = {
   /** If true, only masters trigger bot replies. */
   onlyMasters: boolean;
   /**
-   * QQ 群白名单：仅这些群会回复 AI/插件。空 = 不限制群。
+   * AI 回复群白名单：仅这些群会走 AI / 普通闲聊。空 = 不限制。
+   * 框架与插件的 # 指令不受此限制。
    * 仅对 messageType=group 生效。
    */
   replyGroupIds: string[];
@@ -105,7 +106,7 @@ export function isChannelMaster(
   return settings.masters.includes(String(userId));
 }
 
-/** 群消息是否允许本通道回复（空白名单 = 全部群） */
+/** 群消息是否允许走 AI / 普通闲聊（空白名单 = 全部群；# 指令不走此判断） */
 export function isGroupReplyAllowed(
   settings: ChannelSettings,
   groupId: string | undefined,

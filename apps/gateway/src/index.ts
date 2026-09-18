@@ -467,7 +467,7 @@ async function bootstrap(): Promise<void> {
       return [];
     }
 
-    // QQ 群白名单：未列入的群不回复（管理 # 指令仍可走，见下方 admin 分支）
+    // QQ 群白名单（replyGroupIds）：只限制「非 # 的普通聊天 / AI」，不挡框架与插件指令
     if (
       !isHash &&
       msg.meta?.messageType === "group" &&
@@ -682,16 +682,7 @@ async function bootstrap(): Promise<void> {
       return [];
     }
 
-    // 群白名单也约束插件 / AI（# 管理指令已在上方放行）
-    if (
-      isHash &&
-      !isAdminHash(hashCmd) &&
-      msg.meta?.messageType === "group" &&
-      !isGroupReplyAllowed(chSettings, msg.meta?.groupId as string | undefined)
-    ) {
-      return [];
-    }
-
+    // 框架 / 插件 # 指令：任何群都可响应（不吃 AI 回复群白名单）
     if (powerOff && isHash && !isAdminHash(hashCmd)) {
       // Soft off: still allow #开机 via admin path above; block other plugin cmds
       return [];
@@ -1255,7 +1246,7 @@ async function bootstrap(): Promise<void> {
     };
     saveChannelsConfig(ROOT, channelCfg);
     log.ok(
-      `通道配置已保存  ${id}  masters=${next.masters.join(",") || "—"}  回复群=${next.replyGroupIds.join(",") || "全部"}`,
+      `通道配置已保存  ${id}  masters=${next.masters.join(",") || "—"}  AI回复群=${next.replyGroupIds.join(",") || "全部"}`,
     );
     res.json({
       ok: true,
