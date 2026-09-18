@@ -15,21 +15,55 @@ function botIdOf(e: NexusEvent): string | undefined {
 
 function extractAtQqs(e: NexusEvent): string[] {
   const meta = (e.raw?.meta || {}) as Record<string, unknown>;
+  const ids: string[] = [];
   const fromMeta = meta.atQqs;
   if (Array.isArray(fromMeta)) {
-    return fromMeta.map((x) => String(x).trim()).filter(Boolean);
+    for (const x of fromMeta) {
+      const s = String(x).trim();
+      if (/^\d{5,12}$/.test(s)) ids.push(s);
+    }
   }
-  const ids: string[] = [];
-  const re = /\[CQ:at,qq=(\d+)\]/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(e.msg))) ids.push(m[1]);
-  const plain = e.msg.match(/(?:^|\s)(\d{5,12})(?:\s|$)/);
-  if (plain?.[1]) ids.push(plain[1]);
+  if (!ids.length) {
+    for (const m of e.msg.matchAll(/\[CQ:at,qq=(\d+)\]/gi)) ids.push(m[1]);
+    for (const m of e.msg.matchAll(/@(\d{5,12})\b/g)) ids.push(m[1]);
+  }
   return [...new Set(ids)];
 }
 
 function firstTarget(e: NexusEvent): string {
-  return extractAtQqs(e)[0] || "";
+  const ids = extractAtQqs(e).filter((id) => /^\d{5,12}$/.test(id));
+  return ids[0] || "";
+}
+
+/** QQ 单人禁言最长 30 天。别把被 @ 的 QQ 当成分钟数。 */
+const BAN_MAX_SEC = 30 * 24 * 60 * 60;
+
+function parseBanSeconds(msg: string, targetQq: string): number {
+  let rest = msg.replace(/^#(?:全体)?解?禁言\s*/, "");
+  rest = rest.replace(/\[CQ:at,qq=[^\]]+\]/gi, " ");
+  if (targetQq) rest = rest.replace(new RegExp(`@${targetQq}\\b`, "g"), " ");
+  rest = rest.replace(/@\d{5,12}\b/g, " ").trim();
+  const m = rest.match(/(\d+)\s*(天|小时|时|分钟|分|d|h|m)?/i);
+  if (!m) return 10 * 60;
+  const n = Math.max(0, Math.floor(Number(m[1]) || 0));
+  const unit = (m[2] || "分").toLowerCase();
+  let sec = n * 60;
+  if (unit === "天" || unit === "d") sec = n * 86400;
+  else if (unit === "小时" || unit === "时" || unit === "h") sec = n * 3600;
+  if (sec > BAN_MAX_SEC) sec = BAN_MAX_SEC;
+  return sec;
+}
+
+function banFailTip(message?: string): string {
+  const m = (message || "").trim();
+  if (!m || m === "Error" || /napcat\.mjs|_handle/i.test(m)) {
+    return "禁言被拒绝。机器人需要是管理员，且不能禁群主或其他管理员";
+  }
+  if (/cannot ban owner/i.test(m)) return "不能禁言群主";
+  if (/cannot ban admin/i.test(m)) return "不能禁言管理员";
+  if (/user not in group/i.test(m)) return "对方不在这个群";
+  if (/uid error|get Uid Error/i.test(m)) return "找不到这个 QQ";
+  return m;
 }
 
 const TEASE = [
@@ -43,7 +77,7 @@ export class ZGroupAdminPlugin extends Plugin {
   manifest = {
     id: "z.group.admin",
     name: "群管",
-    version: "0.1.0",
+    version: "0.1.1",
     priority: 850,
     category: "standard" as const,
     kind: "channel" as const,
@@ -174,22 +208,22 @@ export class ZGroupAdminPlugin extends Plugin {
       return;
     }
     const qq = firstTarget(e);
-    const m = e.msg.match(/(\d+)\s*(?:分钟|分|m)?\s*$/i);
-    const minutes = m ? Number(m[1]) : 10;
     if (!qq) {
       await e.reply("用法：#禁言 @对方 10");
       return;
     }
+    const duration = parseBanSeconds(e.msg, qq);
     const r = await ctx.ob11.call(
       "set_group_ban",
       {
-        group_id: Number(gid) || gid,
-        user_id: Number(qq) || qq,
-        duration: Math.max(0, Math.floor(minutes * 60)),
+        group_id: String(gid),
+        user_id: String(qq),
+        duration,
       },
       { botId: botIdOf(e) },
     );
-    await e.reply(r.ok ? `已禁言 ${minutes} 分钟` : r.message || "禁言失败");
+    const minutes = Math.max(1, Math.round(duration / 60));
+    await e.reply(r.ok ? `已禁言 ${minutes} 分钟` : banFailTip(r.message));
   }
 
   async unban(e: NexusEvent, ctx: PluginContext) {
@@ -210,8 +244,8 @@ export class ZGroupAdminPlugin extends Plugin {
     const r = await ctx.ob11.call(
       "set_group_ban",
       {
-        group_id: Number(gid) || gid,
-        user_id: Number(qq) || qq,
+        group_id: String(gid),
+        user_id: String(qq),
         duration: 0,
       },
       { botId: botIdOf(e) },

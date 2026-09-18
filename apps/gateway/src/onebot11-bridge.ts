@@ -96,6 +96,7 @@ type NoticeHandler = (ev: Ob11NoticeEvent) => Promise<string[]>;
 type Pending = {
   resolve: (r: Ob11CallResult) => void;
   timer: ReturnType<typeof setTimeout>;
+  action: string;
 };
 
 type SockMeta = { selfId: string };
@@ -252,11 +253,22 @@ export class OneBot11Bridge {
         this.pending.delete(echo);
         const status = String(data.status || "");
         const retcode = Number(data.retcode ?? (status === "ok" || status === "async" ? 0 : -1));
+        const message =
+          data.message != null
+            ? String(data.message)
+            : data.wording != null
+              ? String(data.wording)
+              : undefined;
+        const ok = retcode === 0 || status === "ok" || status === "async";
+        if (!ok) {
+          const tip = (message || "无说明").replace(/\s+/g, " ").slice(0, 180);
+          log.warn(`OneBot ${pend.action} 失败 ret=${retcode} ${tip}`);
+        }
         pend.resolve({
-          ok: retcode === 0 || status === "ok" || status === "async",
+          ok,
           data: data.data,
           retcode,
-          message: data.message != null ? String(data.message) : undefined,
+          message,
         });
       }
       return;
@@ -372,7 +384,7 @@ export class OneBot11Bridge {
           this.pending.delete(echo);
           resolve({ ok: false, message: "OneBot 调用超时" });
         }, timeoutMs);
-        this.pending.set(echo, { resolve, timer });
+        this.pending.set(echo, { resolve, timer, action });
         try {
           targets[0].send(JSON.stringify({ action, params, echo }));
         } catch (e) {
