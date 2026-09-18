@@ -22,6 +22,8 @@ export type PluginUpdateItem = {
   name?: string;
   localVersion?: string;
   remoteVersion?: string;
+  /** 对照仓库地址 */
+  repoUrl?: string;
   localFingerprint?: string;
   remoteFingerprint?: string;
   status: "same" | "update" | "local-only" | "remote-only" | "unknown";
@@ -263,6 +265,19 @@ export function checkPluginUpdates(
     const localFingerprint = localContentFingerprint(absLocal);
     const remoteFingerprint = remoteContentFingerprint(root, remoteRef, remoteRel);
 
+    let remoteVersion = meta.version;
+    const manBlob = sh(root, ["show", `${remoteRef}:${remoteRel}/nexus.plugin.json`]);
+    if (manBlob) {
+      try {
+        const j = JSON.parse(manBlob) as { version?: string; name?: string; id?: string };
+        if (j.version) remoteVersion = j.version;
+        if (!meta.name && j.name) meta.name = j.name;
+        if (j.id) meta.id = j.id;
+      } catch {
+        /* ignore */
+      }
+    }
+
     let status: PluginUpdateItem["status"] = "unknown";
     let message: string | undefined;
 
@@ -277,23 +292,13 @@ export function checkPluginUpdates(
       message = "本地没有，可拉取";
     } else if (localFingerprint === remoteFingerprint) {
       status = "same";
+      message = "无更新";
     } else {
       status = "update";
-      message = "远端与本地不一致";
-    }
-
-    // 读远端版本
-    let remoteVersion = meta.version;
-    const manBlob = sh(root, ["show", `${remoteRef}:${remoteRel}/nexus.plugin.json`]);
-    if (manBlob) {
-      try {
-        const j = JSON.parse(manBlob) as { version?: string; name?: string; id?: string };
-        if (j.version) remoteVersion = j.version;
-        if (!meta.name && j.name) meta.name = j.name;
-        if (j.id) meta.id = j.id;
-      } catch {
-        /* ignore */
-      }
+      message =
+        meta.version && remoteVersion && meta.version !== remoteVersion
+          ? `有更新 ${meta.version} → ${remoteVersion}`
+          : "有更新";
     }
 
     items.push({
@@ -302,8 +307,9 @@ export function checkPluginUpdates(
       name: meta.name,
       localVersion: meta.version,
       remoteVersion,
-      localFingerprint: localFingerprint.slice(0, 12) || undefined,
-      remoteFingerprint: remoteFingerprint.slice(0, 12) || undefined,
+      repoUrl: source.replace(/\.git$/i, ""),
+      localFingerprint: localFingerprint || undefined,
+      remoteFingerprint: remoteFingerprint || undefined,
       status,
       message,
     });

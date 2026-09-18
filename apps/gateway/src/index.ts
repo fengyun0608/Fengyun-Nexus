@@ -1635,22 +1635,40 @@ async function bootstrap(): Promise<void> {
         pluginsRepoUrl: repoUrl || undefined,
         pluginsRepoBranch: registry.pluginsRepo?.branch || "main",
       });
-      const updates = result.items.filter(
+      const need = result.items.filter(
         (i) => i.status === "update" || i.status === "remote-only",
-      ).length;
+      );
+      const skipped = result.items.filter((i) => i.status === "same").length;
+      const updates = need.length;
+      const present = (i: (typeof result.items)[number]) => ({
+        id: i.id,
+        dir: i.dir,
+        name: i.name,
+        localVersion: i.localVersion,
+        remoteVersion: i.remoteVersion,
+        repoUrl: i.repoUrl,
+        status: i.status,
+        message: i.message,
+      });
       res.json({
-        ...result,
+        ok: result.ok,
+        source: result.source.replace(/\.git$/i, ""),
+        branch: result.branch,
+        items: need.map(present),
+        skipped,
         summary: {
           total: result.items.length,
           update: updates,
-          same: result.items.filter((i) => i.status === "same").length,
+          same: skipped,
           localOnly: result.items.filter((i) => i.status === "local-only").length,
           remoteOnly: result.items.filter((i) => i.status === "remote-only").length,
         },
         message:
           updates > 0
-            ? `有 ${updates} 个插件可更新或可拉取`
-            : "本地与远端插件目录一致（或暂未配置插件专仓）",
+            ? `有 ${updates} 个插件有更新。${skipped ? `其余 ${skipped} 个无更新，已跳过。` : ""}`
+            : skipped
+              ? `已检测，${skipped} 个插件无更新，已跳过。`
+              : "没有待更新的插件。",
       });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
@@ -1931,8 +1949,15 @@ async function bootstrap(): Promise<void> {
     const repoUrl = String(registry.pluginsRepo?.url || "").trim();
     let plugins: {
       available: number;
-      items: Array<{ name: string; dir: string; status: string; detail?: string }>;
-    } = { available: 0, items: [] };
+      skipped: number;
+      items: Array<{
+        name: string;
+        dir: string;
+        status: string;
+        repoUrl?: string;
+        detail?: string;
+      }>;
+    } = { available: 0, skipped: 0, items: [] };
     if (repoUrl) {
       try {
         const checked = checkPluginUpdates(ROOT, {
@@ -1944,19 +1969,22 @@ async function bootstrap(): Promise<void> {
         );
         plugins = {
           available: need.length,
+          skipped: checked.items.filter((i) => i.status === "same").length,
           items: need.map((i) => ({
             name: i.name || i.id || i.dir,
             dir: i.dir,
             status: i.status,
+            repoUrl: (i.repoUrl || repoUrl).replace(/\.git$/i, ""),
             detail:
               i.localVersion && i.remoteVersion && i.localVersion !== i.remoteVersion
-                ? `${i.localVersion}→${i.remoteVersion}`
-                : i.remoteVersion || i.message,
+                ? `${i.localVersion} → ${i.remoteVersion}`
+                : i.message || "有更新",
           })),
         };
       } catch (e) {
         plugins = {
           available: 0,
+          skipped: 0,
           items: [
             {
               name: "系统插件",
@@ -1973,18 +2001,23 @@ async function bootstrap(): Promise<void> {
     if (fw.updateAvailable) {
       const cur = fw.currentVersion || "?";
       const rem = fw.remoteVersion || cur;
-      bits.push(cur === rem ? `框架 ${cur}（有新代码）` : `框架 ${cur}→${rem}`);
+      bits.push(cur === rem ? `主框架 ${cur} 有新内容` : `主框架 ${cur} → ${rem}`);
     }
-    if (plugins.available) bits.push(`系统插件 ${plugins.available} 个`);
+    if (plugins.available) bits.push(`系统插件 ${plugins.available} 个有更新`);
+    const skipLine = plugins.skipped
+      ? `${plugins.skipped} 个插件无更新，已跳过`
+      : "";
     res.status(fw.ok ? 200 : 502).json({
-      ...fw,
+      ok: fw.ok,
+      currentVersion: fw.currentVersion,
+      remoteVersion: fw.remoteVersion,
+      repoUrl: fw.repoUrl,
       updateAvailable,
-      message: updateAvailable
-        ? `发现更新：${bits.join(" + ")}`
-        : fw.ok
-          ? `已是最新 ${fw.currentVersion || ""}`
-          : fw.message,
+      message: [updateAvailable ? `发现更新：${bits.join("，")}` : fw.ok ? `主框架已是最新，版本 ${fw.currentVersion || ""}` : fw.message, skipLine]
+        .filter(Boolean)
+        .join("。"),
       plugins,
+      pluginsRepoUrl: repoUrl.replace(/\.git$/i, ""),
     });
   });
 

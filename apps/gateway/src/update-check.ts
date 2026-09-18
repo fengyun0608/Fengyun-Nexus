@@ -6,8 +6,8 @@ export type UpdateCheckResult = {
   ok: boolean;
   currentVersion: string;
   remoteVersion?: string;
-  currentCommit?: string;
-  remoteCommit?: string;
+  /** 主框架仓库地址，给人看 */
+  repoUrl?: string;
   updateAvailable: boolean;
   branch?: string;
   message: string;
@@ -77,6 +77,16 @@ function parseVersionFromPackageJson(raw: string): string | undefined {
 
 function short(sha: string): string {
   return sha.slice(0, 7);
+}
+
+/** 主框架远程地址（给人看，去掉末尾 .git） */
+export function readOriginUrl(root: string): string {
+  try {
+    const raw = git(root, ["remote", "get-url", "origin"]).trim();
+    return raw.replace(/\.git$/i, "") || "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus";
+  } catch {
+    return "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus";
+  }
 }
 
 /** 拉取区间内的提交说明（倒序最新在前） */
@@ -257,21 +267,21 @@ export function checkRemoteUpdate(root: string): UpdateCheckResult {
     );
 
     const sameVer = currentVersion === remoteVersion;
+    const repoUrl = readOriginUrl(root);
     let message: string;
     if (!updateAvailable) {
-      message = `已是最新 ${currentVersion}`;
+      message = `主框架已是最新，版本 ${currentVersion}`;
     } else if (sameVer) {
-      message = `发现更新：当前 ${currentVersion}，远端有新代码（版本号暂同）`;
+      message = `主框架发现更新，当前版本 ${currentVersion}，远端有新内容`;
     } else {
-      message = `发现新版本 ${currentVersion} → ${remoteVersion}`;
+      message = `主框架发现新版本 ${currentVersion} → ${remoteVersion}`;
     }
 
     return {
       ok: true,
       currentVersion,
       remoteVersion,
-      currentCommit: currentCommit.slice(0, 7),
-      remoteCommit: remoteCommit.slice(0, 7),
+      repoUrl,
       updateAvailable,
       branch,
       message,
@@ -280,8 +290,9 @@ export function checkRemoteUpdate(root: string): UpdateCheckResult {
     return {
       ok: false,
       currentVersion,
+      repoUrl: readOriginUrl(root),
       updateAvailable: false,
-      message: "校验失败",
+      message: "检查失败，连不上远程仓库",
       error: e instanceof Error ? e.message : String(e),
     };
   }

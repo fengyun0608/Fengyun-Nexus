@@ -16,13 +16,14 @@ const applyReport = ref("");
 const updateInfo = ref<{
   currentVersion?: string;
   remoteVersion?: string;
+  repoUrl?: string;
+  pluginsRepoUrl?: string;
   updateAvailable?: boolean;
-  currentCommit?: string;
-  remoteCommit?: string;
   message?: string;
   plugins?: {
     available: number;
-    items: Array<{ name: string; dir: string; status: string; detail?: string }>;
+    skipped?: number;
+    items: Array<{ name: string; dir: string; status: string; detail?: string; repoUrl?: string }>;
   };
 } | null>(null);
 
@@ -130,22 +131,36 @@ onMounted(() => void loadBot());
     >
       <template v-if="!applyReport">
         <p v-if="updateInfo" class="upd-line">
-          版本 {{ updateInfo.currentVersion || "?" }}
-          <template v-if="updateInfo.updateAvailable">
-            → {{ updateInfo.remoteVersion || updateInfo.currentVersion || "?" }}
+          主框架版本 {{ updateInfo.currentVersion || "?" }}
+          <template v-if="updateInfo.updateAvailable && updateInfo.remoteVersion && updateInfo.remoteVersion !== updateInfo.currentVersion">
+            → {{ updateInfo.remoteVersion }}
           </template>
+          <template v-else-if="!updateInfo.updateAvailable">（已是最新）</template>
+        </p>
+        <p v-if="updateInfo?.repoUrl" class="hint">
+          主框架仓库
+          <a :href="updateInfo.repoUrl" target="_blank" rel="noopener noreferrer">{{ updateInfo.repoUrl }}</a>
+        </p>
+        <p v-if="updateInfo?.pluginsRepoUrl" class="hint">
+          系统插件仓库
+          <a :href="updateInfo.pluginsRepoUrl" target="_blank" rel="noopener noreferrer">{{ updateInfo.pluginsRepoUrl }}</a>
         </p>
         <p class="hint">{{ updateInfo?.message }}</p>
         <div v-if="updateInfo?.plugins?.items?.length" class="plugin-box">
-          <strong>系统插件待更新</strong>
+          <strong>有更新的插件</strong>
           <ul>
             <li v-for="p in updateInfo.plugins.items" :key="p.dir || p.name">
               {{ p.name }}
-              <span v-if="p.detail" class="muted"> · {{ p.detail }}</span>
+              <span v-if="p.detail"> · {{ p.detail }}</span>
+              <div v-if="p.repoUrl" class="hint">
+                <a :href="p.repoUrl" target="_blank" rel="noopener noreferrer">{{ p.repoUrl }}</a>
+              </div>
             </li>
           </ul>
         </div>
-        <p v-else-if="updateInfo" class="hint">系统插件侧无待更新项</p>
+        <p v-else-if="updateInfo" class="hint">
+          {{ updateInfo.plugins?.skipped ? `${updateInfo.plugins.skipped} 个插件无更新，已跳过` : "没有待更新的插件" }}
+        </p>
       </template>
       <pre v-else class="report">{{ applyReport }}</pre>
       <template #footer>
@@ -183,6 +198,10 @@ onMounted(() => void loadBot());
 .upd-line {
   margin: 0 0 6px;
   font-size: 1.05rem;
+}
+.hint a {
+  color: var(--amber);
+  word-break: break-all;
 }
 .plugin-box {
   margin-top: 12px;

@@ -27,8 +27,9 @@ type UpdateItem = {
   id: string;
   dir: string;
   name?: string;
-  localFingerprint?: string;
-  remoteFingerprint?: string;
+  localVersion?: string;
+  remoteVersion?: string;
+  repoUrl?: string;
   status: "same" | "update" | "local-only" | "remote-only" | "unknown";
   message?: string;
 };
@@ -74,8 +75,11 @@ async function checkUpdates() {
       items?: UpdateItem[];
       message?: string;
       source?: string;
+      skipped?: number;
     }>("/v1/registry/plugin-updates", { token: auth.token });
-    updateItems.value = res.items || [];
+    updateItems.value = (res.items || []).filter(
+      (u) => u.status === "update" || u.status === "remote-only",
+    );
     updateMsg.value = res.message || "";
     updateSource.value = res.source || "";
     message.info(res.message || "已检测");
@@ -147,17 +151,27 @@ onMounted(() => void load());
     <n-spin :show="loading">
       <p v-if="err" class="err">{{ err }}</p>
       <template v-else>
-        <n-card size="small" title="系统插件专仓" style="margin-bottom: 14px">
-          <p class="hint">官方地址，控制台不可改，避免被指到别处。</p>
+        <n-card size="small" title="仓库地址" style="margin-bottom: 14px">
+          <p class="hint">主框架仓库</p>
           <p class="repo">
-            {{ info?.pluginsRepo?.url || "未配置" }}
-            <span v-if="info?.pluginsRepo?.branch" class="hint">
-              · {{ info.pluginsRepo.branch }}
-            </span>
+            <a
+              v-if="info?.baseUrl"
+              :href="info.baseUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ info.baseUrl }}</a>
+            <span v-else>未配置</span>
           </p>
-          <n-tag v-if="info?.pluginsRepoLocked !== false" size="small" type="info" :bordered="false">
-            已锁定
-          </n-tag>
+          <p class="hint">系统插件仓库（已锁定）</p>
+          <p class="repo">
+            <a
+              v-if="info?.pluginsRepo?.url"
+              :href="String(info.pluginsRepo.url).replace(/\.git$/i, '')"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ String(info.pluginsRepo.url).replace(/\.git$/i, "") }}</a>
+            <span v-else>未配置</span>
+          </p>
         </n-card>
 
         <div class="admin-row surface">
@@ -184,23 +198,22 @@ onMounted(() => void load());
           <div v-for="u in updateItems" :key="u.dir" class="upd-row">
             <div>
               <strong>{{ u.name || u.id }}</strong>
-              <span class="hint">
-                {{ u.dir }} · {{ u.localFingerprint || "?" }} → {{ u.remoteFingerprint || "?" }}
-              </span>
+              <p class="hint">
+                版本 {{ u.localVersion || "—" }}
+                <template v-if="u.remoteVersion && u.remoteVersion !== u.localVersion">
+                  → {{ u.remoteVersion }}
+                </template>
+                · {{ u.message || statusLabel(u.status) }}
+              </p>
+              <p v-if="u.repoUrl" class="hint">
+                <a :href="u.repoUrl" target="_blank" rel="noopener noreferrer">{{ u.repoUrl }}</a>
+              </p>
             </div>
-            <n-tag
-              size="small"
-              :type="
-                u.status === 'update' || u.status === 'remote-only'
-                  ? 'warning'
-                  : u.status === 'same'
-                    ? 'success'
-                    : 'default'
-              "
-            >
+            <n-tag size="small" type="warning" :bordered="false">
               {{ statusLabel(u.status) }}
             </n-tag>
           </div>
+          <p v-if="!updateItems.length" class="hint">没有待更新的插件，无更新的已跳过。</p>
         </n-card>
 
         <n-card title="登记发布意图" size="small" style="margin-top: 14px">
@@ -255,9 +268,11 @@ onMounted(() => void load());
   margin: 10px 0;
 }
 .repo {
-  margin: 8px 0;
+  margin: 4px 0 12px;
   word-break: break-all;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 13px;
+}
+.repo a {
+  color: var(--amber);
 }
 </style>
