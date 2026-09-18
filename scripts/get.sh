@@ -194,23 +194,51 @@ pkg_fix_termux_base() {
     pkg reinstall -y $dpkg_opts openssl libcurl libssh2 ca-certificates git liblz4 || true
   fi
   local libdir="${PREFIX:-/data/data/com.termux/files/usr}/lib"
+  termux_fix_lz4_symlink "$libdir" || true
   if [ -d "$libdir/openssl-1.1" ]; then
     ln -sf openssl-1.1/libssl.so.1.1 "$libdir/libssl.so.1.1" 2>/dev/null || true
     ln -sf openssl-1.1/libcrypto.so.1.1 "$libdir/libcrypto.so.1.1" 2>/dev/null || true
   fi
 }
 
-# Termux apt 已坏（缺 liblz4.so.1 等）时：用 curl 拉 deb 再 dpkg -i
+# Termux apt 已坏（缺 liblz4.so.1 等）时：补软链 / 拉 deb / 配置卡住的包
+termux_fix_lz4_symlink() {
+  local libdir="${1:-${PREFIX:-/data/data/com.termux/files/usr}/lib}"
+  [ -d "$libdir" ] || return 1
+  if [ -e "$libdir/liblz4.so.1" ] || [ -L "$libdir/liblz4.so.1" ]; then
+    return 0
+  fi
+  local src=""
+  if [ -e "$libdir/liblz4.so" ]; then
+    src="liblz4.so"
+  else
+    src="$(ls -1 "$libdir"/liblz4.so.* 2>/dev/null | head -n1 | xargs -n1 basename 2>/dev/null || true)"
+  fi
+  if [ -n "$src" ] && [ -e "$libdir/$src" ]; then
+    log "补软链 liblz4.so.1 → $src"
+    ln -sfn "$src" "$libdir/liblz4.so.1"
+    return 0
+  fi
+  return 1
+}
+
 termux_repair_apt() {
   is_termux || return 1
   local prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   export DEBIAN_FRONTEND=noninteractive
+  # 先补软链：很多机器 liblz4 已装，只缺 .so.1 名字
+  termux_fix_lz4_symlink "$prefix/lib" || true
   if command -v apt >/dev/null 2>&1 && apt --version >/dev/null 2>&1; then
-    dpkg --configure -a -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold 2>/dev/null || true
+    echo N | dpkg --configure -a -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold 2>/dev/null || true
     return 0
   fi
   warn "apt 无法启动，尝试修复 liblz4 / 卡住的配置…"
-  dpkg --configure -a -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold 2>/dev/null || true
+  echo N | dpkg --configure -a -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold 2>/dev/null || true
+  termux_fix_lz4_symlink "$prefix/lib" || true
+  if command -v apt >/dev/null 2>&1 && apt --version >/dev/null 2>&1; then
+    log "apt 已靠软链恢复"
+    return 0
+  fi
   local arch
   arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
   case "$arch" in
@@ -221,15 +249,14 @@ termux_repair_apt() {
   esac
   local tmp="${TMPDIR:-/data/data/com.termux/files/usr/tmp}/nexus-apt-fix"
   mkdir -p "$tmp" && cd "$tmp" || return 1
-  # 多镜像试拉 liblz4（版本号随仓库变，用 packages 页最新名不好写死；先试常见文件名）
   local mirrors=(
+    "https://packages-cf.termux.dev/apt/termux-main"
     "https://packages.termux.dev/apt/termux-main"
     "https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main"
     "https://mirrors.ustc.edu.cn/termux/apt/termux-main"
   )
   local ok=0
   for base in "${mirrors[@]}"; do
-    # 从 Packages 索引里找 liblz4 的 Filename
     if curl -fsSL "$base/dists/stable/main/binary-${arch}/Packages" -o Packages 2>/dev/null; then
       local path
       path="$(awk '
@@ -246,16 +273,19 @@ termux_repair_apt() {
       fi
     fi
   done
-  dpkg --configure -a -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold 2>/dev/null || true
+  termux_fix_lz4_symlink "$prefix/lib" || true
+  echo N | dpkg --configure -a -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold 2>/dev/null || true
   if command -v apt >/dev/null 2>&1 && apt --version >/dev/null 2>&1; then
     log "apt 已恢复"
     return 0
   fi
   if [ "$ok" != "1" ]; then
-    warn "自动修复失败。请在手机浏览器打开 Termux 镜像站装回 liblz4，或重装 Termux 应用后重跑安装。"
+    warn "自动修复失败。请手动：ln -sfn liblz4.so \$PREFIX/lib/liblz4.so.1"
+    warn "或重装 Termux 应用后重跑安装。"
     return 1
   fi
-  return 0
+  warn "liblz4 已装但仍缺软链？请执行：ln -sfn liblz4.so \$PREFIX/lib/liblz4.so.1"
+  return 1
 }
 
 ensure_base_pkgs() {
