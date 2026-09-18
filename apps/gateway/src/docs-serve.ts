@@ -2,7 +2,7 @@
  * 控制台「编写文档」：只读打开仓库内教程 / 模板，路径白名单防穿越。
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join, normalize, relative, resolve, sep } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 
 const ALLOW_PREFIXES = ["docs/", "plugins/templates/", "workflows/"] as const;
 
@@ -22,17 +22,24 @@ export function docLink(title: string, path: string): DocLink {
   };
 }
 
+/** 白名单比对只用正斜杠。Windows 的 path.normalize 会把 / 改成 \\，startsWith("docs/") 会误判。 */
+function toPosix(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
 function underRoot(root: string, rel: string): string | null {
-  const clean = normalize(rel.replace(/\\/g, "/")).replace(/^(\.\.(\/|\\|$))+/, "");
-  if (!clean || clean.includes("\0")) return null;
+  const clean = toPosix(rel)
+    .replace(/^\/+/, "")
+    .replace(/\/+/g, "/");
+  if (!clean || clean.includes("\0") || clean.split("/").includes("..")) return null;
   const ok = ALLOW_PREFIXES.some(
     (pre) => clean === pre.slice(0, -1) || clean.startsWith(pre),
   );
   if (!ok) return null;
-  const abs = resolve(root, clean);
+  const abs = resolve(root, ...clean.split("/"));
   const rootAbs = resolve(root);
-  const relToRoot = relative(rootAbs, abs);
-  if (!relToRoot || relToRoot.startsWith("..") || relToRoot.includes(`..${sep}`)) {
+  const relToRoot = toPosix(relative(rootAbs, abs));
+  if (!relToRoot || relToRoot === ".." || relToRoot.startsWith("../")) {
     return null;
   }
   return abs;
