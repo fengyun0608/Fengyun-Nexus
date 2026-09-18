@@ -2471,7 +2471,8 @@ async function bootstrap(): Promise<void> {
   }
 
   const port = Number(process.env.PORT ?? profile.gateway.port);
-  const host = process.env.HOST ?? profile.gateway.host;
+  // 默认听所有网卡。只要本机访问时再设 HOST=127.0.0.1
+  const host = String(process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
 
   await bootStep("初始化：检测环境并放行端口…");
   try {
@@ -2494,8 +2495,10 @@ async function bootstrap(): Promise<void> {
   const server = app.listen(port, host, () => {
     onebot.attach(server);
     if (host === "0.0.0.0" || host === "::") {
-      log.info(`监听 ${host}:${port}。外网用公网 IP，不要用 127.0.0.1`);
+      log.info(`进程绑定 ${host}:${port}，外网网卡都能进。127.0.0.1 只是本机快捷方式`);
       log.info("云服务器请在安全组放行这个 TCP 端口。别的端口连不上");
+    } else {
+      log.info(`进程只绑定 ${host}:${port}。外网要改成不设 HOST，或 HOST=0.0.0.0`);
     }
     for (const u of urls) log.info(`控制台 ${u}`);
     void printBootSuccess({

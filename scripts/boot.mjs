@@ -79,9 +79,9 @@ function guessEnv() {
   return "desktop";
 }
 
-function consoleHints(port, env) {
-  const lines = [`本机 http://127.0.0.1:${port}/`];
-  if (env !== "server" && env !== "termux" && env !== "mobile") return lines;
+function consoleHints(port) {
+  const lines = [`进程绑定 0.0.0.0:${port}，不是只绑本机`];
+  lines.push(`本机快捷方式 http://127.0.0.1:${port}/`);
   const nets = networkInterfaces();
   for (const list of Object.values(nets)) {
     for (const n of list || []) {
@@ -410,7 +410,7 @@ async function main() {
   const port = process.env.PORT || "8787";
   bootLog("OK", ANSI.green, `姿态=${process.env.NEXUS_ENV}`);
   bootLog("INFO", ANSI.cyan, `即将拉起网关 → 先连数据库，再刷初始化日志`);
-  for (const line of consoleHints(port, process.env.NEXUS_ENV)) {
+  for (const line of consoleHints(port)) {
     bootLog("INFO", ANSI.cyan, line);
   }
   bootLog("INFO", ANSI.cyan, "初始账号 console / console  |  或: pnpm nexus setup");
