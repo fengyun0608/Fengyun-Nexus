@@ -44,7 +44,7 @@
   word-break: break-word;
   max-height: 320px;
   overflow: auto;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--surface);
   padding: 10px;
   border-radius: 8px;
 }

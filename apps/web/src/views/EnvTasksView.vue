@@ -146,6 +146,6 @@ onUnmounted(() => {
 }
 .task-row.on,
 .task-row:hover {
-  background: rgba(232, 165, 75, 0.1);
+  background: rgba(47, 155, 120, 0.1);
 }
 </style>

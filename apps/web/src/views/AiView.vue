@@ -211,7 +211,7 @@ onMounted(() => void load());
   border-bottom: 1px solid var(--line);
 }
 .list-row.on {
-  background: rgba(232, 165, 75, 0.08);
+  background: rgba(47, 155, 120, 0.08);
   border-radius: 8px;
   padding-left: 10px;
   padding-right: 10px;

@@ -92,7 +92,7 @@ onUnmounted(() => {
   grid-template-columns: auto auto 1fr;
   gap: 8px;
   padding: 6px 0;
-  border-bottom: 1px solid rgba(232, 165, 75, 0.08);
+  border-bottom: 1px solid rgba(47, 155, 120, 0.08);
   font-size: 0.86rem;
   align-items: start;
 }

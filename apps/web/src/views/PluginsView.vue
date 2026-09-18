@@ -461,7 +461,7 @@ onMounted(() => void refresh());
   width: 100%;
   font-family: ui-monospace, Consolas, monospace;
   font-size: 13px;
-  background: #121410;
+  background: var(--bg2);
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 8px;

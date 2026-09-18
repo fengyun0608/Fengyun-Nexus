@@ -176,7 +176,7 @@ onMounted(() => void loadMe());
 .admin-row.surface {
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--surface);
 }
 .warn {
   color: var(--amber);

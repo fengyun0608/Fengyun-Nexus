@@ -243,13 +243,13 @@ onUnmounted(() => {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 12px 14px;
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--surface);
   display: grid;
   gap: 4px;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
 .dash-tile:hover {
-  border-color: rgba(232, 165, 75, 0.4);
+  border-color: rgba(47, 155, 120, 0.4);
   transform: translateY(-1px);
 }
 .dash-tile span {
@@ -266,7 +266,7 @@ onUnmounted(() => {
   margin-top: 18px;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--surface-2);
   padding: 14px 14px 8px;
 }
 .feed-head {
@@ -312,8 +312,8 @@ onUnmounted(() => {
   font-size: 0.82rem;
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(232, 165, 75, 0.12);
-  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(47, 155, 120, 0.12);
+  background: var(--surface);
 }
 .lvl {
   font-weight: 700;

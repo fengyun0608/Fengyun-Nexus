@@ -153,16 +153,16 @@ onMounted(() => void loadHistory());
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 12px;
-  background: rgba(18, 20, 16, 0.55);
+  background: rgba(255, 255, 255, 0.72);
 }
 .bubble {
   margin-bottom: 12px;
   padding: 10px 12px;
   border-radius: 10px;
-  background: rgba(36, 43, 34, 0.9);
+  background: var(--surface-2);
 }
 .bubble.user {
-  background: rgba(232, 165, 75, 0.12);
+  background: rgba(47, 155, 120, 0.12);
 }
 .bubble-meta {
   display: flex;

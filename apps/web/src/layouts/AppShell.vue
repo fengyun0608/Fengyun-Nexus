@@ -173,8 +173,8 @@ async function onLogin() {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 80% 60% at 50% 110%, rgba(143, 173, 122, 0.12), transparent 55%),
-    linear-gradient(165deg, #0e100d 0%, #161a14 48%, #121410 100%);
+    radial-gradient(ellipse 80% 60% at 50% 110%, rgba(76, 175, 138, 0.18), transparent 55%),
+    linear-gradient(165deg, #f7fcf9 0%, #eef8f3 48%, #e4f3ec 100%);
 }
 .orb {
   position: absolute;
@@ -188,7 +188,7 @@ async function onLogin() {
   height: min(42vw, 380px);
   left: 8%;
   top: 12%;
-  background: rgba(232, 165, 75, 0.28);
+  background: rgba(94, 196, 212, 0.28);
   animation: orb-drift-a 14s ease-in-out infinite;
 }
 .orb-b {
@@ -196,7 +196,7 @@ async function onLogin() {
   height: min(48vw, 420px);
   right: 4%;
   bottom: 8%;
-  background: rgba(143, 173, 122, 0.22);
+  background: rgba(76, 175, 138, 0.26);
   animation: orb-drift-b 18s ease-in-out infinite;
 }
 .orb-c {
@@ -204,16 +204,16 @@ async function onLogin() {
   height: min(28vw, 240px);
   left: 42%;
   top: 38%;
-  background: rgba(232, 165, 75, 0.12);
+  background: rgba(47, 155, 120, 0.14);
   animation: orb-drift-c 11s ease-in-out infinite;
 }
 .grid-fade {
   position: absolute;
   inset: 0;
-  opacity: 0.18;
+  opacity: 0.22;
   background-image:
-    linear-gradient(rgba(242, 239, 230, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(242, 239, 230, 0.05) 1px, transparent 1px);
+    linear-gradient(rgba(28, 50, 44, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(28, 50, 44, 0.05) 1px, transparent 1px);
   background-size: 48px 48px;
   mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 20%, transparent 75%);
   animation: grid-breathe 8s ease-in-out infinite;
@@ -223,14 +223,14 @@ async function onLogin() {
   z-index: 1;
   width: min(400px, 100%);
   padding: 36px 30px 30px;
-  border: 1px solid rgba(232, 165, 75, 0.28);
+  border: 1px solid rgba(45, 140, 110, 0.2);
   border-radius: 18px;
-  background: rgba(22, 26, 20, 0.78);
+  background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   box-shadow:
-    0 0 0 1px rgba(143, 173, 122, 0.06) inset,
-    0 24px 60px rgba(0, 0, 0, 0.35);
+    0 0 0 1px rgba(76, 175, 138, 0.08) inset,
+    0 24px 60px rgba(40, 90, 70, 0.12);
   text-align: center;
   animation: card-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -244,7 +244,7 @@ async function onLogin() {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  border: 1.5px solid rgba(232, 165, 75, 0.45);
+  border: 1.5px solid rgba(47, 155, 120, 0.4);
   animation: ring-spin 10s linear infinite;
 }
 .brand-ring::after {
@@ -256,7 +256,7 @@ async function onLogin() {
   background: var(--amber);
   top: -4px;
   left: calc(50% - 3.5px);
-  box-shadow: 0 0 10px rgba(232, 165, 75, 0.55);
+  box-shadow: 0 0 10px rgba(47, 155, 120, 0.45);
 }
 .brand-core {
   position: absolute;
@@ -264,7 +264,7 @@ async function onLogin() {
   border-radius: 50%;
   background:
     radial-gradient(circle at 35% 30%, rgba(242, 239, 230, 0.35), transparent 45%),
-    linear-gradient(145deg, rgba(232, 165, 75, 0.55), rgba(143, 173, 122, 0.35));
+    linear-gradient(145deg, rgba(47, 155, 120, 0.55), rgba(76, 175, 138, 0.35));
   animation: core-pulse 3.2s ease-in-out infinite;
 }
 .login-card h1 {
@@ -434,7 +434,7 @@ async function onLogin() {
 .nav-item:hover,
 .nav-item.active {
   color: var(--ink);
-  background: rgba(232, 165, 75, 0.12);
+  background: rgba(47, 155, 120, 0.12);
 }
 .sidebar-foot {
   padding: 12px;

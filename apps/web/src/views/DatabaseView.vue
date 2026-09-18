@@ -219,7 +219,7 @@ onMounted(() => void load());
 .surface {
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--surface);
 }
 .layer-grid.tight {
   padding: 0;
@@ -229,6 +229,6 @@ onMounted(() => void load());
 }
 .layer-card.static:hover {
   border-color: var(--line);
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--surface);
 }
 </style>

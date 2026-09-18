@@ -238,7 +238,7 @@ onMounted(() => void load());
 .surface {
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--surface);
 }
 .upd-row {
   display: flex;

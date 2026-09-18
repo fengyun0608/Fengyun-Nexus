@@ -504,7 +504,7 @@ onMounted(() => void load());
   padding: 10px;
   border-radius: 8px;
   border: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--surface);
   color: inherit;
   resize: vertical;
 }

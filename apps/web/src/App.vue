@@ -3,7 +3,6 @@ import {
   NConfigProvider,
   NMessageProvider,
   NDialogProvider,
-  darkTheme,
   zhCN,
   dateZhCN,
 } from "naive-ui";
@@ -11,29 +10,28 @@ import AppShell from "@/layouts/AppShell.vue";
 
 const themeOverrides = {
   common: {
-    primaryColor: "#e8a54b",
-    primaryColorHover: "#f0b45c",
-    primaryColorPressed: "#c4842f",
-    bodyColor: "#121410",
-    cardColor: "#1a1f18",
-    modalColor: "#1a1f18",
-    popoverColor: "#242b22",
-    textColorBase: "#f2efe6",
-    textColor1: "#f2efe6",
-    textColor2: "#a7b0a0",
-    textColor3: "#8a9480",
-    borderColor: "rgba(232, 165, 75, 0.22)",
-    dividerColor: "rgba(232, 165, 75, 0.12)",
-    inputColor: "#242b22",
-    hoverColor: "rgba(232, 165, 75, 0.12)",
-    fontFamily: 'var(--font-ui)',
+    primaryColor: "#2f9b78",
+    primaryColorHover: "#3aad88",
+    primaryColorPressed: "#247a5e",
+    bodyColor: "#eef8f3",
+    cardColor: "#ffffff",
+    modalColor: "#ffffff",
+    popoverColor: "#ffffff",
+    textColorBase: "#1c322c",
+    textColor1: "#1c322c",
+    textColor2: "#5f7a70",
+    textColor3: "#7a9088",
+    borderColor: "rgba(45, 140, 110, 0.18)",
+    dividerColor: "rgba(45, 140, 110, 0.1)",
+    inputColor: "#f3faf6",
+    hoverColor: "rgba(47, 155, 120, 0.1)",
+    fontFamily: "var(--font-ui)",
   },
 };
 </script>
 
 <template>
   <n-config-provider
-    :theme="darkTheme"
     :locale="zhCN"
     :date-locale="dateZhCN"
     :theme-overrides="themeOverrides"

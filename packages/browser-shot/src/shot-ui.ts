@@ -1,6 +1,6 @@
 /**
- * 系统截图统一视觉：墨色底 + 琥珀标题 + 鼠尾草绿点缀。
- * 菜单 / 状态 / 重启成功共用，避免各画各的。
+ * 系统截图统一视觉：清新浅色（薄荷底 + 叶绿强调）。
+ * 菜单 / 状态 / 重启成功共用。
  */
 
 export function escapeShotHtml(s: string): string {
@@ -15,19 +15,19 @@ export function escapeShotHtml(s: string): string {
 export function nexusShotCss(): string {
   return `
   :root {
-    --bg0: #0f1410;
-    --bg1: #1a1f18;
-    --ink: #f2efe6;
-    --muted: #a7b0a0;
-    --line: rgba(232,165,75,.22);
-    --amber: #e8a54b;
-    --amber2: #c4842f;
-    --sage: #8fad7a;
+    --bg0: #eef8f3;
+    --bg1: #f7fcf9;
+    --ink: #1c322c;
+    --muted: #5f7a70;
+    --line: rgba(45, 140, 110, 0.16);
+    --amber: #2f9b78;
+    --amber2: #247a5e;
+    --sage: #4caf8a;
     --danger: #d4644a;
-    --ok: #6f9b6a;
-    --warn: #e0a045;
-    --card: rgba(0,0,0,.38);
-    --tile: rgba(255,255,255,.035);
+    --ok: #2f9b78;
+    --warn: #d4923a;
+    --card: rgba(255,255,255,.92);
+    --tile: #f3faf6;
   }
   * { box-sizing: border-box; }
   body {
@@ -36,9 +36,9 @@ export function nexusShotCss(): string {
     font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     color: var(--ink);
     background:
-      radial-gradient(820px 380px at 12% -8%, rgba(232,165,75,.16), transparent 55%),
-      radial-gradient(640px 340px at 100% 0%, rgba(143,173,122,.12), transparent 50%),
-      linear-gradient(155deg, var(--bg1) 0%, var(--bg0) 55%, #161c14 100%);
+      radial-gradient(820px 380px at 10% -8%, rgba(76,175,138,.18), transparent 55%),
+      radial-gradient(640px 340px at 100% 0%, rgba(120, 200, 220, .14), transparent 50%),
+      linear-gradient(165deg, var(--bg1) 0%, var(--bg0) 55%, #e4f3ec 100%);
   }
   #panel, #shot {
     width: 780px;
@@ -52,14 +52,14 @@ export function nexusShotCss(): string {
     border-radius: 18px;
     background: var(--card);
     padding: 20px 22px;
-    box-shadow: 0 18px 48px rgba(0,0,0,.35);
+    box-shadow: 0 10px 28px rgba(40, 90, 70, .08);
     overflow: hidden;
   }
   .card::before {
     content: "";
     position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-    background: linear-gradient(180deg, var(--amber), var(--sage));
-    opacity: .9;
+    background: linear-gradient(180deg, #4caf8a, #5ec4d4);
+    opacity: .95;
   }
   .brand {
     font-size: 12px;
@@ -80,7 +80,7 @@ export function nexusShotCss(): string {
     margin: 0;
     font-size: 28px;
     font-weight: 750;
-    color: var(--amber);
+    color: var(--amber2);
     letter-spacing: -.02em;
     line-height: 1.15;
   }
@@ -99,11 +99,11 @@ export function nexusShotCss(): string {
     content: "";
     width: 8px; height: 8px; border-radius: 50%;
     background: currentColor;
-    box-shadow: 0 0 0 3px rgba(255,255,255,.06);
+    box-shadow: 0 0 0 3px rgba(47,155,120,.12);
   }
-  .badge.on { color: var(--ok); background: rgba(111,155,106,.14); border-color: rgba(111,155,106,.28); }
-  .badge.wait { color: var(--warn); background: rgba(224,160,69,.12); border-color: rgba(224,160,69,.28); }
-  .badge.off { color: #9aa29a; background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.08); }
+  .badge.on { color: var(--ok); background: rgba(47,155,120,.12); border-color: rgba(47,155,120,.28); }
+  .badge.wait { color: var(--warn); background: rgba(212,146,58,.12); border-color: rgba(212,146,58,.28); }
+  .badge.off { color: #7a8a84; background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.06); }
   .chips {
     display: flex; flex-wrap: wrap; gap: 7px;
     margin-top: 14px;
@@ -114,7 +114,7 @@ export function nexusShotCss(): string {
     border-radius: 999px;
     color: var(--muted);
     background: var(--tile);
-    border: 1px solid rgba(232,165,75,.12);
+    border: 1px solid rgba(45,140,110,.12);
   }
   .sec {
     font-size: 11px;
@@ -133,7 +133,7 @@ export function nexusShotCss(): string {
     padding: 14px 14px 12px;
     border-radius: 14px;
     background: var(--tile);
-    border: 1px solid rgba(232,165,75,.1);
+    border: 1px solid rgba(45,140,110,.1);
     min-height: 88px;
   }
   .tile-k {
@@ -180,9 +180,9 @@ export function nexusShotCss(): string {
   .track {
     height: 10px;
     border-radius: 999px;
-    background: rgba(255,255,255,.06);
+    background: rgba(45,140,110,.1);
     overflow: hidden;
-    border: 1px solid rgba(255,255,255,.04);
+    border: 1px solid rgba(45,140,110,.06);
   }
   .fill {
     height: 100%;
@@ -210,7 +210,7 @@ export function nexusShotCss(): string {
   .list li {
     padding: 11px 13px;
     border-radius: 12px;
-    border: 1px solid rgba(232,165,75,.12);
+    border: 1px solid rgba(45,140,110,.12);
     background: var(--tile);
     font-size: 14px;
     line-height: 1.45;
@@ -222,8 +222,8 @@ export function nexusShotCss(): string {
   .menu-list li {
     padding: 12px 14px;
     border-radius: 12px;
-    border: 1px solid rgba(232,165,75,.15);
-    background: rgba(255,255,255,.03);
+    border: 1px solid rgba(45,140,110,.14);
+    background: var(--tile);
     font-size: 16px; line-height: 1.45;
   }
   .menu-list li span { white-space: pre-wrap; }
@@ -236,14 +236,14 @@ export function meterBarHtml(
   detail: string,
 ): string {
   const p = Math.min(100, Math.max(0, Math.round(pct)));
-  let c1 = "#6f9b6a";
-  let c2 = "#8fad7a";
+  let c1 = "#2f9b78";
+  let c2 = "#5ec4d4";
   if (p >= 90) {
     c1 = "#c45c4a";
     c2 = "#d4644a";
   } else if (p >= 70) {
-    c1 = "#c4842f";
-    c2 = "#e8a54b";
+    c1 = "#d4923a";
+    c2 = "#e0a045";
   }
   return `<div class="meter-row">
   <div class="meter-name">${escapeShotHtml(name)}</div>
