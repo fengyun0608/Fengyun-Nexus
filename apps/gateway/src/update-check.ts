@@ -120,7 +120,7 @@ export function formatShortStat(raw: string): string {
   if (!nFiles && !nIns && !nDel) return s;
   const bits = [`${nFiles || 0} 个文件`];
   if (nIns) bits.push(`+${nIns}`);
-  if (nDel) bits.push(`−${nDel}`);
+  if (nDel) bits.push(`-${nDel}`);
   if (!nIns && !nDel) bits.push("没改行数？");
   return bits.join("  ");
 }

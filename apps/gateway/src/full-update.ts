@@ -16,6 +16,15 @@ export type FullUpdateResult = UpdateApplyResult & {
   pluginDirs?: string[];
 };
 
+/** 拆成多条转发节点，群里展开能看到一段段说明 */
+function pushNodes(out: string[], ...parts: Array<string | undefined | false>) {
+  for (const p of parts) {
+    if (!p) continue;
+    const t = String(p).trim();
+    if (t) out.push(t);
+  }
+}
+
 export function applyFullUpdate(
   root: string,
   opts?: FullUpdateOpts,
@@ -34,21 +43,27 @@ export function applyFullUpdate(
   let pluginsUpdated = false;
   let pluginError = "";
 
-  // 框架段
+  // —— 框架 ——
   if (fw.updated) {
-    nodes.push(
-      `框架已更新 ${fw.version || ""}\n${fw.beforeCommit || "?"} → ${fw.afterCommit || "?"}`.trim(),
+    pushNodes(
+      nodes,
+      `框架已更新到 ${fw.version || "?"}`,
+      `${fw.beforeCommit || "?"} → ${fw.afterCommit || "?"}`,
     );
     const statLine = (fw.forwardNodes || []).find(
       (n) => n.includes("个文件") || n.includes("有改动") || n.includes("没改"),
     );
-    if (statLine) nodes.push(statLine);
-    if (fw.overwritten) nodes.push("框架本地被远程盖掉了");
+    pushNodes(nodes, statLine || "有改动，统计拿不到");
+    if (fw.overwritten) pushNodes(nodes, "本地被远程盖掉了");
   } else {
-    nodes.push(`框架已是最新 ${fw.version || ""}\n${fw.afterCommit || ""}`.trim());
+    pushNodes(
+      nodes,
+      `框架已是最新 ${fw.version || "?"}`,
+      fw.afterCommit ? `当前 ${fw.afterCommit}` : undefined,
+    );
   }
 
-  // 插件专仓段
+  // —— 系统插件专仓 ——
   const repoUrl = String(opts?.pluginsRepoUrl || "").trim();
   if (repoUrl) {
     try {
@@ -70,31 +85,39 @@ export function applyFullUpdate(
           pluginDirs.push(...applied.applied);
           const labels = need
             .filter((i) => applied.applied.includes(i.dir))
-            .map((i) => i.name || i.id || i.dir);
-          nodes.push(`系统插件已更新\n${labels.join("、")}`);
+            .map((i) => {
+              const ver =
+                i.remoteVersion && i.remoteVersion !== i.localVersion
+                  ? ` ${i.localVersion || "?"}→${i.remoteVersion}`
+                  : i.remoteVersion
+                    ? ` ${i.remoteVersion}`
+                    : "";
+              return `${i.name || i.id || i.dir}${ver}`;
+            });
+          pushNodes(nodes, "系统插件已更新", labels.join("\n"));
         }
         if (applied.failed.length) {
-          pluginError = applied.failed.map((f) => `${f.dir}：${f.error}`).join("；");
-          nodes.push(`插件拉取失败\n${pluginError}`);
+          pluginError = applied.failed.map((f) => `${f.dir}：${f.error}`).join("\n");
+          pushNodes(nodes, "插件拉取失败", pluginError);
         }
       } else {
         const names = before.items.map((i) => i.name || i.id || i.dir);
-        nodes.push(
-          names.length
-            ? `系统插件已是最新\n${names.join("、")}`
-            : "系统插件已是最新",
+        pushNodes(
+          nodes,
+          "系统插件已是最新",
+          names.length ? names.join("、") : undefined,
         );
       }
     } catch (e) {
       pluginError = e instanceof Error ? e.message : String(e);
-      nodes.push(`系统插件更新失败\n${pluginError}`);
+      pushNodes(nodes, "系统插件更新失败", pluginError);
     }
   } else if (fw.updated) {
-    nodes.push("系统插件随框架目录对齐");
+    pushNodes(nodes, "系统插件随框架目录对齐");
   }
 
   const anyUpdated = Boolean(fw.updated) || pluginsUpdated;
-  if (anyUpdated) nodes.push("正在重启");
+  if (anyUpdated) pushNodes(nodes, "正在重启");
 
   const reportText = nodes.join("\n\n");
   const bits: string[] = [];

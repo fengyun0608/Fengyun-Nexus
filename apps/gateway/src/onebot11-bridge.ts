@@ -225,7 +225,8 @@ export class OneBot11Bridge {
 
   /**
    * 合并转发：多段节点，显示为「匿名用户」。
-   * NapCat / go-cqhttp：send_group_forward_msg / send_private_forward_msg
+   * NapCat：content 必须是消息段数组，传纯字符串会乱码/空白。
+   * @see https://napneko.github.io/develop/msg
    */
   async sendForward(
     nodes: string[],
@@ -236,15 +237,15 @@ export class OneBot11Bridge {
     if (!texts.length) return false;
 
     const nickname = opts?.nickname || "匿名用户";
-    const uin = opts?.userId || "80000000";
-    const messages = texts.map((content) => ({
+    const uinNum = Number(opts?.userId || "80000000") || 80000000;
+    const messages = texts.map((text) => ({
       type: "node",
       data: {
         name: nickname,
-        uin,
-        user_id: Number(uin) || 80000000,
+        uin: String(uinNum),
+        user_id: uinNum,
         nickname,
-        content,
+        content: [{ type: "text", data: { text } }],
       },
     }));
 
@@ -254,7 +255,7 @@ export class OneBot11Bridge {
 
     let action = "send_private_forward_msg";
     let params: Record<string, unknown> = {
-      user_id: Number(ctx.userId),
+      user_id: Number(ctx.userId) || 0,
       messages,
     };
     if (mt === "group") {
