@@ -3,13 +3,15 @@ import { renderHtmlShot, renderMenuShot } from "./menu-shot.js";
 
 export type PluginRuntimeHooks = {
   statusLines: () => string[];
+  statusHtml: () => string;
 };
 
 let runtimeHooks: PluginRuntimeHooks = {
   statusLines: () => ["状态暂不可用"],
+  statusHtml: () => "<html><body><div id='panel'>状态暂不可用</div></body></html>",
 };
 
-/** 网关在收集完运行信息后注入，供系统插件读状态行 */
+/** 网关在收集完运行信息后注入，供系统插件读状态 */
 export function setPluginRuntime(hooks: PluginRuntimeHooks): void {
   runtimeHooks = hooks;
 }
@@ -29,6 +31,7 @@ export function makePluginCtx(
     },
     runtime: {
       statusLines: () => runtimeHooks.statusLines(),
+      statusHtml: () => runtimeHooks.statusHtml(),
     },
   };
 }

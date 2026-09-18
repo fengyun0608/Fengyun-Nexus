@@ -53,7 +53,7 @@ import {
 } from "./env-tasks.js";
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
 import { applyFullUpdate } from "./full-update.js";
-import { buildRestartOkLines, buildStatusLines } from "./status-shot.js";
+import { buildRestartOkLines, buildStatusLines, buildStatusPanelHtml, type StatusShotInput } from "./status-shot.js";
 import { execFileSync } from "node:child_process";
 import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
 import {
@@ -475,14 +475,14 @@ async function bootstrap(): Promise<void> {
     }
   }
 
-  function collectStatusLines(): string[] {
+  function collectStatusInput(): StatusShotInput {
     const ob = onebot.status();
     const snap = llm.snapshot();
     const ch = getChannelSettings(channelCfg, "onebot11");
     const list = plugins.listConsole();
     const enabled = list.filter((p) => p.enabled !== false).length;
     const ap = activeProvider(llmStore);
-    return buildStatusLines({
+    return {
       version: readLocalVersion(ROOT),
       commit: shortCommit() || undefined,
       envId: profile.id,
@@ -505,10 +505,17 @@ async function bootstrap(): Promise<void> {
       pluginsTotal: list.length,
       replyGroupIds: ch.replyGroupIds || [],
       notifyGroupIds: ch.notifyGroupIds || [],
-    });
+    };
   }
 
-  setPluginRuntime({ statusLines: collectStatusLines });
+  function collectStatusLines(): string[] {
+    return buildStatusLines(collectStatusInput());
+  }
+
+  setPluginRuntime({
+    statusLines: collectStatusLines,
+    statusHtml: () => buildStatusPanelHtml(collectStatusInput()),
+  });
 
   /** Process inbound message: # admin → plugins (first match) → LLM. Never local-echo. */
   async function processInbound(

@@ -161,8 +161,10 @@ export interface PluginContext {
   shot: PluginShot;
   /** 宿主运行时只读信息（状态图等） */
   runtime: {
-    /** 框架 / 网络 / OneBot / AI / 群等状态行 */
+    /** 框架 / 网络 / OneBot / AI / 群等状态行（纯文本回退） */
     statusLines: () => string[];
+    /** 状态面板 HTML，配合 shot.renderHtml({ selector: "#panel" }) */
+    statusHtml: () => string;
   };
 }
 

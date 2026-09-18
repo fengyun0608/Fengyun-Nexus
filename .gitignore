@@ -29,6 +29,7 @@ workers/go-pump/bin/
 __pycache__/
 *.pyc
 .tmp-ref/
+.tmp-yenai/
 tmp-*.mjs
 
 # 系统插件包本地专仓 .git（内容仍跟踪，勿嵌套提交）
