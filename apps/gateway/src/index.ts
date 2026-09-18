@@ -57,6 +57,13 @@ import { buildRestartOkLines, buildRestartOkPanelHtml, buildStatusLines, buildSt
 import { execFileSync } from "node:child_process";
 import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
 import {
+  DEFAULT_WALLPAPER_URL,
+  isAllowedWallpaperUrl,
+  loadConsoleAppearance,
+  saveConsoleAppearance,
+  type ConsoleAppearance,
+} from "./console-appearance.js";
+import {
   listPluginDirs,
   listPluginFiles,
   readPluginFile,
@@ -406,6 +413,7 @@ async function bootstrap(): Promise<void> {
 
   let channelCfg: ChannelsConfigFile = loadChannelsConfig(ROOT);
   let botCfg: BotConfig = loadBotConfig(ROOT);
+  let consoleAppearance: ConsoleAppearance = loadConsoleAppearance(ROOT);
   await bootStep("初始化：消息通道配置（主人等，与插件装载独立）…");
 
   /** Soft power-off: ignore normal chat until #开机. #重启 calls system restart executable. */
@@ -1002,7 +1010,61 @@ async function bootstrap(): Promise<void> {
         tips: scan.tips,
       },
       db: db.stats(),
+      console: consoleAppearance,
     });
+  });
+
+  /** 控制台外观（壁纸等），登录页也可读 */
+  app.get("/v1/console/appearance", (_req, res) => {
+    res.json({
+      ok: true,
+      appearance: consoleAppearance,
+      defaults: { wallpaperUrl: DEFAULT_WALLPAPER_URL },
+    });
+  });
+
+  app.get("/v1/admin/console", authMiddleware, (_req, res) => {
+    res.json({
+      ok: true,
+      appearance: consoleAppearance,
+      defaults: { wallpaperUrl: DEFAULT_WALLPAPER_URL },
+    });
+  });
+
+  app.put("/v1/admin/console", authMiddleware, (req, res) => {
+    const body = (req.body ?? {}) as Partial<ConsoleAppearance>;
+    let wallpaperUrl = consoleAppearance.wallpaperUrl;
+    if (typeof body.wallpaperUrl === "string") {
+      const next = body.wallpaperUrl.trim() || DEFAULT_WALLPAPER_URL;
+      if (!isAllowedWallpaperUrl(next)) {
+        res.status(400).json({
+          error: "壁纸地址须为站点相对路径（如 /wallpapers/default.jpg）或 http(s) 链接",
+          errorType: "bad_request",
+        });
+        return;
+      }
+      wallpaperUrl = next;
+    }
+    const fit = body.wallpaperFit;
+    const next: ConsoleAppearance = {
+      ...consoleAppearance,
+      wallpaperUrl,
+      wallpaperFit:
+        fit === "contain" || fit === "fill" || fit === "cover"
+          ? fit
+          : consoleAppearance.wallpaperFit,
+      wallpaperDim:
+        typeof body.wallpaperDim === "number"
+          ? body.wallpaperDim
+          : typeof body.wallpaperDim === "string"
+            ? Number(body.wallpaperDim)
+            : consoleAppearance.wallpaperDim,
+      note: typeof body.note === "string" ? body.note : consoleAppearance.note,
+    };
+    consoleAppearance = next;
+    saveConsoleAppearance(ROOT, consoleAppearance);
+    log.ok(`控制台外观已保存  wallpaper=${consoleAppearance.wallpaperUrl}`);
+    res.json({ ok: true, message: "已保存", appearance: consoleAppearance });
   });
 
   /** 教程 / 示例：新窗口打开，路径仅允许 docs、模板、workflows */
@@ -2056,6 +2118,18 @@ async function bootstrap(): Promise<void> {
     : existsSync(join(PUBLIC_FALLBACK, "index.html"))
       ? PUBLIC_FALLBACK
       : null;
+
+  /** 默认壁纸：优先 Web public，其次 assets/console */
+  const wallPublic = join(ROOT, "apps/web/public/wallpapers/default.jpg");
+  const wallAsset = join(ROOT, "assets/console/wallpaper-default.jpg");
+  const wallFile = existsSync(wallPublic) ? wallPublic : existsSync(wallAsset) ? wallAsset : null;
+  if (wallFile) {
+    app.get("/wallpapers/default.jpg", (_req, res) => {
+      res.type("jpg");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.sendFile(wallFile);
+    });
+  }
 
   if (staticRoot) {
     app.use(

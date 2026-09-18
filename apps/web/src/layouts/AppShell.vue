@@ -4,8 +4,10 @@ import { useRoute, useRouter } from "vue-router";
 import { NButton, NInput, NForm, NFormItem, useMessage } from "naive-ui";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
+import { useConsoleStore } from "@/stores/console";
 
 const auth = useAuthStore();
+const consoleUi = useConsoleStore();
 const route = useRoute();
 const router = useRouter();
 const message = useMessage();
@@ -102,6 +104,7 @@ async function refreshChannelNav() {
 }
 
 onMounted(() => {
+  void consoleUi.refresh();
   void auth.refreshMe().then(() => refreshChannelNav());
 });
 
@@ -126,8 +129,8 @@ async function onLogin() {
 </script>
 
 <template>
-  <div v-if="!auth.loggedIn" class="login-wrap">
-    <div class="login-bg" aria-hidden="true">
+  <div v-if="!auth.loggedIn" class="login-wrap" :style="consoleUi.wallpaperStyle">
+    <div class="login-bg" aria-hidden="true" :style="consoleUi.dimStyle">
       <span class="orb orb-a" />
       <span class="orb orb-b" />
       <span class="orb orb-c" />
@@ -168,33 +171,36 @@ async function onLogin() {
     </div>
   </div>
 
-  <div v-else class="shell">
-    <aside class="sidebar">
-      <div class="sidebar-brand">
-        <strong>Fengyun Nexus</strong>
-        <span>{{ auth.username || "已登录" }}</span>
-      </div>
-      <nav class="nav">
-        <div v-for="g in navGroups" :key="g.title" class="nav-group">
-          <div class="nav-group-title">{{ g.title }}</div>
-          <router-link
-            v-for="item in g.items"
-            :key="item.to"
-            :to="item.to"
-            class="nav-item"
-            :class="{ active: isActive(item) }"
-          >
-            {{ item.label }}
-          </router-link>
+  <div v-else class="shell-wrap" :style="consoleUi.wallpaperStyle">
+    <div class="shell-dim" aria-hidden="true" :style="consoleUi.dimStyle" />
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <strong>Fengyun Nexus</strong>
+          <span>{{ auth.username || "已登录" }}</span>
         </div>
-      </nav>
-      <div class="sidebar-foot">
-        <n-button quaternary size="small" @click="auth.logout()">退出</n-button>
-      </div>
-    </aside>
-    <main class="main">
-      <router-view />
-    </main>
+        <nav class="nav">
+          <div v-for="g in navGroups" :key="g.title" class="nav-group">
+            <div class="nav-group-title">{{ g.title }}</div>
+            <router-link
+              v-for="item in g.items"
+              :key="item.to"
+              :to="item.to"
+              class="nav-item"
+              :class="{ active: isActive(item) }"
+            >
+              {{ item.label }}
+            </router-link>
+          </div>
+        </nav>
+        <div class="sidebar-foot">
+          <n-button quaternary size="small" @click="auth.logout()">退出</n-button>
+        </div>
+      </aside>
+      <main class="main">
+        <router-view />
+      </main>
+    </div>
   </div>
 </template>
 
@@ -214,9 +220,6 @@ async function onLogin() {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background:
-    radial-gradient(ellipse 80% 60% at 50% 110%, rgba(76, 175, 138, 0.18), transparent 55%),
-    linear-gradient(165deg, #f7fcf9 0%, #eef8f3 48%, #e4f3ec 100%);
 }
 .orb {
   position: absolute;
@@ -418,7 +421,21 @@ async function onLogin() {
     animation: none !important;
   }
 }
+.shell-wrap {
+  position: relative;
+  isolation: isolate;
+  min-height: 100%;
+  height: 100%;
+}
+.shell-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
 .shell {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: 220px 1fr;
   min-height: 100%;
@@ -428,9 +445,9 @@ async function onLogin() {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   min-height: 100vh;
   position: sticky;
   top: 0;

@@ -23,10 +23,7 @@ html, body, #app { height: 100%; margin: 0; }
 body {
   font-family: var(--font-ui);
   color: var(--ink);
-  background:
-    radial-gradient(900px 480px at 0% 0%, rgba(76, 175, 138, 0.16), transparent 50%),
-    radial-gradient(700px 400px at 100% 0%, rgba(94, 196, 212, 0.12), transparent 45%),
-    linear-gradient(165deg, var(--bg1), var(--bg0));
+  background: var(--bg0);
 }
 
 button, input, textarea, select { font: inherit; color: inherit; }

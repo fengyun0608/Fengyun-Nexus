@@ -1,0 +1,6 @@
+{
+  "wallpaperUrl": "/wallpapers/default.jpg",
+  "wallpaperFit": "cover",
+  "wallpaperDim": 0.42,
+  "note": "控制台外观。wallpaperUrl 默认本仓壁纸；可改成任意 http(s) 地址或站点相对路径。wallpaperDim 为遮罩透明度 0～0.85。"
+}

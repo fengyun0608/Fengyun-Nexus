@@ -3,14 +3,18 @@ import { onMounted, ref } from "vue";
 import {
   NButton,
   NInput,
+  NInputNumber,
   NModal,
+  NSelect,
   NSpace,
   useMessage,
 } from "naive-ui";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
+import { DEFAULT_WALLPAPER_URL, useConsoleStore } from "@/stores/console";
 
 const auth = useAuthStore();
+const consoleUi = useConsoleStore();
 const message = useMessage();
 
 const displayUser = ref("");
@@ -25,6 +29,18 @@ const newUser = ref("");
 const newPass = ref("");
 const newPass2 = ref("");
 
+const wallUrl = ref(DEFAULT_WALLPAPER_URL);
+const wallFit = ref<"cover" | "contain" | "fill">("cover");
+const wallDim = ref(0.42);
+const wallSaving = ref(false);
+const defaultUrl = ref(DEFAULT_WALLPAPER_URL);
+
+const fitOptions = [
+  { label: "铺满裁切（cover）", value: "cover" },
+  { label: "完整显示（contain）", value: "contain" },
+  { label: "拉伸填满（fill）", value: "fill" },
+];
+
 async function loadMe() {
   try {
     const me = await api<{ username?: string; mustReconfigure?: boolean }>("/v1/admin/me", {
@@ -36,6 +52,66 @@ async function loadMe() {
   } catch {
     /* ignore */
   }
+}
+
+async function loadAppearance() {
+  try {
+    const res = await api<{
+      appearance?: {
+        wallpaperUrl?: string;
+        wallpaperFit?: "cover" | "contain" | "fill";
+        wallpaperDim?: number;
+      };
+      defaults?: { wallpaperUrl?: string };
+    }>("/v1/admin/console", { token: auth.token });
+    wallUrl.value = res.appearance?.wallpaperUrl || DEFAULT_WALLPAPER_URL;
+    wallFit.value = res.appearance?.wallpaperFit || "cover";
+    wallDim.value =
+      typeof res.appearance?.wallpaperDim === "number" ? res.appearance.wallpaperDim : 0.42;
+    defaultUrl.value = res.defaults?.wallpaperUrl || DEFAULT_WALLPAPER_URL;
+    if (res.appearance) consoleUi.applyLocal(res.appearance);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function saveAppearance() {
+  wallSaving.value = true;
+  try {
+    const res = await api<{
+      message?: string;
+      appearance?: {
+        wallpaperUrl: string;
+        wallpaperFit: "cover" | "contain" | "fill";
+        wallpaperDim: number;
+      };
+    }>("/v1/admin/console", {
+      method: "PUT",
+      token: auth.token,
+      body: JSON.stringify({
+        wallpaperUrl: wallUrl.value.trim() || defaultUrl.value,
+        wallpaperFit: wallFit.value,
+        wallpaperDim: wallDim.value,
+      }),
+    });
+    if (res.appearance) {
+      wallUrl.value = res.appearance.wallpaperUrl;
+      wallFit.value = res.appearance.wallpaperFit;
+      wallDim.value = res.appearance.wallpaperDim;
+      consoleUi.applyLocal(res.appearance);
+    }
+    message.success(res.message || "外观已保存");
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    wallSaving.value = false;
+  }
+}
+
+function resetWallpaperDefault() {
+  wallUrl.value = defaultUrl.value;
+  wallFit.value = "cover";
+  wallDim.value = 0.42;
 }
 
 function openPasswordModal() {
@@ -81,12 +157,11 @@ async function saveCredentials() {
         body: JSON.stringify({
           username: newUser.value.trim(),
           password: newPass.value,
-          confirmPassword: newPass2.value,
+          confirmPassword: newPass2.value || undefined,
         }),
       });
       message.success(res.message || "已设置，请重新登录");
       showPwd.value = false;
-      mustReconfigure.value = false;
       auth.logout();
       return;
     }
@@ -111,14 +186,17 @@ async function saveCredentials() {
   }
 }
 
-onMounted(() => void loadMe());
+onMounted(() => {
+  void loadMe();
+  void loadAppearance();
+});
 </script>
 
 <template>
   <div class="page">
     <header class="page-head">
       <h1>管理</h1>
-      <p class="muted">当前账号：{{ displayUser || "—" }}。改密从右侧点开，中央弹窗确认。</p>
+      <p class="muted">当前账号：{{ displayUser || "—" }}。改密与控制台壁纸都在本页。</p>
     </header>
 
     <div class="admin-row surface">
@@ -127,6 +205,41 @@ onMounted(() => void loadMe());
         <p class="muted">修改管理端登录密码；可选同时改用户名。</p>
       </div>
       <n-button type="primary" @click="openPasswordModal">修改</n-button>
+    </div>
+
+    <div class="surface wall-card">
+      <h2>控制台壁纸</h2>
+      <p class="hint">
+        默认地址
+        <code>{{ defaultUrl }}</code>
+        （本仓库图）。可改成任意 http(s) 链接或站点相对路径。
+      </p>
+      <label class="field">
+        壁纸地址
+        <n-input v-model:value="wallUrl" placeholder="/wallpapers/default.jpg" />
+      </label>
+      <label class="field">
+        铺放方式
+        <n-select v-model:value="wallFit" :options="fitOptions" />
+      </label>
+      <label class="field">
+        浅色遮罩（0～0.85，越大字越清晰）
+        <n-input-number
+          v-model:value="wallDim"
+          :min="0"
+          :max="0.85"
+          :step="0.05"
+          style="width: 100%"
+        />
+      </label>
+      <div class="wall-preview" :style="consoleUi.wallpaperStyle">
+        <div class="wall-preview-dim" :style="consoleUi.dimStyle" />
+        <span>预览</span>
+      </div>
+      <n-space>
+        <n-button type="primary" :loading="wallSaving" @click="saveAppearance">保存外观</n-button>
+        <n-button quaternary @click="resetWallpaperDefault">恢复默认地址</n-button>
+      </n-space>
     </div>
 
     <n-modal
@@ -177,6 +290,39 @@ onMounted(() => void loadMe());
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
+  margin-bottom: 14px;
+}
+.wall-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 16px 18px 18px;
+}
+.wall-card h2 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+  color: var(--amber);
+}
+.wall-preview {
+  position: relative;
+  height: 120px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  margin: 4px 0 14px;
+  display: grid;
+  place-items: center;
+}
+.wall-preview-dim {
+  position: absolute;
+  inset: 0;
+}
+.wall-preview span {
+  position: relative;
+  z-index: 1;
+  color: var(--ink);
+  font-weight: 600;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 .warn {
   color: var(--amber);
