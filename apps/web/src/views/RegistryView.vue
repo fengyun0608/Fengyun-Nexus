@@ -3,7 +3,6 @@ import { onMounted, ref } from "vue";
 import {
   NButton,
   NCard,
-  NInput,
   NSelect,
   NSpace,
   NSpin,
@@ -18,6 +17,7 @@ type RegistryInfo = {
   tokenConfigured?: boolean;
   tokenEnv?: string;
   pluginsRepo?: { url?: string; branch?: string } | null;
+  pluginsRepoLocked?: boolean;
   categories?: Array<{ id: string; label: string; path: string }>;
 };
 
@@ -39,7 +39,6 @@ const loading = ref(true);
 const publishing = ref(false);
 const checking = ref(false);
 const applying = ref(false);
-const savingRepo = ref(false);
 const err = ref("");
 const info = ref<RegistryInfo | null>(null);
 const plugins = ref<PluginItem[]>([]);
@@ -48,8 +47,6 @@ const category = ref("");
 const updateItems = ref<UpdateItem[]>([]);
 const updateMsg = ref("");
 const updateSource = ref("");
-const repoUrl = ref("");
-const repoBranch = ref("main");
 
 async function load() {
   loading.value = true;
@@ -61,36 +58,12 @@ async function load() {
     ]);
     info.value = r;
     plugins.value = p.items || [];
-    repoUrl.value = r.pluginsRepo?.url || "";
-    repoBranch.value = r.pluginsRepo?.branch || "main";
     if (!pluginId.value && plugins.value[0]) pluginId.value = plugins.value[0].id;
     if (!category.value && r.categories?.[0]) category.value = r.categories[0].id;
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
     loading.value = false;
-  }
-}
-
-async function saveRepo() {
-  savingRepo.value = true;
-  try {
-    const res = await api<{ message?: string; pluginsRepo?: RegistryInfo["pluginsRepo"] }>(
-      "/v1/registry",
-      {
-        method: "PATCH",
-        token: auth.token,
-        body: JSON.stringify({
-          pluginsRepo: { url: repoUrl.value.trim(), branch: repoBranch.value.trim() || "main" },
-        }),
-      },
-    );
-    if (info.value) info.value.pluginsRepo = res.pluginsRepo ?? { url: repoUrl.value, branch: repoBranch.value };
-    message.success(res.message || "已保存");
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e));
-  } finally {
-    savingRepo.value = false;
   }
 }
 
@@ -169,38 +142,28 @@ onMounted(() => void load());
   <div class="page">
     <header class="page-head">
       <h1>插件更新</h1>
-      <p class="muted">配置专仓、检测一致性，一键拉取后热重载。</p>
+      <p class="muted">对照官方系统插件专仓检测与拉取；专仓地址由发行配置锁定。</p>
     </header>
     <n-spin :show="loading">
       <p v-if="err" class="err">{{ err }}</p>
       <template v-else>
-        <n-card size="small" title="插件专仓" style="margin-bottom: 14px">
-          <p class="hint">
-            填独立插件仓地址；空着则对照本仓 origin 的 plugins/。
-            系统包可用 <code>pnpm pack:system-plugins</code> 抽出后推到该仓。
+        <n-card size="small" title="系统插件专仓" style="margin-bottom: 14px">
+          <p class="hint">官方地址，控制台不可改，避免被指到别处。</p>
+          <p class="repo">
+            {{ info?.pluginsRepo?.url || "未配置" }}
+            <span v-if="info?.pluginsRepo?.branch" class="hint">
+              · {{ info.pluginsRepo.branch }}
+            </span>
           </p>
-          <label class="field">
-            仓库 URL
-            <n-input v-model:value="repoUrl" placeholder="https://…/your-plugins-repo.git" clearable />
-          </label>
-          <label class="field">
-            分支
-            <n-input v-model:value="repoBranch" placeholder="main" style="max-width: 200px" />
-          </label>
-          <n-button type="primary" :loading="savingRepo" @click="saveRepo">保存专仓</n-button>
+          <n-tag v-if="info?.pluginsRepoLocked !== false" size="small" type="info" :bordered="false">
+            已锁定
+          </n-tag>
         </n-card>
 
         <div class="admin-row surface">
           <div>
             <strong>远程一致性</strong>
-            <p class="muted">
-              对照
-              {{
-                info?.pluginsRepo?.url
-                  ? info.pluginsRepo.url
-                  : "本仓 origin 的 plugins/（专仓 url 空着时）"
-              }}
-            </p>
+            <p class="muted">检测本地系统插件与官方专仓是否一致，可一键拉取并热重载。</p>
           </div>
           <n-space>
             <n-button type="primary" :loading="checking" @click="checkUpdates">检测更新</n-button>
@@ -291,7 +254,10 @@ onMounted(() => void load());
   gap: 6px;
   margin: 10px 0;
 }
-code {
-  font-size: 0.9em;
+.repo {
+  margin: 8px 0;
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
 }
 </style>

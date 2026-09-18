@@ -11,10 +11,11 @@ Fengyun Nexus 的插件生态面向两类能力：
 
 插件可从远程仓安装与更新（示例 / 基础 / 标准分类），也可在本地 `plugins/` 中开发。
 
-系统通用插件（菜单 / 生图 / 回声）可单独打成插件包发布：主仓执行 `pnpm pack:system-plugins`，得到 `packs/fengyun-system-plugins/`，推到你的插件专仓后，在控制台「插件更新」里填专仓地址即可检测与拉取。群里主人发 `#更新` / `#更新插件` 会拉框架与专仓，有一方更新则多群转发说明并重启。
+系统通用插件（菜单 / 状态 / 生图 / 回声）走官方专仓更新，地址写在发行配置里并锁定，控制台不能改。群里主人发 `#更新` / `#更新插件` 会拉框架与该专仓；有一方更新则多群转发说明并重启。
 
 - 远程仓：[GitCode · Fengyun-Nexus](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus)
-- 控制台：系统设置 → 插件管理（分层进入，可返回上一层）；插件更新页可配专仓
+- 系统插件专仓：[fengyun-system-plugins](https://gitcode.com/fengyunnb_admin/fengyun-system-plugins)
+- 控制台：插件管理；插件更新页可检测 / 拉取，专仓地址只读
 
 推荐开源许可：MIT。
 

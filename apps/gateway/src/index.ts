@@ -206,9 +206,24 @@ function persistAdmin(cfg: AdminConfig): void {
 }
 
 function loadRegistry(): RegistryConfig {
+  const shipped = loadJson<RegistryConfig>("configs/registry.json");
   const local = join(ROOT, "configs/registry.local.json");
-  if (existsSync(local)) return JSON.parse(readFileSync(local, "utf8")) as RegistryConfig;
-  return loadJson<RegistryConfig>("configs/registry.json");
+  if (!existsSync(local)) return shipped;
+  try {
+    const loc = JSON.parse(readFileSync(local, "utf8")) as Partial<RegistryConfig>;
+    // 可合并其它登记项；系统插件专仓地址以发行配置为准，禁止被 local / 控制台改掉
+    return {
+      ...shipped,
+      ...loc,
+      pluginsRepo: shipped.pluginsRepo,
+      categories: loc.categories ?? shipped.categories,
+      update: loc.update ?? shipped.update,
+      baseUrl: typeof loc.baseUrl === "string" ? loc.baseUrl : shipped.baseUrl,
+      tokenEnv: typeof loc.tokenEnv === "string" ? loc.tokenEnv : shipped.tokenEnv,
+    };
+  } catch {
+    return shipped;
+  }
 }
 
 function hashToken(token: string): string {
@@ -260,12 +275,7 @@ async function bootstrap(): Promise<void> {
   const profile = loadEnvProfile(envId);
   let adminCfg = loadAdmin();
   adminCfg.sessionHours = adminCfg.sessionHours || 12;
-  const registryLocal = join(ROOT, "configs/registry.local.json");
-  let registry = loadRegistry();
-
-  function persistRegistry(cfg: RegistryConfig): void {
-    writeFileSync(registryLocal, `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
-  }
+  const registry = loadRegistry();
   await bootStep(`运行姿态 → ${profile.id}（${profile.label}）`);
 
   function currentPassword(): string {
@@ -1453,6 +1463,8 @@ async function bootstrap(): Promise<void> {
       tokenEnv: registry.tokenEnv,
       update: registry.update,
       pluginsRepo: registry.pluginsRepo || null,
+      /** 专仓地址只读，发行配置锁定，控制台不可改 */
+      pluginsRepoLocked: true,
       categories: Object.entries(registry.categories).map(([id, c]) => ({
         id,
         label: c.label,
@@ -1461,25 +1473,16 @@ async function bootstrap(): Promise<void> {
     });
   });
 
-  /** 保存插件专仓地址等到 registry.local.json */
+  /** 专仓地址不可经 API 修改 */
   app.patch("/v1/registry", authMiddleware, (req, res) => {
-    const body = (req.body || {}) as {
-      pluginsRepo?: { url?: string; branch?: string } | null;
-    };
-    if (body.pluginsRepo !== undefined) {
-      const url = String(body.pluginsRepo?.url ?? "").trim();
-      const branch = String(body.pluginsRepo?.branch ?? "main").trim() || "main";
-      registry = {
-        ...registry,
-        pluginsRepo: url ? { url, branch } : { url: "", branch },
-      };
+    if (req.body?.pluginsRepo !== undefined) {
+      res.status(403).json({
+        error: "系统插件专仓地址已锁定，不可在控制台修改",
+        pluginsRepo: registry.pluginsRepo || null,
+      });
+      return;
     }
-    persistRegistry(registry);
-    res.json({
-      ok: true,
-      message: "已保存插件更新配置",
-      pluginsRepo: registry.pluginsRepo || null,
-    });
+    res.status(400).json({ error: "无可保存项" });
   });
 
   /** 对比本地 plugins/ 与远端是否一致 */

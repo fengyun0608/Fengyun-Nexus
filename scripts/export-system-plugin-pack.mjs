@@ -95,7 +95,7 @@ const readme = `# Fengyun Nexus · 系统插件包
 - 框架或系统插件**有一方有更新**：多群合并转发说明改了啥，然后同窗口重启
 - 两边都最新：只回执，不重启
 
-专仓地址默认：\`configs/registry.json\` → \`pluginsRepo.url\`。
+专仓地址写在宿主发行配置 \`configs/registry.json\` 的 \`pluginsRepo\`，**控制台不可改**。
 
 ## 截图与状态
 
