@@ -130,9 +130,10 @@ export function summarizeChangedAreas(
   }
 }
 
-/** 更新回执：版本 + 提交说明 + 范围统计，再提示重启 */
+/** 更新回执：以版本号为主 + 提交说明 + 范围统计，再提示重启 */
 export function buildUpdateReport(opts: {
   version: string;
+  beforeVersion?: string;
   updated: boolean;
   before: string;
   after: string;
@@ -141,12 +142,20 @@ export function buildUpdateReport(opts: {
   subjects?: string[];
   areas?: string;
 }): { reportText: string; forwardNodes: string[]; message: string; changeItems: string[] } {
-  const { version, updated, before, after, shortStat, overwritten, subjects = [], areas } =
-    opts;
+  const {
+    version,
+    beforeVersion,
+    updated,
+    shortStat,
+    overwritten,
+    subjects = [],
+    areas,
+  } = opts;
   const changeItems = [...subjects];
+  const fromVer = beforeVersion || version;
 
   if (!updated) {
-    const nodes = [`框架已是最新 ${version}`, `当前提交 ${short(after)}`];
+    const nodes = [`框架已是最新`, `版本 ${version}`];
     return {
       reportText: nodes.join("\n\n"),
       forwardNodes: nodes,
@@ -155,18 +164,19 @@ export function buildUpdateReport(opts: {
     };
   }
 
-  const head = [
-    `框架已更新到 ${version}`,
-    `${short(before)} → ${short(after)}`,
-  ].join("\n");
+  const verLine =
+    fromVer === version
+      ? `版本 ${version}（版本号未变，含代码更新）`
+      : `版本 ${fromVer} → ${version}`;
 
+  const head = [`框架已更新`, verLine].join("\n");
   const forwardNodes: string[] = [head];
 
   if (subjects.length) {
     const body = subjects.map((s, i) => `${i + 1}. ${s}`).join("\n");
-    forwardNodes.push(`本次提交说明\n${body}`);
+    forwardNodes.push(`本次更新说明\n${body}`);
   } else {
-    forwardNodes.push("本次提交说明\n（拿不到提交标题，仍有代码变更）");
+    forwardNodes.push("本次更新说明\n（拿不到说明标题，仍有代码变更）");
   }
 
   const statBits = [shortStat || "有改动，统计拿不到", areas].filter(Boolean);
@@ -176,11 +186,8 @@ export function buildUpdateReport(opts: {
   forwardNodes.push("下一步\n即将重启以加载新版本，请稍候");
 
   const reportText = forwardNodes.join("\n\n");
-  const tip =
-    subjects[0] ||
-    shortStat ||
-    "有代码变更";
-  const message = `框架已更新到 ${version}（${short(before)}→${short(after)}）\n要点：${tip}\n即将重启`;
+  const tip = subjects[0] || shortStat || "有代码变更";
+  const message = `框架已更新到 ${version}\n${verLine}\n要点：${tip}\n即将重启`;
 
   return { reportText, forwardNodes, message, changeItems };
 }
@@ -249,6 +256,16 @@ export function checkRemoteUpdate(root: string): UpdateCheckResult {
       remoteCommit && currentCommit && remoteCommit !== currentCommit,
     );
 
+    const sameVer = currentVersion === remoteVersion;
+    let message: string;
+    if (!updateAvailable) {
+      message = `已是最新 ${currentVersion}`;
+    } else if (sameVer) {
+      message = `发现更新：当前 ${currentVersion}，远端有新代码（版本号暂同）`;
+    } else {
+      message = `发现新版本 ${currentVersion} → ${remoteVersion}`;
+    }
+
     return {
       ok: true,
       currentVersion,
@@ -257,7 +274,7 @@ export function checkRemoteUpdate(root: string): UpdateCheckResult {
       remoteCommit: remoteCommit.slice(0, 7),
       updateAvailable,
       branch,
-      message: updateAvailable ? `发现新版本 ${remoteVersion}` : "已是最新",
+      message,
     };
   } catch (e) {
     return {
@@ -274,6 +291,7 @@ export function checkRemoteUpdate(root: string): UpdateCheckResult {
 export function applyRemoteUpdate(root: string): UpdateApplyResult {
   try {
     const before = git(root, ["rev-parse", "HEAD"]);
+    const beforeVersion = readLocalVersion(root);
     const branch = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]) || "main";
     const pullBranch = branch === "HEAD" ? "main" : branch;
     const remoteRef = `origin/${pullBranch}`;
@@ -324,6 +342,7 @@ export function applyRemoteUpdate(root: string): UpdateApplyResult {
 
     const built = buildUpdateReport({
       version,
+      beforeVersion,
       updated,
       before,
       after,

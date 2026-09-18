@@ -185,7 +185,6 @@ export function buildStatusLines(s: StatusShotInput): string[] {
   const net = networkDisplay(s);
   const lines: string[] = [];
   lines.push(`框架 Fengyun Nexus ${s.version}`);
-  if (s.commit) lines.push(`提交 ${s.commit}`);
   lines.push(`姿态 ${s.envLabel}（${s.envId}）`);
   lines.push(s.powerOff ? "电源 已关机" : `电源 运行中 · ${s.uptime}`);
   lines.push(`系统 ${os.osMain} · 主机 ${os.host}`);
@@ -377,12 +376,7 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
   const statusTone = s.powerOff ? "off" : online ? "on" : "wait";
   const stamp = new Date().toLocaleString("zh-CN", { hour12: false });
 
-  const botChips = [
-    `v${s.version}`,
-    s.commit ? `#${s.commit}` : "",
-    s.envLabel,
-    s.uptime,
-  ]
+  const botChips = [`v${s.version}`, s.envLabel, s.uptime]
     .filter(Boolean)
     .map((t) => `<span class="chip">${escapeHtml(t)}</span>`)
     .join("");
@@ -460,7 +454,6 @@ export function buildRestartOkLines(
 ): string[] {
   const lines: string[] = ["重启成功"];
   if (opts?.version) lines.push(`框架 ${opts.version}`);
-  if (opts?.commit) lines.push(`提交 ${opts.commit}`);
   if (opts?.previousUptime) lines.push(`上次运行 ${opts.previousUptime}`);
   const summary = (opts?.updateSummary || []).map((s) => String(s).trim()).filter(Boolean);
   if (summary.length) {
@@ -496,7 +489,6 @@ export function buildRestartOkPanelHtml(
   const summary = (opts?.updateSummary || []).map((s) => String(s).trim()).filter(Boolean);
   const chips = [
     opts?.version ? `v${opts.version}` : "",
-    opts?.commit ? `#${opts.commit}` : "",
     opts?.previousUptime ? `上次 ${opts.previousUptime}` : "",
   ]
     .filter(Boolean)

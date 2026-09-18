@@ -1838,7 +1838,11 @@ async function bootstrap(): Promise<void> {
     }
     const updateAvailable = Boolean(fw.updateAvailable) || plugins.available > 0;
     const bits: string[] = [];
-    if (fw.updateAvailable) bits.push(`框架 ${fw.remoteVersion || fw.currentVersion}`);
+    if (fw.updateAvailable) {
+      const cur = fw.currentVersion || "?";
+      const rem = fw.remoteVersion || cur;
+      bits.push(cur === rem ? `框架 ${cur}（有新代码）` : `框架 ${cur}→${rem}`);
+    }
     if (plugins.available) bits.push(`系统插件 ${plugins.available} 个`);
     res.status(fw.ok ? 200 : 502).json({
       ...fw,
@@ -1846,7 +1850,7 @@ async function bootstrap(): Promise<void> {
       message: updateAvailable
         ? `发现更新：${bits.join(" + ")}`
         : fw.ok
-          ? "框架与系统插件均已是最新"
+          ? `已是最新 ${fw.currentVersion || ""}`
           : fw.message,
       plugins,
     });

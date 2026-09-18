@@ -130,10 +130,10 @@ onMounted(() => void loadBot());
     >
       <template v-if="!applyReport">
         <p v-if="updateInfo" class="upd-line">
-          框架 {{ updateInfo.currentVersion }} → {{ updateInfo.remoteVersion || "—" }}
-        </p>
-        <p v-if="updateInfo" class="hint mono">
-          {{ updateInfo.currentCommit || "?" }} → {{ updateInfo.remoteCommit || "?" }}
+          版本 {{ updateInfo.currentVersion || "?" }}
+          <template v-if="updateInfo.updateAvailable">
+            → {{ updateInfo.remoteVersion || updateInfo.currentVersion || "?" }}
+          </template>
         </p>
         <p class="hint">{{ updateInfo?.message }}</p>
         <div v-if="updateInfo?.plugins?.items?.length" class="plugin-box">

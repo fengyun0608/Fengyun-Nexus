@@ -54,16 +54,10 @@ export function applyFullUpdate(
       updateSummary.push(`框架：${item}`);
     }
     if (!(fw.changeItems || []).length) {
-      updateSummary.push(
-        `框架 ${fw.version || "?"}（${fw.beforeCommit || "?"}→${fw.afterCommit || "?"}）`,
-      );
+      updateSummary.push(`框架 ${fw.version || "?"}`);
     }
   } else {
-    pushNodes(
-      nodes,
-      `框架已是最新 ${fw.version || "?"}`,
-      fw.afterCommit ? `当前提交 ${fw.afterCommit}` : undefined,
-    );
+    pushNodes(nodes, `框架已是最新`, `版本 ${fw.version || "?"}`);
   }
 
   // —— 系统插件专仓 ——
