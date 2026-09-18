@@ -15,6 +15,7 @@ import {
   uptime as osUptime,
 } from "node:os";
 import { memoryUsage } from "node:process";
+import { getHeapStatistics } from "node:v8";
 
 export type StatusShotInput = {
   version: string;
@@ -135,8 +136,9 @@ export function collectOsMetrics(): OsMetrics {
   const used = tot - free;
   const memPct = tot ? Math.round((used / tot) * 100) : 0;
   const mu = memoryUsage();
-  const heapTot = mu.heapTotal || 1;
-  const nodePct = Math.round((mu.heapUsed / heapTot) * 100);
+  // heapTotal 只是当前已扩容的堆，常用到 80%+ 很正常，不当成堵塞
+  const heapLimit = getHeapStatistics().heap_size_limit || mu.heapTotal || 1;
+  const nodePct = Math.min(100, Math.round((mu.heapUsed / heapLimit) * 100));
   const cpuList = cpus();
   const model = (cpuList[0]?.model || "CPU").replace(/\s+/g, " ").trim();
   return {
@@ -146,7 +148,7 @@ export function collectOsMetrics(): OsMetrics {
     memTotal: formatBytes(tot),
     nodePct,
     nodeUsed: formatBytes(mu.heapUsed),
-    nodeTotal: formatBytes(heapTot),
+    nodeTotal: formatBytes(heapLimit),
     osMain: `${type()} ${release()}`,
     osSecondary: platform(),
     host: hostname(),
@@ -426,7 +428,7 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
       <div class="rings">
         ${ringHtml("CPU", os.cpuPct, `${os.cores} 核 · ${os.cpuModel}`)}
         ${ringHtml("内存", os.memPct, `${os.memUsed} / ${os.memTotal}`)}
-        ${ringHtml("Node", os.nodePct, `堆 ${os.nodeUsed} / ${os.nodeTotal}`)}
+        ${ringHtml("Node", os.nodePct, `堆 ${os.nodeUsed} / 上限 ${os.nodeTotal}`)}
       </div>
     </div>
 
