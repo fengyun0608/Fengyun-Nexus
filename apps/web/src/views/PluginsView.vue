@@ -19,11 +19,14 @@ type PluginItem = {
   id: string;
   name?: string;
   version?: string;
+  author?: string;
+  description?: string;
   enabled?: boolean;
   kind?: "channel" | "framework";
   adapterScope?: "all" | "channel" | "specified";
   channels?: string[];
   configSupported?: boolean;
+  category?: string;
 };
 
 type ChannelItem = { id: string; label?: string; masters?: string[] };
@@ -35,6 +38,10 @@ type DevPlugin = {
   modular?: boolean;
   layout?: string[];
   name?: string;
+  version?: string;
+  author?: string;
+  description?: string;
+  category?: string;
 };
 
 type Layer =
@@ -65,6 +72,27 @@ const cfgSupported = ref(false);
 const cfgMsg = ref("");
 const cfgSchema = ref<Array<{ key: string; label: string; type?: string }>>([]);
 const cfgValues = ref<Record<string, unknown>>({});
+
+const showCreate = ref(false);
+const creating = ref(false);
+const createForm = ref({
+  id: "",
+  name: "",
+  version: "0.1.0",
+  author: "",
+  description: "",
+  kind: "framework" as "framework" | "channel",
+});
+const createResult = ref<{
+  path?: string;
+  message?: string;
+  docs?: Array<{ title: string; path: string }>;
+} | null>(null);
+const pluginGuide = ref<{
+  pluginsDir?: string;
+  docs?: Array<{ title: string; path: string }>;
+  steps?: string[];
+} | null>(null);
 
 const frameworkPlugins = computed(() =>
   plugins.value.filter((p) => p.adapterScope === "all" || p.kind === "framework"),
@@ -105,13 +133,22 @@ async function refresh() {
     const [rt, ch, dev] = await Promise.all([
       api<{ items: PluginItem[] }>("/v1/plugins", { token: auth.token }),
       api<{ items: ChannelItem[] }>("/v1/channels", { token: auth.token }),
-      api<{ items: DevPlugin[] }>("/v1/admin/dev/plugins", { token: auth.token }).catch(() => ({
+      api<{
+        items: DevPlugin[];
+        guide?: {
+          pluginsDir?: string;
+          docs?: Array<{ title: string; path: string }>;
+          steps?: string[];
+        };
+      }>("/v1/admin/dev/plugins", { token: auth.token }).catch(() => ({
         items: [] as DevPlugin[],
+        guide: undefined,
       })),
     ]);
     plugins.value = rt.items || [];
     channels.value = ch.items || [];
     devItems.value = dev.items || [];
+    pluginGuide.value = dev.guide || null;
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {
@@ -246,6 +283,70 @@ async function saveFile() {
   }
 }
 
+function openCreateLocal() {
+  createResult.value = null;
+  createForm.value = {
+    id: "",
+    name: "",
+    version: "0.1.0",
+    author: "",
+    description: "",
+    kind: "framework",
+  };
+  showCreate.value = true;
+  if (!pluginGuide.value) {
+    void api<{
+      pluginsDir?: string;
+      docs?: Array<{ title: string; path: string }>;
+      steps?: string[];
+    }>("/v1/admin/dev/new-plugin", { token: auth.token })
+      .then((g) => {
+        pluginGuide.value = g;
+      })
+      .catch(() => undefined);
+  }
+}
+
+async function submitCreateLocal() {
+  creating.value = true;
+  createResult.value = null;
+  try {
+    const res = await api<{
+      ok?: boolean;
+      path?: string;
+      message?: string;
+      docs?: Array<{ title: string; path: string }>;
+      error?: string;
+    }>("/v1/admin/dev/plugins", {
+      method: "POST",
+      token: auth.token,
+      body: JSON.stringify(createForm.value),
+    });
+    createResult.value = {
+      path: res.path,
+      message: res.message,
+      docs: res.docs,
+    };
+    message.success(res.message || "已创建本地插件");
+    await refresh();
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    creating.value = false;
+  }
+}
+
+function metaLine(p: PluginItem): string {
+  const hit = findDev(p);
+  const bits = [
+    p.id,
+    p.version || hit?.version ? `v${p.version || hit?.version}` : "",
+    p.author || hit?.author ? `作者 ${p.author || hit?.author}` : "",
+    hit?.dir ? `路径 plugins/${hit.dir}` : "",
+  ].filter(Boolean);
+  return bits.join(" · ");
+}
+
 onMounted(() => void refresh());
 </script>
 
@@ -276,11 +377,16 @@ onMounted(() => void refresh());
 
     <n-space style="margin-bottom: 12px">
       <n-button size="small" :loading="loading" @click="refresh">刷新</n-button>
+      <n-button size="small" type="primary" @click="openCreateLocal">创建本地插件</n-button>
       <n-button v-if="layer.step !== 'home'" size="small" quaternary @click="backLayer">返回上一层</n-button>
     </n-space>
 
     <n-spin :show="loading">
       <div v-if="layer.step === 'home'" class="layer-grid tight">
+        <button type="button" class="layer-card" @click="openCreateLocal">
+          <strong>创建本地插件</strong>
+          <span>生成本机 plugins/ 目录骨架，填名称 / 版本 / 作者，再按文档编写。</span>
+        </button>
         <button type="button" class="layer-card" @click="layer = { step: 'channels' }">
           <strong>消息通道插件包</strong>
           <span>绑定某一消息通道（如 QQ）的插件，写法与通道事件相关。</span>
@@ -332,10 +438,22 @@ onMounted(() => void refresh());
         <div v-for="p in listPlugins" :key="p.id" class="list-row">
           <div>
             <strong>{{ p.name || p.id }}</strong>
+            <div class="hint">{{ metaLine(p) }}</div>
+            <div v-if="p.description || findDev(p)?.description" class="hint">
+              {{ p.description || findDev(p)?.description }}
+            </div>
             <div class="hint">
-              {{ p.id }}
-              <n-tag v-if="findDev(p)?.modular" size="tiny" type="success" :bordered="false" style="margin-left: 6px">
+              <n-tag v-if="findDev(p)?.modular" size="tiny" type="success" :bordered="false">
                 模块化
+              </n-tag>
+              <n-tag
+                v-if="(p.category || findDev(p)?.category) === 'local'"
+                size="tiny"
+                type="info"
+                :bordered="false"
+                style="margin-left: 6px"
+              >
+                本地
               </n-tag>
               <span v-if="!p.enabled"> · 已停用</span>
             </div>
@@ -379,6 +497,57 @@ onMounted(() => void refresh());
         </template>
       </div>
     </n-spin>
+
+    <n-modal
+      v-model:show="showCreate"
+      preset="card"
+      title="创建本地插件"
+      :style="{ width: 'min(560px, 94vw)' }"
+    >
+      <p class="hint">
+        会写到本机目录
+        <code>{{ pluginGuide?.pluginsDir || "plugins/" }}</code>
+        ，创建后按文档继续编写。
+      </p>
+      <template v-if="!createResult">
+        <label class="field">插件 id（英文） <n-input v-model:value="createForm.id" placeholder="例如 z.hello" /></label>
+        <label class="field">插件名称 <n-input v-model:value="createForm.name" placeholder="中文显示名" /></label>
+        <label class="field">版本 <n-input v-model:value="createForm.version" placeholder="0.1.0" /></label>
+        <label class="field">作者 <n-input v-model:value="createForm.author" placeholder="你的名字" /></label>
+        <label class="field">说明 <n-input v-model:value="createForm.description" type="textarea" :rows="2" /></label>
+        <label class="field">
+          类型
+          <select v-model="createForm.kind" class="kind-select">
+            <option value="framework">系统通用</option>
+            <option value="channel">消息通道</option>
+          </select>
+        </label>
+        <div v-if="pluginGuide?.docs?.length" class="docs-mini">
+          <strong>编写文档</strong>
+          <ul>
+            <li v-for="d in pluginGuide.docs" :key="d.path"><code>{{ d.path }}</code> — {{ d.title }}</li>
+          </ul>
+        </div>
+      </template>
+      <template v-else>
+        <p class="ok-line">{{ createResult.message }}</p>
+        <p class="hint">路径：<code>{{ createResult.path }}</code></p>
+        <div v-if="createResult.docs?.length" class="docs-mini">
+          <strong>接下来看这些文档开始写</strong>
+          <ul>
+            <li v-for="d in createResult.docs" :key="d.path"><code>{{ d.path }}</code> — {{ d.title }}</li>
+          </ul>
+        </div>
+      </template>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showCreate = false">关闭</n-button>
+          <n-button v-if="!createResult" type="primary" :loading="creating" @click="submitCreateLocal">
+            创建
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
 
     <n-modal
       v-model:show="showCfg"
@@ -456,6 +625,29 @@ onMounted(() => void refresh());
 }
 .docs strong {
   color: var(--amber);
+}
+.docs-mini {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.docs-mini ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.kind-select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  color: var(--ink);
+}
+.ok-line {
+  color: var(--amber);
+  font-weight: 600;
 }
 .code {
   width: 100%;

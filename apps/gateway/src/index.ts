@@ -62,7 +62,14 @@ import {
   readPluginFile,
   scaffoldPluginGuide,
   writePluginFile,
+  createLocalPlugin,
 } from "./plugin-files.js";
+import {
+  createLocalWorkflow,
+  listLocalWorkflows,
+  scaffoldWorkflowGuide,
+  toWorkflowDef,
+} from "./workflow-files.js";
 import { pathToFileURL } from "node:url";
 import { renderHtmlShot, renderMenuShot } from "./menu-shot.js";
 import { makePluginCtx, setPluginRuntime } from "./plugin-ctx.js";
@@ -393,7 +400,10 @@ async function bootstrap(): Promise<void> {
       { id: "d1", type: "delay", config: { ms: 10 }, next: [] },
     ],
   });
-  await bootStep("  · 注册工作流 starter");
+  for (const w of listLocalWorkflows(ROOT)) {
+    workflows.register(toWorkflowDef(w));
+  }
+  await bootStep(`  · 工作流 ${workflows.list().length} 个`);
 
   await bootStep("初始化：MCP Host…");
   const mcp = new McpHost();
@@ -1310,7 +1320,47 @@ async function bootstrap(): Promise<void> {
   });
 
   app.get("/v1/workflows", (_req, res) => {
-    res.json({ items: workflows.list() });
+    const local = listLocalWorkflows(ROOT);
+    const byId = new Map(local.map((w) => [w.id, w]));
+    res.json({
+      items: workflows.list().map((w) => {
+        const meta = byId.get(w.id);
+        return {
+          id: w.id,
+          name: w.name,
+          description: meta?.description,
+          author: meta?.author,
+          file: meta?.file,
+          local: Boolean(meta),
+        };
+      }),
+      guide: scaffoldWorkflowGuide(ROOT),
+    });
+  });
+
+  app.post("/v1/workflows", authMiddleware, (req, res) => {
+    const body = (req.body ?? {}) as {
+      id?: string;
+      name?: string;
+      description?: string;
+      author?: string;
+    };
+    const created = createLocalWorkflow(ROOT, {
+      id: String(body.id || ""),
+      name: String(body.name || ""),
+      description: body.description ? String(body.description) : undefined,
+      author: body.author ? String(body.author) : undefined,
+    });
+    if (!created.ok) {
+      res.status(400).json({ error: created.error });
+      return;
+    }
+    workflows.register(toWorkflowDef(created.workflow));
+    log.ok(`已创建本地工作流 ${created.path}`);
+    res.json({
+      ...created,
+      items: workflows.list(),
+    });
   });
 
   app.post("/v1/workflows/:id/run", authMiddleware, async (req, res) => {
@@ -1933,6 +1983,37 @@ async function bootstrap(): Promise<void> {
 
   app.get("/v1/admin/dev/new-plugin", authMiddleware, (_req, res) => {
     res.json({ ok: true, ...scaffoldPluginGuide(ROOT) });
+  });
+
+  app.post("/v1/admin/dev/plugins", authMiddleware, async (req, res) => {
+    const body = (req.body ?? {}) as {
+      id?: string;
+      name?: string;
+      version?: string;
+      author?: string;
+      description?: string;
+      kind?: "framework" | "channel";
+    };
+    const created = createLocalPlugin(ROOT, {
+      id: String(body.id || ""),
+      name: String(body.name || ""),
+      version: body.version ? String(body.version) : undefined,
+      author: body.author ? String(body.author) : undefined,
+      description: body.description ? String(body.description) : undefined,
+      kind: body.kind === "channel" ? "channel" : "framework",
+    });
+    if (!created.ok) {
+      res.status(400).json({ error: created.error });
+      return;
+    }
+    const reload = await reloadPlugins(pluginHotDeps);
+    log.ok(`已创建本地插件 ${created.path}`);
+    res.json({
+      ...created,
+      reload,
+      items: plugins.listConsole(),
+      guide: scaffoldPluginGuide(ROOT),
+    });
   });
 
   const staticRoot = existsSync(join(WEB_DIST, "index.html"))

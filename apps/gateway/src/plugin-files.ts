@@ -54,6 +54,10 @@ export function listPluginDirs(root: string): Array<{
   /** 已有的分目录 */
   layout: string[];
   name?: string;
+  version?: string;
+  author?: string;
+  description?: string;
+  category?: string;
 }> {
   const base = pluginsRoot(root);
   if (!existsSync(base)) return [];
@@ -83,20 +87,25 @@ export function listPluginDirs(root: string): Array<{
       });
       let id = dir;
       let name: string | undefined;
+      let version: string | undefined;
+      let author: string | undefined;
+      let description: string | undefined;
+      let category: string | undefined;
       const manPath = join(abs, "nexus.plugin.json");
       if (existsSync(manPath)) {
         try {
-          const j = JSON.parse(readFileSync(manPath, "utf8")) as {
-            id?: string;
-            name?: string;
-          };
+          const j = JSON.parse(readFileSync(manPath, "utf8")) as Record<string, unknown>;
           if (j.id) id = String(j.id);
-          if (j.name) name = String(j.name);
+          if (typeof j.name === "string") name = j.name;
+          if (typeof j.version === "string") version = j.version;
+          if (typeof j.author === "string") author = j.author;
+          if (typeof j.description === "string") description = j.description;
+          if (typeof j.category === "string") category = j.category;
         } catch {
           /* ignore */
         }
       }
-      return { id, dir, hasIndex, modular, layout, name };
+      return { id, dir, hasIndex, modular, layout, name, version, author, description, category };
     });
 }
 
@@ -160,21 +169,192 @@ export function writePluginFile(
 export function scaffoldPluginGuide(root: string): {
   pluginsDir: string;
   templateDir: string;
+  docs: Array<{ title: string; path: string }>;
   steps: string[];
 } {
   const pluginsDir = pluginsRoot(root);
   const templateDir = join(pluginsDir, "templates", "ts-plugin");
+  const docs = [
+    { title: "插件生态介绍", path: "docs/ecosystem/plugins.md" },
+    { title: "通道插件说明", path: "docs/ecosystem/channel-plugins.md" },
+    { title: "简单模板", path: "plugins/templates/ts-plugin" },
+    { title: "模块化模板", path: "plugins/templates/modular-plugin" },
+  ];
   return {
     pluginsDir,
     templateDir: existsSync(templateDir) ? templateDir : pluginsDir,
+    docs,
     steps: [
-      `在 ${pluginsDir} 下新建目录，例如 my-plugin`,
-      existsSync(templateDir)
-        ? `可复制 templates/ts-plugin，或 templates/modular-plugin（分目录写法）`
-        : "目录内放 index.ts，或 plugin/*.ts",
-      "manifest.id 用英文；manifest.name 写中文显示名",
-      "分目录可选：adapter / plugin / workflow / http / events / www",
-      "保存后热重载；群里用 #帮助 验证",
+      `本地插件目录：${pluginsDir}`,
+      "控制台「创建本地插件」会生成目录与骨架",
+      "manifest.id 用英文；name / author / version 给人看",
+      "打开文档与模板后改规则，保存后热重载",
+      "群里用 #帮助 或你的指令验证",
     ],
   };
 }
+
+function slugDir(id: string): string {
+  const s = id
+    .trim()
+    .replace(/^@[^/]+\//, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^\.+/, "")
+    .replace(/-+/g, "-");
+  return s || "local-plugin";
+}
+
+export type CreateLocalPluginInput = {
+  id: string;
+  name: string;
+  version?: string;
+  author?: string;
+  description?: string;
+  kind?: "framework" | "channel";
+};
+
+export function createLocalPlugin(
+  root: string,
+  input: CreateLocalPluginInput,
+):
+  | {
+      ok: true;
+      id: string;
+      dir: string;
+      path: string;
+      docs: Array<{ title: string; path: string }>;
+      message: string;
+    }
+  | { ok: false; error: string } {
+  const id = String(input.id || "").trim();
+  const name = String(input.name || "").trim();
+  if (!/^[a-z][a-z0-9._-]*$/i.test(id)) {
+    return { ok: false, error: "插件 id 须为英文：字母开头，仅 a-z 0-9 . _ -" };
+  }
+  if (!name) return { ok: false, error: "请填写插件名称" };
+  const dir = slugDir(id);
+  const base = pluginsRoot(root);
+  const abs = join(base, dir);
+  if (existsSync(abs)) {
+    return { ok: false, error: `目录已存在：plugins/${dir}` };
+  }
+  const version = String(input.version || "0.1.0").trim() || "0.1.0";
+  const author = String(input.author || "").trim();
+  const description = String(input.description || "").trim() || "本地插件";
+  const kind = input.kind === "channel" ? "channel" : "framework";
+  const adapterScope = kind === "framework" ? "all" : "specified";
+  const cmd = id.includes(".") ? id.split(".").pop()! : id;
+
+  mkdirSync(abs, { recursive: true });
+  const man = {
+    id,
+    name,
+    version,
+    author: author || undefined,
+    description,
+    main: "index.ts",
+    priority: 2000,
+    hooks: ["onMessage", "onReady"],
+    permissions: ["channel.send"],
+    category: "local",
+    kind,
+    adapterScope,
+  };
+  writeFileSync(join(abs, "nexus.plugin.json"), `${JSON.stringify(man, null, 2)}\n`, "utf8");
+  writeFileSync(
+    join(abs, "package.json"),
+    `${JSON.stringify(
+      {
+        name: `@local/${dir}`,
+        version,
+        private: true,
+        type: "module",
+        dependencies: { "@fengyun/nexus-plugin-sdk": "workspace:*" },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  writeFileSync(
+    join(abs, "README.md"),
+    `# ${name}
+
+本地插件骨架。请先阅读：
+
+- \`docs/ecosystem/plugins.md\`
+- \`docs/ecosystem/channel-plugins.md\`
+- 模板：\`plugins/templates/ts-plugin\` / \`plugins/templates/modular-plugin\`
+
+目录：\`plugins/${dir}\`
+
+改完保存后热重载即可；群里用 \`#${cmd} 你好\` 试一下。
+`,
+    "utf8",
+  );
+  const className =
+    "Z" +
+    dir
+      .split(/[._-]+/)
+      .filter(Boolean)
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+      .join("") +
+    "Plugin";
+  writeFileSync(
+    join(abs, "index.ts"),
+    `import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
+
+/** 本地插件：${name} */
+export class ${className} extends Plugin {
+  manifest = {
+    id: ${JSON.stringify(id)},
+    name: ${JSON.stringify(name)},
+    version: ${JSON.stringify(version)},
+    ${author ? `author: ${JSON.stringify(author)},` : ""}
+    description: ${JSON.stringify(description)},
+    priority: 2000,
+    category: "local" as const,
+    kind: ${JSON.stringify(kind)} as const,
+    adapterScope: ${JSON.stringify(adapterScope)} as const,
+    permissions: ["channel.send" as const],
+  };
+
+  rule = [
+    {
+      reg: ${JSON.stringify("^#" + cmd + "\\s*(.*)$")},
+      fnc: "hello",
+      describe: ${JSON.stringify(name)},
+    },
+  ];
+
+  async onReady(ctx: PluginContext) {
+    ctx.log(${JSON.stringify(`${name} 就绪`)});
+  }
+
+  async hello(e: NexusEvent) {
+    const m = e.msg.match(/^#${cmd}\\s*(.*)$/);
+    const tip = (m?.[1] || "").trim();
+    await e.reply(
+      tip
+        ? \`收到：\${tip}\`
+        : ${JSON.stringify(`${name} 已响应。请看 docs/ecosystem/plugins.md 继续编写。`)},
+    );
+  }
+}
+
+export default new ${className}();
+`,
+    "utf8",
+  );
+
+  const guide = scaffoldPluginGuide(root);
+  return {
+    ok: true,
+    id,
+    dir,
+    path: join("plugins", dir),
+    docs: guide.docs,
+    message: `已创建本地插件 plugins/${dir}，请按文档继续编写`,
+  };
+}
+

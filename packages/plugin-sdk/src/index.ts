@@ -21,6 +21,10 @@ export interface PluginManifest {
    */
   name: string;
   version: string;
+  /** 插件作者显示名 */
+  author?: string;
+  /** 一句话说明 */
+  description?: string;
   engines?: { nexus?: string };
   main?: string;
   permissions?: PluginPermission[];
