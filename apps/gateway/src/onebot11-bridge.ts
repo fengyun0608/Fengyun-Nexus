@@ -1,8 +1,39 @@
 import type { Server } from "node:http";
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { OneBot11Channel, type Ob11MessageEvent } from "@fengyun/nexus-channel";
 import type { NexusMessage } from "@fengyun/nexus-shared";
 import { log } from "./log.js";
+
+/** NapCat 吃不稳中文路径的 file://，也不认 SVG；本地图改 base64:// */
+function rewriteCqImagesForOneBot(text: string): string {
+  return text.replace(/\[CQ:image,file=([^\]]+)\]/gi, (_all, raw: string) => {
+    const src = String(raw || "").trim();
+    if (!src) return "[CQ:image,file=]";
+    if (/^(base64|https?):\/\//i.test(src)) return `[CQ:image,file=${src}]`;
+    let filePath = src;
+    try {
+      if (/^file:/i.test(src)) filePath = fileURLToPath(src);
+    } catch {
+      return "（图片路径无效）";
+    }
+    if (!existsSync(filePath)) return "（图片文件不存在）";
+    if (/\.svg$/i.test(filePath)) {
+      return "（未装浏览器运行时，菜单图未能发给 QQ。可在控制台「环境配置」安装 Chromium，或网页对话里查看。）";
+    }
+    if (!/\.(png|jpe?g|gif|webp|bmp)$/i.test(filePath)) {
+      return "（不支持的图片格式）";
+    }
+    try {
+      const b64 = readFileSync(filePath).toString("base64");
+      return `[CQ:image,file=base64://${b64}]`;
+    } catch (e) {
+      log.warn(`OneBot 读图失败：${e instanceof Error ? e.message : String(e)}`);
+      return "（读图失败）";
+    }
+  });
+}
 
 export type OneBotBotConfig = {
   /** 机器人 QQ；空则连上后再认 */
@@ -433,9 +464,10 @@ export class OneBot11Bridge {
   }
 
   async sendText(text: string, ctx: NexusMessage, prefer?: WebSocket): Promise<boolean> {
+    const payload = rewriteCqImagesForOneBot(text);
     const params = this.channel.toSendParams({
       ...ctx,
-      content: text,
+      content: payload,
       userId: ctx.userId,
     });
     const botId = String(ctx.meta?.botId || ctx.meta?.selfId || "");

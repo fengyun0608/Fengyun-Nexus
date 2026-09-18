@@ -9,7 +9,6 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const isWin = process.platform === "win32";
-const pnpmCmd = isWin ? "pnpm.cmd" : "pnpm";
 
 const ANSI = {
   reset: "\x1b[0m",
@@ -106,22 +105,53 @@ function nodeMajor() {
   return Number(m);
 }
 
+/** cmd.exe 参数转义（Node 24 不能直接 spawn .cmd，且 shell:true 会触发 DEP0190） */
+function escapeCmdArg(arg) {
+  const s = String(arg);
+  if (!/[ \t"&<>|^()%!]/.test(s)) return s;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+/**
+ * 拉起 pnpm。Windows 走 cmd.exe /d /s /c，避免 Node 24 对 .cmd 报 spawn EINVAL。
+ */
+function spawnPnpm(args, extra = {}) {
+  const env = {
+    ...process.env,
+    // Termux/android-arm64: never fetch @pnpm/exe native binary
+    NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS: "false",
+    ...(extra.env || {}),
+  };
+  const opts = {
+    cwd: root,
+    stdio: "inherit",
+    shell: false,
+    env,
+    windowsHide: true,
+    ...extra,
+    env,
+    shell: false,
+  };
+  if (isWin) {
+    const line = `"${["pnpm", ...args].map(escapeCmdArg).join(" ")}"`;
+    return spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", line], {
+      ...opts,
+      windowsVerbatimArguments: true,
+    });
+  }
+  return spawn("pnpm", args, opts);
+}
+
 function run(args) {
   return new Promise((resolve, reject) => {
-    const env = {
-      ...process.env,
-      // Termux/android-arm64: never fetch @pnpm/exe native binary
-      NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS: "false",
-    };
-    const child = spawn(pnpmCmd, args, {
-      cwd: root,
-      stdio: "inherit",
-      // Windows 用 pnpm.cmd 时不必再 shell:true，避免 DEP0190
-      shell: false,
-      env,
-      windowsHide: true,
+    const child = spawnPnpm(args);
+    child.on("error", (err) => {
+      reject(
+        new Error(
+          `无法启动 pnpm：${err.message}（Node ${process.versions.node}${isWin ? " / Windows" : ""}）`,
+        ),
+      );
     });
-    child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) resolve(0);
       else reject(new Error(`pnpm ${args.join(" ")} exited ${code}`));
@@ -131,19 +161,15 @@ function run(args) {
 
 /** Like run(), but returns exit code instead of throwing (for restart loop). */
 function runCode(args) {
-  return new Promise((resolve) => {
-    const env = {
-      ...process.env,
-      NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS: "false",
-    };
-    const child = spawn(pnpmCmd, args, {
-      cwd: root,
-      stdio: "inherit",
-      shell: false,
-      env,
-      windowsHide: true,
+  return new Promise((resolve, reject) => {
+    const child = spawnPnpm(args);
+    child.on("error", (err) => {
+      reject(
+        new Error(
+          `无法启动 pnpm：${err.message}（Node ${process.versions.node}${isWin ? " / Windows" : ""}）`,
+        ),
+      );
     });
-    child.on("error", () => resolve(1));
     child.on("exit", (code, signal) => {
       if (signal) resolve(1);
       else resolve(code ?? 0);
@@ -361,6 +387,10 @@ function formatWinCrashHint(code) {
 main().catch((e) => {
   const msg = e.message || String(e);
   bootLog("ERROR", ANSI.red, msg);
+  if (/spawn EINVAL|无法启动 pnpm/i.test(msg)) {
+    bootLog("INFO", ANSI.cyan, "处理建议：Node 24 需经 cmd 拉起 pnpm；已修复请再试 start.bat");
+    bootLog("INFO", ANSI.cyan, "  或手动：pnpm --filter @fengyun/nexus-gateway start");
+  }
   if (/0xC0000409|3221226505|-1073740791/i.test(msg)) {
     bootLog("INFO", ANSI.cyan, "处理建议：");
     bootLog("INFO", ANSI.cyan, "  1. 关掉所有 Fengyun Nexus / node 相关 CMD 窗口");
