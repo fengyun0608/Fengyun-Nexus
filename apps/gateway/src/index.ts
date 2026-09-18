@@ -2629,7 +2629,7 @@ async function bootstrap(): Promise<void> {
   const server = app.listen(port, host, () => {
     onebot.attach(server);
     if (host === "0.0.0.0" || host === "::") {
-      log.info(`进程绑定 ${host}:${port}，外网网卡都能进。127.0.0.1 只是本机快捷方式`);
+      log.info(`进程绑定 ${host}:${port}`);
       log.info("云服务器请在安全组放行这个 TCP 端口。别的端口连不上");
     } else {
       log.info(`进程只绑定 ${host}:${port}。外网要改成不设 HOST，或 HOST=0.0.0.0`);

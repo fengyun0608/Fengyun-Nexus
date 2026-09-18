@@ -598,7 +598,7 @@ boot_now() {
   cd "$INSTALL_DIR"
   export NEXUS_ENV
   log "启动  姿态=$NEXUS_ENV"
-  log "进程绑定 0.0.0.0:8787，外网网卡都能进。127.0.0.1 只是本机快捷方式"
+  log "进程绑定 0.0.0.0:8787"
   local pub
   pub="$(public_ipv4)"
   if [ -n "$pub" ]; then
