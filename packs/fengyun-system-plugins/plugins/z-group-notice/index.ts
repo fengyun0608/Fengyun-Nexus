@@ -24,21 +24,6 @@ const LEAVE = [
   "行吧，你走。口袋里的糖自己带着，我才不追。",
 ].join("\n");
 
-const KICK = [
-  "被拎出去了？活该。要是冤的，再来找我。",
-  "哼，被踢了吧。惹谁了，小鬼。",
-  "踢了就踢了。亲戚也不护短到这种程度。",
-  "出去冷静一下。想清楚了再回来，我才懒得拦。",
-  "被请出去啦。真丢人。下次乖一点。",
-  "啧，当众被踢。脸还要不要。想回来再说。",
-].join("\n");
-
-const SELF_JOIN = [
-  "本小姐到了。都给我乖一点，家里我罩着。",
-  "哼，我来了。别惹事，惹事我可嫌弃你们。",
-  "到家了。谁敢欺负人，先过我这关。",
-].join("\n");
-
 function pick(raw: string, fallback: string): string {
   const lines = raw
     .split(/\n+/)
@@ -54,19 +39,19 @@ function sameId(a: unknown, b: unknown): boolean {
   return Boolean(x) && x === y;
 }
 
-/** 进群 / 退群 / 被踢：亲戚口吻，带点嫌弃 */
+/** 只对别人进群、别人退群说话。机器人自己进退或被踢不吭声 */
 export class ZGroupNoticePlugin extends Plugin {
   manifest = {
     id: "z.group.notice",
     name: "进退群通知",
-    version: "0.1.0",
+    version: "0.1.1",
     priority: 860,
     category: "standard" as const,
     kind: "channel" as const,
     adapterScope: "channel" as const,
     channels: ["onebot11"],
     permissions: ["channel.send" as const],
-    description: "有人进群或退群时在群里说一声",
+    description: "别人进群或退群时说一声，自己进退或被踢不说话",
   };
 
   configSchema = [
@@ -94,18 +79,6 @@ export class ZGroupNoticePlugin extends Plugin {
       type: "string" as const,
       default: LEAVE,
     },
-    {
-      key: "kickLines",
-      label: "被踢语句",
-      type: "string" as const,
-      default: KICK,
-    },
-    {
-      key: "selfJoinLines",
-      label: "自己进群语句",
-      type: "string" as const,
-      default: SELF_JOIN,
-    },
   ];
 
   private cfg = {
@@ -113,8 +86,6 @@ export class ZGroupNoticePlugin extends Plugin {
     atUser: true,
     joinLines: JOIN,
     leaveLines: LEAVE,
-    kickLines: KICK,
-    selfJoinLines: SELF_JOIN,
   };
 
   getConfig() {
@@ -127,8 +98,6 @@ export class ZGroupNoticePlugin extends Plugin {
       atUser: next.atUser !== false,
       joinLines: String(next.joinLines ?? this.cfg.joinLines),
       leaveLines: String(next.leaveLines ?? this.cfg.leaveLines),
-      kickLines: String(next.kickLines ?? this.cfg.kickLines),
-      selfJoinLines: String(next.selfJoinLines ?? this.cfg.selfJoinLines),
     };
   }
 
@@ -144,19 +113,15 @@ export class ZGroupNoticePlugin extends Plugin {
     const self = String(ev.self_id ?? "").trim();
     if (!uid) return;
 
+    // 机器人自己进群、退群、被踢：不说话
+    if (sameId(uid, self) || sub === "kick_me") return;
+
     if (noticeType === "group_increase") {
-      if (sameId(uid, self)) {
-        return [pick(this.cfg.selfJoinLines, SELF_JOIN.split("\n")[0]!)];
-      }
       return [this.wrap(uid, pick(this.cfg.joinLines, JOIN.split("\n")[0]!))];
     }
 
-    if (noticeType === "group_decrease") {
-      // 自己被踢，群里发不出去
-      if (sub === "kick_me" || sameId(uid, self)) return;
-      if (sub === "kick") {
-        return [this.wrap(uid, pick(this.cfg.kickLines, KICK.split("\n")[0]!))];
-      }
+    // 别人主动退群才说。被踢不说
+    if (noticeType === "group_decrease" && sub !== "kick") {
       return [this.wrap(uid, pick(this.cfg.leaveLines, LEAVE.split("\n")[0]!))];
     }
   }

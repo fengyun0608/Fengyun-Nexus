@@ -1,7 +1,7 @@
 {
   "id": "z.group.notice",
   "name": "进退群通知",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "main": "index.ts",
   "priority": 860,
   "hooks": ["onNotice", "onReady"],
