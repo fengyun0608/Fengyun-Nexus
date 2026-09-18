@@ -118,6 +118,7 @@ export class OneBot11Bridge {
   private pending = new Map<string, Pending>();
   private onInbound?: InboundHandler;
   private onNotice?: NoticeHandler;
+  private onSelfId?: (selfId: string) => void;
 
   constructor(private cfg: OneBotConfig) {}
 
@@ -127,6 +128,20 @@ export class OneBot11Bridge {
 
   setNoticeHandler(fn: NoticeHandler): void {
     this.onNotice = fn;
+  }
+
+  setSelfIdHandler(fn: (selfId: string) => void): void {
+    this.onSelfId = fn;
+  }
+
+  private noteSelfId(sid: string): void {
+    if (!sid || sid === this.selfId) return;
+    this.selfId = sid;
+    try {
+      this.onSelfId?.(sid);
+    } catch {
+      /* ignore */
+    }
   }
 
   updateConfig(next: Partial<OneBotConfig>): void {
@@ -277,7 +292,7 @@ export class OneBot11Bridge {
     if (data.post_type === "meta_event") {
       if (data.meta_event_type === "lifecycle" && data.self_id != null) {
         const sid = String(data.self_id);
-        this.selfId = sid;
+        this.noteSelfId(sid);
         this.sockMeta.set(ws, { selfId: sid });
       }
       return;
@@ -285,7 +300,7 @@ export class OneBot11Bridge {
 
     if (data.self_id != null) {
       const sid = String(data.self_id);
-      this.selfId = sid;
+      this.noteSelfId(sid);
       const meta = this.sockMeta.get(ws);
       if (meta) meta.selfId = sid;
       else this.sockMeta.set(ws, { selfId: sid });

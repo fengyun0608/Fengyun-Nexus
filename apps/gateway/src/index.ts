@@ -46,11 +46,21 @@ import {
   initEnvTasks,
   listRuntimes,
   listTasks,
+  setNapCatWireProvider,
+  setNapCatAfterInstall,
   setTaskStatus,
   taskCounts,
   type EnvRuntimeId,
   type EnvTaskStatus,
 } from "./env-tasks.js";
+import {
+  buildReverseWsUrl,
+  getNapCatStatus,
+  tryLaunchNapCat,
+  wireNapCatConfigs,
+  wireNapCatForAccount,
+  readNapCatMarker,
+} from "./napcat-setup.js";
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
 import { applyFullUpdate } from "./full-update.js";
 import { ensureGatewayPortOpen } from "./open-port.js";
@@ -333,6 +343,44 @@ async function bootstrap(): Promise<void> {
       ? `  · 注册通道 onebot11（反向 WS ${onebotCfg.reverseWsPath}）`
       : "  · 注册通道 onebot11（未启用）",
   );
+
+  const gatewayPortEarly = () => Number(process.env.PORT ?? profile.gateway.port);
+  setNapCatWireProvider(() => {
+    const cfg = onebot.getConfig();
+    return {
+      reverseWsUrl: buildReverseWsUrl({
+        port: gatewayPortEarly(),
+        path: cfg.reverseWsPath || "/onebot/v11/ws",
+        token: cfg.accessToken,
+      }),
+      token: cfg.accessToken || "",
+    };
+  });
+  setNapCatAfterInstall(() => {
+    const cfg = onebot.getConfig();
+    const next = { ...cfg, enabled: true };
+    persistOneBotConfig(next);
+    onebot.updateConfig(next);
+  });
+  onebot.setSelfIdHandler((sid) => {
+    const cfg = onebot.getConfig();
+    const url = buildReverseWsUrl({
+      port: gatewayPortEarly(),
+      path: cfg.reverseWsPath || "/onebot/v11/ws",
+      token: cfg.accessToken,
+    });
+    const file = wireNapCatForAccount(ROOT, sid, url, cfg.accessToken || "");
+    if (file) log.ok(`NapCat 已按 QQ ${sid} 写好反向 WS → ${file}`);
+    // 同步本机 OneBot 配置里的 selfId
+    const bots = [...(cfg.bots || [])];
+    if (!bots.some((b) => String(b.selfId) === sid)) {
+      if (bots[0] && !bots[0].selfId) bots[0] = { ...bots[0], selfId: sid };
+      else bots.push({ selfId: sid, label: "主号", apiBase: "http://127.0.0.1:3000", accessToken: "" });
+      const next = { ...cfg, enabled: true, bots };
+      persistOneBotConfig(next);
+      onebot.updateConfig(next);
+    }
+  });
 
   await bootStep("初始化：AI 供应商（LLM）…");
   let llmStore = loadProvidersFile(ROOT);
@@ -1688,7 +1736,76 @@ async function bootstrap(): Promise<void> {
   });
 
   app.get("/v1/channels/onebot11", authMiddleware, (_req, res) => {
-    res.json({ ok: true, ...onebot.status(), config: onebot.getConfig() });
+    const st = onebot.status();
+    const cfg = onebot.getConfig();
+    const reverseWsUrl = buildReverseWsUrl({
+      port: Number(process.env.PORT ?? profile.gateway.port),
+      path: cfg.reverseWsPath || st.reverseWsPath || "/onebot/v11/ws",
+      token: cfg.accessToken,
+    });
+    const napcat = getNapCatStatus({
+      root: ROOT,
+      reverseWsUrl,
+      connected: st.connected,
+      selfId: st.selfId,
+    });
+    res.json({
+      ok: true,
+      ...st,
+      reverseWsUrl,
+      napcat,
+      config: cfg,
+    });
+  });
+
+  app.get("/v1/admin/napcat", authMiddleware, (_req, res) => {
+    const cfg = onebot.getConfig();
+    const reverseWsUrl = buildReverseWsUrl({
+      port: Number(process.env.PORT ?? profile.gateway.port),
+      path: cfg.reverseWsPath || "/onebot/v11/ws",
+      token: cfg.accessToken,
+    });
+    const st = onebot.status();
+    res.json({
+      ok: true,
+      ...getNapCatStatus({
+        root: ROOT,
+        reverseWsUrl,
+        connected: st.connected,
+        selfId: st.selfId,
+      }),
+      onebot: st,
+    });
+  });
+
+  app.post("/v1/admin/napcat/launch", authMiddleware, (_req, res) => {
+    const r = tryLaunchNapCat(ROOT);
+    res.status(r.ok ? 200 : 400).json({ ok: r.ok, message: r.message });
+  });
+
+  app.post("/v1/admin/napcat/wire", authMiddleware, (_req, res) => {
+    const cfg = onebot.getConfig();
+    const reverseWsUrl = buildReverseWsUrl({
+      port: Number(process.env.PORT ?? profile.gateway.port),
+      path: cfg.reverseWsPath || "/onebot/v11/ws",
+      token: cfg.accessToken,
+    });
+    const marker = readNapCatMarker(ROOT);
+    const home = marker?.home;
+    if (!home) {
+      res.status(400).json({ error: "尚未安装 NapCat，请先到环境配置安装" });
+      return;
+    }
+    const files = wireNapCatConfigs(home, reverseWsUrl, cfg.accessToken || "");
+    const next = { ...cfg, enabled: true };
+    persistOneBotConfig(next);
+    onebot.updateConfig(next);
+    res.json({
+      ok: true,
+      message: `已写入 ${files.length} 个配置，并启用 OneBot`,
+      reverseWsUrl,
+      files,
+    });
   });
 
   app.post("/v1/channels/onebot11/config", authMiddleware, (req, res) => {

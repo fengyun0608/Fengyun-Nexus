@@ -11,7 +11,7 @@ Fengyun Nexus 内置 **OneBot 11** 消息通道，兼容 [NapCat](https://napnek
 | 反向 WS（推荐） | WebSocket 客户端 | `ws://127.0.0.1:8787/onebot/v11/ws` |
 | HTTP 上报 | HTTP 客户端 | `POST /onebot/v11/http` |
 
-控制台 → **消息通道 → OneBot 11 开发区** 查看连接状态与配置。
+控制台 → **环境配置 → NapCat** 可一键安装（Windows Shell / Linux Launcher / Termux）；装完扫码后自动写反向 WS。也可到 **OneBot 11** 页看连接状态。
 
 ## 插件写法
 

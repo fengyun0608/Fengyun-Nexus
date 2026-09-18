@@ -1,12 +1,18 @@
 /**
- * Go / Python / browser install queue.
- * Uninstalled runtimes auto-enqueue; worker runs one-by-one with live logs.
+ * Go / Python / browser / NapCat install queue.
+ * Uninstalled runtimes auto-enqueue（NapCat 除外，需手动点安装）; worker runs one-by-one with live logs.
  */
 import { spawn, execSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  installNapCat,
+  readNapCatMarker,
+  resolveFlavor,
+  type NapCatFlavor,
+} from "./napcat-setup.js";
 
-export type EnvRuntimeId = "go" | "python" | "browser";
+export type EnvRuntimeId = "go" | "python" | "browser" | "napcat";
 export type EnvTaskStatus = "pending" | "running" | "paused" | "done" | "failed";
 
 export type EnvRuntimeDef = {
@@ -16,6 +22,7 @@ export type EnvRuntimeDef = {
   modes: Array<"compile" | "binary">;
   installed?: boolean;
   activeVersion?: string;
+  hint?: string;
 };
 
 export type EnvTask = {
@@ -54,7 +61,31 @@ const runtimes: EnvRuntimeDef[] = [
     modes: ["binary"],
     installed: false,
   },
+  {
+    id: "napcat",
+    label: "NapCat（QQ）",
+    versions: ["auto", "shell", "linux", "termux", "docker"],
+    modes: ["binary"],
+    installed: false,
+    hint: "一键装适配器，扫码后自动连 Nexus",
+  },
 ];
+
+/** 安装完成后把反向 WS 地址注入 NapCat；由网关注入 */
+let napcatWire:
+  | (() => { reverseWsUrl: string; token: string })
+  | null = null;
+let napcatAfterInstall: (() => void) | null = null;
+
+export function setNapCatWireProvider(
+  fn: () => { reverseWsUrl: string; token: string },
+): void {
+  napcatWire = fn;
+}
+
+export function setNapCatAfterInstall(fn: () => void): void {
+  napcatAfterInstall = fn;
+}
 
 const tasks: EnvTask[] = [];
 let seq = 1;
@@ -144,6 +175,14 @@ function refreshInstalledFlags(): void {
         rt.installed = true;
         rt.activeVersion = rt.activeVersion || "chromium";
       }
+      continue;
+    }
+    if (rt.id === "napcat") {
+      const m = readNapCatMarker(rootDir);
+      if (m) {
+        rt.installed = true;
+        rt.activeVersion = m.version || m.flavor || "installed";
+      }
     }
   }
 }
@@ -204,8 +243,11 @@ export function createInstallTask(input: {
   const version = input.version || rt.versions[0]!;
   const mode = input.mode || (rt.modes.includes("binary") ? "binary" : rt.modes[0]!)!;
   if (!rt.versions.includes(version) && !rt.versions.some((v) => version.startsWith(v))) {
-    // allow chromium alias
-    if (!(rt.id === "browser" && (version === "chromium" || version === "firefox"))) {
+    // allow chromium alias / napcat flavors
+    if (
+      !(rt.id === "browser" && (version === "chromium" || version === "firefox")) &&
+      !(rt.id === "napcat")
+    ) {
       throw new Error("版本不可用");
     }
   }
@@ -236,12 +278,16 @@ export function createInstallTask(input: {
   return { ...task, logs: [...task.logs] };
 }
 
-/** Auto-queue every runtime that is not installed. */
+/** Auto-queue every runtime that is not installed. NapCat 需手动点装。 */
 export function autoQueueMissing(): { queued: EnvTask[]; skipped: string[] } {
   refreshInstalledFlags();
   const queued: EnvTask[] = [];
   const skipped: string[] = [];
   for (const rt of runtimes) {
+    if (rt.id === "napcat") {
+      skipped.push(rt.id);
+      continue;
+    }
     if (rt.installed) {
       skipped.push(rt.id);
       continue;
@@ -397,7 +443,40 @@ async function executeInstall(task: EnvTask): Promise<void> {
     await installPython(task);
     return;
   }
+  if (task.runtime === "napcat") {
+    await installNapCatTask(task);
+    return;
+  }
   throw new Error("未知运行时");
+}
+
+async function installNapCatTask(task: EnvTask): Promise<void> {
+  setProgress(task, 10);
+  const wire = napcatWire?.() || {
+    reverseWsUrl: "ws://127.0.0.1:8787/onebot/v11/ws",
+    token: "",
+  };
+  const flavor = resolveFlavor((task.version as NapCatFlavor) || "auto");
+  appendLog(task, `NapCat 一键安装 · ${flavor}`);
+  appendLog(task, `官方说明 https://napneko.github.io/guide/boot/Shell`);
+  const result = await installNapCat({
+    root: rootDir,
+    flavor,
+    reverseWsUrl: wire.reverseWsUrl,
+    token: wire.token,
+    onLog: (line) => appendLog(task, line),
+    onProgress: (n) => setProgress(task, n),
+  });
+  appendLog(task, `安装目录 ${result.home}`);
+  appendLog(task, `启动：${result.launchCmd}`);
+  appendLog(task, "下一步：运行启动脚本 → 扫码登录 → 回控制台 OneBot 看是否已连接");
+  task.note = `NapCat ${result.version} · ${result.home}`;
+  try {
+    napcatAfterInstall?.();
+    appendLog(task, "已自动启用本机 OneBot 通道");
+  } catch (e) {
+    appendLog(task, `启用 OneBot 跳过：${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 async function installBrowser(task: EnvTask): Promise<void> {
