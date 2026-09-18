@@ -121,13 +121,23 @@ onUnmounted(() => {
           <n-tag size="small" :type="r.installed ? 'success' : 'warning'" style="margin-bottom: 10px">
             {{ r.installed ? `已安装 ${r.activeVersion || ""}` : "未安装" }}
           </n-tag>
-          <label class="field">
-            版本
-            <n-select
-              v-model:value="picks[r.id].version"
-              :options="(r.versions || []).map((v) => ({ label: v, value: v }))"
-            />
-          </label>
+          <div class="env-pick">
+            <label class="field">
+              版本
+              <n-select
+                v-model:value="picks[r.id].version"
+                :options="(r.versions || []).map((v) => ({ label: v, value: v }))"
+              />
+            </label>
+            <n-button
+              type="primary"
+              :disabled="r.installed"
+              :loading="busy === r.id"
+              @click="install(r.id)"
+            >
+              安装
+            </n-button>
+          </div>
           <label class="field">
             安装方式
             <n-select
@@ -135,15 +145,6 @@ onUnmounted(() => {
               :options="(r.modes || []).map((m) => ({ label: m === 'compile' ? '编译安装' : '二进制安装', value: m }))"
             />
           </label>
-          <n-button
-            size="small"
-            type="primary"
-            :disabled="r.installed"
-            :loading="busy === r.id"
-            @click="install(r.id)"
-          >
-            安装
-          </n-button>
         </n-card>
       </div>
     </n-spin>
@@ -152,4 +153,10 @@ onUnmounted(() => {
 
 <style scoped>
 @import "@/styles/page.css";
+.env-pick {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
 </style>

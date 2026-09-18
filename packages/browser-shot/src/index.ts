@@ -159,6 +159,25 @@ async function captureFile(
   }
 }
 
+function menuSvg(title: string, lines: string[]): string {
+  const rowH = 34;
+  const height = 108 + Math.max(1, lines.length) * rowH + 28;
+  const rows = (lines.length ? lines : ["（空）"])
+    .map((line, i) => {
+      const y = 96 + i * rowH;
+      return `<rect x="28" y="${y}" width="724" height="28" rx="8" fill="#f3faf6" stroke="rgba(45,140,110,.16)"/>
+  <text x="42" y="${y + 19}" font-size="15" fill="#1c322c" font-family="Segoe UI, Microsoft YaHei, sans-serif">${escapeShotHtml(line)}</text>`;
+    })
+    .join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="${height}">
+  <rect width="100%" height="100%" fill="#eef8f3"/>
+  <text x="32" y="40" font-size="12" letter-spacing="3" fill="#4caf8a" font-family="Segoe UI, sans-serif">FENGYUN NEXUS</text>
+  <text x="32" y="74" font-size="28" fill="#247a5e" font-family="Segoe UI, Microsoft YaHei, sans-serif">${escapeShotHtml(title)}</text>
+  ${rows}
+</svg>`;
+}
+
 export async function renderMenuShot(opts: ShotMenuOpts): Promise<ShotResult> {
   const root = projectRoot();
   const outDir = opts.outDir ?? join(root, "data", "draw");
@@ -167,11 +186,16 @@ export async function renderMenuShot(opts: ShotMenuOpts): Promise<ShotResult> {
   const htmlPath = join(outDir, `menu-${stamp}.html`);
   const pngPath = join(outDir, `menu-${stamp}.png`);
   writeFileSync(htmlPath, menuHtml(opts.title, opts.lines), "utf8");
-  return captureFile(htmlPath, pngPath, {
+  const shot = await captureFile(htmlPath, pngPath, {
     selector: "#shot",
     width: 800,
     height: 1000,
   });
+  if (shot.ok) return shot;
+  console.warn(`[browser-shot] 菜单 PNG 未生成，改出 SVG：${shot.message}`);
+  const svgPath = join(outDir, `menu-${stamp}.svg`);
+  writeFileSync(svgPath, menuSvg(opts.title, opts.lines), "utf8");
+  return { ok: true, htmlPath, pngPath: svgPath };
 }
 
 export async function renderHtmlShot(opts: ShotHtmlOpts): Promise<ShotResult> {

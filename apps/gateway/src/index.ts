@@ -1077,7 +1077,7 @@ async function bootstrap(): Promise<void> {
       return;
     }
     const name = basename(String(req.params.name || ""));
-    if (!/^[\w.-]+\.png$/i.test(name)) {
+    if (!/^[\w.-]+\.(png|svg)$/i.test(name)) {
       res.status(400).end();
       return;
     }
@@ -1086,7 +1086,7 @@ async function bootstrap(): Promise<void> {
       res.status(404).end();
       return;
     }
-    res.type("png");
+    res.type(name.toLowerCase().endsWith(".svg") ? "image/svg+xml" : "png");
     res.sendFile(file);
   });
 

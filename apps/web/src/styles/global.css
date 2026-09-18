@@ -731,3 +731,24 @@ pre::selection {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+@media (max-width: 860px) {
+  .n-modal {
+    align-items: flex-start;
+    padding-top: 8px;
+  }
+  .n-modal .n-card {
+    max-height: calc(100dvh - 16px);
+    display: flex;
+    flex-direction: column;
+  }
+  .n-modal .n-card__content {
+    overflow: auto;
+    flex: 1;
+    min-height: 0;
+  }
+  .n-modal .n-card__footer {
+    position: sticky;
+    bottom: 0;
+    background: #fff;
+  }
+}

@@ -29,7 +29,7 @@ function shotSrc(content: string): string {
   const raw = cq?.[1] || "";
   if (!raw) return "";
   const name = decodeURIComponent(raw.split(/[/\\]/).pop() || "");
-  if (!/^[\w.-]+\.png$/i.test(name)) return "";
+  if (!/^[\w.-]+\.(png|svg)$/i.test(name)) return "";
   return `/v1/media/shot/${encodeURIComponent(name)}?token=${encodeURIComponent(auth.token)}`;
 }
 
