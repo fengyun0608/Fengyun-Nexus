@@ -382,10 +382,15 @@ export class PluginHost {
     return out;
   }
 
-  async dispatchEvent(e: NexusEvent, makeCtx: (id: string) => PluginContext): Promise<NexusMessage[]> {
+  async dispatchEvent(
+    e: NexusEvent,
+    makeCtx: (id: string) => PluginContext,
+    gate?: (id: string) => boolean | Promise<boolean>,
+  ): Promise<NexusMessage[]> {
     const out: NexusMessage[] = [];
     for (const p of this.values()) {
       if (!this.isEnabled(p.manifest.id)) continue;
+      if (gate && !(await gate(p.manifest.id))) continue;
       // Scope filter: all / channel / specified
       const scope =
         p.manifest.adapterScope ??
@@ -413,8 +418,12 @@ export class PluginHost {
     return out;
   }
 
-  async onMessage(msg: NexusMessage, makeCtx: (id: string) => PluginContext): Promise<NexusMessage[]> {
+  async onMessage(
+    msg: NexusMessage,
+    makeCtx: (id: string) => PluginContext,
+    gate?: (id: string) => boolean | Promise<boolean>,
+  ): Promise<NexusMessage[]> {
     const e = new NexusEvent(msg);
-    return this.dispatchEvent(e, makeCtx);
+    return this.dispatchEvent(e, makeCtx, gate);
   }
 }

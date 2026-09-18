@@ -110,9 +110,11 @@ import { renderDocView, findRepoRoot } from "./docs-serve.js";
 import { reloadPlugins, watchPluginsHotReload } from "./plugin-hot-reload.js";
 import {
   applyStoredPluginConfigs,
+  loadPluginConfigMap,
   savePluginConfig,
   watchPluginConfigFile,
 } from "./plugin-config-store.js";
+import { getChannelPluginAssign, saveChannelPluginAssign } from "./channel-plugin-assign.js";
 import { getLogEntries, log } from "./log.js";
 import {
   activeProvider,
@@ -788,6 +790,17 @@ async function bootstrap(): Promise<void> {
     msg: NexusMessage,
     opts?: { isAdminConsole?: boolean },
   ): Promise<string[]> {
+    const accountId = String(msg.meta?.selfId || msg.meta?.botId || "");
+    const writeMsg = (row: {
+      id: string;
+      channel: string;
+      chatId: string;
+      userId: string;
+      role: "user" | "assistant" | "system";
+      content: string;
+      createdAt: string;
+      accountId?: string;
+    }) => db.insertMessage({ ...row, accountId: row.accountId || accountId });
     const chSettings = getChannelSettings(channelCfg, msg.channel);
     const isMaster = isChannelMaster(chSettings, msg.userId);
     const isAdminConsole = Boolean(opts?.isAdminConsole);
@@ -917,7 +930,7 @@ async function bootstrap(): Promise<void> {
                     : "更新报告发送失败，将回退由回复通道再试",
                 );
                 if (sent) {
-                  db.insertMessage({
+                  writeMsg({
                     id: newId("msg"),
                     channel: msg.channel,
                     chatId: gid ? `group:${gid}` : msg.chatId,
@@ -941,7 +954,7 @@ async function bootstrap(): Promise<void> {
         }
 
         for (const content of replies) {
-          db.insertMessage({
+          writeMsg({
             id: newId("msg"),
             channel: msg.channel,
             chatId: msg.chatId,
@@ -951,7 +964,7 @@ async function bootstrap(): Promise<void> {
             createdAt: nowIso(),
           });
         }
-        db.insertMessage({
+        writeMsg({
           id: msg.id,
           channel: msg.channel,
           chatId: msg.chatId,
@@ -1022,11 +1035,27 @@ async function bootstrap(): Promise<void> {
     const pluginMsg = trimmed !== trimmedRaw ? { ...msg, content: trimmed } : msg;
 
     const pluginReplies = await Promise.race([
-      plugins.onMessage(pluginMsg, (id) =>
-        makePluginCtx(id, (m) => log.plugin(id, m), {
-          channelId: msg.channel,
-          eventUserId: msg.userId,
-        }),
+      plugins.onMessage(
+        pluginMsg,
+        (id) =>
+          makePluginCtx(id, (m) => log.plugin(id, m), {
+            channelId: msg.channel,
+            eventUserId: msg.userId,
+          }),
+        async (id) => {
+          const assign = getChannelPluginAssign(ROOT, msg.channel, id);
+          if (msg.channel === "onebot11" && assign.accounts.length) {
+            if (!accountId || !assign.accounts.includes(accountId)) return false;
+          }
+          const plug = plugins.get(id);
+          if (plug?.setConfig) {
+            const base = loadPluginConfigMap(ROOT)[id] || {};
+            const own = accountId ? assign.byAccount[accountId] : undefined;
+            const merged = own ? { ...base, ...own } : base;
+            if (Object.keys(merged).length) await plug.setConfig(merged);
+          }
+          return true;
+        },
       ),
       new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error("插件处理超时")), 55_000);
@@ -1049,7 +1078,7 @@ async function bootstrap(): Promise<void> {
 
     if (pluginReplies.length) {
       sessions.append(session, "user", trimmed);
-      db.insertMessage({
+      writeMsg({
         id: msg.id,
         channel: msg.channel,
         chatId: msg.chatId,
@@ -1070,7 +1099,7 @@ async function bootstrap(): Promise<void> {
       }).filter(Boolean);
       for (const content of texts) {
         sessions.append(session, "assistant", content);
-        db.insertMessage({
+        writeMsg({
           id: newId("msg"),
           channel: msg.channel,
           chatId: msg.chatId,
@@ -1114,7 +1143,7 @@ async function bootstrap(): Promise<void> {
     if (!userAsk) return [];
 
     sessions.append(session, "user", userAsk);
-    db.insertMessage({
+    writeMsg({
       id: msg.id,
       channel: msg.channel,
       chatId: msg.chatId,
@@ -1147,7 +1176,7 @@ async function bootstrap(): Promise<void> {
     const parts = splitAiSegments(assistant);
     const storeAs = parts.join("\n\n");
     sessions.append(session, "assistant", storeAs);
-    db.insertMessage({
+    writeMsg({
       id: newId("msg"),
       channel: msg.channel,
       chatId: msg.chatId,
@@ -1699,6 +1728,46 @@ async function bootstrap(): Promise<void> {
       id,
       settings: saved,
     });
+  });
+
+  app.get("/v1/channels/:id/plugin-scope/:pluginId", authMiddleware, (req, res) => {
+    const channelId = String(req.params.id);
+    const pluginId = String(req.params.pluginId);
+    if (!channels.get(channelId)) {
+      res.status(404).json({ error: "通道未找到" });
+      return;
+    }
+    res.json({ ok: true, ...getChannelPluginAssign(ROOT, channelId, pluginId) });
+  });
+
+  app.put("/v1/channels/:id/plugin-scope/:pluginId", authMiddleware, (req, res) => {
+    const channelId = String(req.params.id);
+    const pluginId = String(req.params.pluginId);
+    if (!channels.get(channelId)) {
+      res.status(404).json({ error: "通道未找到" });
+      return;
+    }
+    const body = (req.body ?? {}) as {
+      accounts?: unknown;
+      accountId?: unknown;
+      values?: unknown;
+    };
+    const prev = getChannelPluginAssign(ROOT, channelId, pluginId);
+    const accounts = Array.isArray(body.accounts)
+      ? body.accounts.map((x) => String(x || "").trim()).filter(Boolean)
+      : prev.accounts;
+    const byAccount = { ...prev.byAccount };
+    const accountId = typeof body.accountId === "string" ? body.accountId.trim() : "";
+    if (accountId && body.values && typeof body.values === "object" && !Array.isArray(body.values)) {
+      byAccount[accountId] = body.values as Record<string, unknown>;
+    }
+    const saved = saveChannelPluginAssign(ROOT, channelId, pluginId, { accounts, byAccount });
+    if (accountId) {
+      const plug = plugins.get(pluginId);
+      const base = loadPluginConfigMap(ROOT)[pluginId] || {};
+      if (plug?.setConfig) void plug.setConfig({ ...base, ...byAccount[accountId] });
+    }
+    res.json({ ok: true, message: "已修改成功，立即生效", ...saved });
   });
 
   app.get("/v1/workflows", (_req, res) => {

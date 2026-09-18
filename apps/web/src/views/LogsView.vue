@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { NButton, NCard, NSpace, NSpin, NTabs, NTabPane, NTag } from "naive-ui";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
@@ -13,6 +13,7 @@ type FeedMsg = {
   role: string;
   content: string;
   createdAt: string;
+  accountId?: string;
 };
 
 const auth = useAuthStore();
@@ -38,6 +39,16 @@ async function load() {
     loading.value = false;
   }
 }
+
+const messageGroups = computed(() => {
+  const map = new Map<string, { key: string; title: string; items: FeedMsg[] }>();
+  for (const row of messages.value) {
+    const key = String(row.accountId || "");
+    if (!map.has(key)) map.set(key, { key, title: key ? `QQ ${key}` : "未分账号", items: [] });
+    map.get(key)!.items.push(row);
+  }
+  return [...map.values()];
+});
 
 onMounted(() => {
   void load();
@@ -72,11 +83,14 @@ onUnmounted(() => {
         </n-tab-pane>
         <n-tab-pane name="messages" tab="最近消息">
           <n-card size="small">
-            <div v-for="m in messages" :key="m.id" class="log-row">
-              <n-tag size="tiny">{{ m.channel }}</n-tag>
-              <span class="at">{{ m.createdAt }}</span>
-              <span>{{ m.role }}/{{ m.userId }}: {{ m.content }}</span>
-            </div>
+            <section v-for="g in messageGroups" :key="g.key || 'none'">
+              <p class="at">{{ g.title }}</p>
+              <div v-for="m in g.items" :key="m.id" class="log-row">
+                <n-tag size="tiny">{{ m.channel }}</n-tag>
+                <span class="at">{{ m.createdAt }}</span>
+                <span>{{ m.role }}/{{ m.userId }}: {{ m.content }}</span>
+              </div>
+            </section>
             <p v-if="!messages.length" class="muted">暂无消息</p>
           </n-card>
         </n-tab-pane>

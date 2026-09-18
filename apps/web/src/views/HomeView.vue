@@ -39,6 +39,7 @@ type FeedMsg = {
   role: string;
   content: string;
   createdAt: string;
+  accountId?: string;
 };
 
 const auth = useAuthStore();
@@ -124,6 +125,23 @@ const rawPayload = computed(() => ({
   powerOff: feedPowerOff.value,
   recentMessages: feedItems.value.slice(0, 20),
 }));
+
+const feedGroups = computed(() => {
+  const bots = onebotInfo.value?.bots || [];
+  const nameOf = (id: string) => {
+    const hit = bots.find((b) => b.selfId === id);
+    return hit ? `${hit.label || "未备注"} ${id}` : id;
+  };
+  const map = new Map<string, { key: string; title: string; items: FeedMsg[] }>();
+  for (const row of feedItems.value) {
+    const key = String(row.accountId || "");
+    if (!map.has(key)) {
+      map.set(key, { key, title: key ? nameOf(key) : "未分账号", items: [] });
+    }
+    map.get(key)!.items.push(row);
+  }
+  return [...map.values()];
+});
 
 function fmtTime(iso: string): string {
   return String(iso || "").replace("T", " ").slice(0, 19) || "—";
@@ -264,12 +282,15 @@ onUnmounted(() => {
             <p class="hint">管理指令以 # 开头。列表约每 5 秒刷新。</p>
             <div class="log-list feed">
               <p v-if="!feedItems.length" class="muted pad">暂无实时消息</p>
-              <div v-for="row in feedItems" :key="row.id" class="log-row feed-row">
-                <span class="muted">{{ fmtTime(row.createdAt) }}</span>
-                <span class="lvl">{{ row.channel }}</span>
-                <span class="muted who">{{ row.role }}:{{ row.userId }}</span>
-                <span class="content">{{ row.content }}</span>
-              </div>
+              <section v-for="g in feedGroups" :key="g.key || 'none'" class="feed-group">
+                <h3>{{ g.title }}</h3>
+                <div v-for="row in g.items" :key="row.id" class="log-row feed-row">
+                  <span class="muted">{{ fmtTime(row.createdAt) }}</span>
+                  <span class="lvl">{{ row.channel }}</span>
+                  <span class="muted who">{{ row.role }}:{{ row.userId }}</span>
+                  <span class="content">{{ row.content }}</span>
+                </div>
+              </section>
             </div>
           </section>
         </template>
@@ -400,6 +421,10 @@ onUnmounted(() => {
 .chip strong {
   color: var(--amber);
   margin-left: 4px;
+}
+.feed-group h3 {
+  margin: 10px 0 4px;
+  font-size: 0.95rem;
 }
 .log-list.feed {
   padding: 4px 0 8px;

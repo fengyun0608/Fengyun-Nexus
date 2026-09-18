@@ -11,6 +11,7 @@ import {
   NSpin,
   NSwitch,
   NInputNumber,
+  NSelect,
   NThing,
   useMessage,
 } from "naive-ui";
@@ -95,6 +96,14 @@ const obToken = ref("");
 const obWs = ref("");
 const obHttp = ref("/onebot/v11");
 const obBotCards = ref<BotDraft[]>([]);
+const pluginScopes = ref<Record<string, string[]>>({});
+const scopeConfigs = ref<Record<string, Record<string, unknown>>>({});
+const cfgAccount = ref("");
+const botOptions = computed(() =>
+  (onebot.value?.bots || [])
+    .filter((b) => b.selfId)
+    .map((b) => ({ label: `${b.label || "未备注"} ${b.selfId}`, value: b.selfId })),
+);
 let onebotTimer: number | undefined;
 
 async function refreshOnebotLive() {
@@ -209,6 +218,52 @@ async function saveSettings() {
   }
 }
 
+async function loadScope(pluginId: string) {
+  const res = await api<{ accounts?: string[]; byAccount?: Record<string, Record<string, unknown>> }>(
+    `/v1/channels/${encodeURIComponent(id.value)}/plugin-scope/${encodeURIComponent(pluginId)}`,
+    { token: auth.token },
+  );
+  pluginScopes.value = { ...pluginScopes.value, [pluginId]: res.accounts || [] };
+  return res.byAccount || {};
+}
+
+async function saveScope(pluginId: string, accounts: string[]) {
+  pluginScopes.value = { ...pluginScopes.value, [pluginId]: accounts };
+  try {
+    await api(`/v1/channels/${encodeURIComponent(id.value)}/plugin-scope/${encodeURIComponent(pluginId)}`, {
+      method: "PUT",
+      token: auth.token,
+      body: JSON.stringify({ accounts }),
+    });
+    message.success("已修改成功，立即生效");
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function pickAccount(accountId: string) {
+  cfgAccount.value = accountId;
+  cfgSaved.value = "";
+  if (!accountId) {
+    const res = await api<{ values?: Record<string, unknown> }>(
+      `/v1/plugins/${encodeURIComponent(cfgId.value)}/config`,
+      { token: auth.token },
+    );
+    cfgValues.value = { ...(res.values || {}) };
+    return;
+  }
+  const own = scopeConfigs.value[accountId];
+  if (own) {
+    cfgValues.value = { ...own };
+    return;
+  }
+  const res = await api<{ values?: Record<string, unknown> }>(
+    `/v1/plugins/${encodeURIComponent(cfgId.value)}/config`,
+    { token: auth.token },
+  );
+  cfgValues.value = { ...(res.values || {}) };
+}
+
 async function togglePlugin(p: PluginItem, enabled: boolean) {
   try {
     await api(`/v1/plugins/${encodeURIComponent(p.id)}/${enabled ? "enable" : "disable"}`, {
@@ -226,6 +281,7 @@ async function openConfig(p: PluginItem) {
   cfgId.value = p.id;
   cfgTitle.value = p.name || p.id;
   cfgSaved.value = "";
+  cfgAccount.value = "";
   showCfg.value = true;
   try {
     const res = await api<{
@@ -238,6 +294,7 @@ async function openConfig(p: PluginItem) {
     cfgMsg.value = res.message || "";
     cfgSchema.value = res.schema || [];
     cfgValues.value = { ...(res.values || {}) };
+    if (id.value === "onebot11") scopeConfigs.value = await loadScope(p.id);
   } catch (e) {
     cfgSupported.value = false;
     cfgMsg.value = e instanceof Error ? e.message : String(e);
@@ -246,6 +303,20 @@ async function openConfig(p: PluginItem) {
 
 async function saveConfig() {
   try {
+    if (cfgAccount.value) {
+      const res = await api<{ message?: string; byAccount?: Record<string, Record<string, unknown>> }>(
+        `/v1/channels/${encodeURIComponent(id.value)}/plugin-scope/${encodeURIComponent(cfgId.value)}`,
+        {
+          method: "PUT",
+          token: auth.token,
+          body: JSON.stringify({ accountId: cfgAccount.value, values: cfgValues.value }),
+        },
+      );
+      if (res.byAccount) scopeConfigs.value = res.byAccount;
+      cfgSaved.value = res.message || "已修改成功，立即生效";
+      message.success(cfgSaved.value);
+      return;
+    }
     const res = await api<{ message?: string; values?: Record<string, unknown> }>(
       `/v1/plugins/${encodeURIComponent(cfgId.value)}/config`,
       {
@@ -364,6 +435,10 @@ onMounted(() => void load());
 onUnmounted(() => {
   if (onebotTimer) window.clearInterval(onebotTimer);
 });
+watch(showPlugins, (open) => {
+  if (!open || id.value !== "onebot11") return;
+  for (const p of channelPlugins.value) void loadScope(p.id).catch(() => undefined);
+});
 watch(showOnebot, (open) => {
   if (onebotTimer) window.clearInterval(onebotTimer);
   onebotTimer = undefined;
@@ -451,11 +526,20 @@ watch(showOnebot, (open) => {
       title="本通道插件管理"
       :style="{ width: 'min(560px, 94vw)' }"
     >
-      <p class="hint">含系统通用插件与本通道专用插件。</p>
+      <p class="hint">不选生效账号，就是这个通道上全部号都走。选了就只对这些号生效，配置可以按号分开。</p>
       <div v-for="p in channelPlugins" :key="p.id" class="plug-row">
         <div>
           <strong>{{ p.name || p.id }}</strong>
           <p class="hint">{{ p.id }} · {{ p.kind === "framework" ? "系统" : "通道" }}</p>
+          <n-select
+            v-if="id === 'onebot11'"
+            multiple
+            size="small"
+            :value="pluginScopes[p.id] || []"
+            :options="botOptions"
+            placeholder="全部号生效"
+            @update:value="(v: string[]) => saveScope(p.id, v)"
+          />
         </div>
         <n-space align="center">
           <n-button size="tiny" quaternary @click="openConfig(p)">配置</n-button>
@@ -481,6 +565,14 @@ watch(showOnebot, (open) => {
       <p v-if="!cfgSupported" class="muted">{{ cfgMsg || "该插件暂未支持配置" }}</p>
       <template v-else>
         <p v-if="cfgSaved" class="ok-line">{{ cfgSaved }}</p>
+        <label v-if="id === 'onebot11' && botOptions.length" class="field">
+          这份配置给
+          <n-select
+            :value="cfgAccount"
+            :options="[{ label: '全部号共用', value: '' }, ...botOptions]"
+            @update:value="(v: string) => pickAccount(v)"
+          />
+        </label>
         <label
           v-for="f in cfgSchema"
           :key="f.key"

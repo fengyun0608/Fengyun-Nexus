@@ -14,6 +14,8 @@ export interface DbMessageRow {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: string;
+  /** 哪个机器人号收到的。旧记录可能没有 */
+  accountId?: string;
 }
 
 export interface DbPluginRow {
@@ -184,6 +186,10 @@ export class NexusDatabase {
           value TEXT
         );
       `);
+      const cols = this.sqlite.prepare(`PRAGMA table_info(messages)`).all() as Array<{ name?: string }>;
+      if (!cols.some((c) => c.name === "accountId")) {
+        this.sqlite.exec(`ALTER TABLE messages ADD COLUMN accountId TEXT`);
+      }
       return;
     }
 
@@ -226,10 +232,19 @@ export class NexusDatabase {
     if (this.sqlite) {
       this.sqlite
         .prepare(
-          `INSERT OR REPLACE INTO messages (id,channel,chatId,userId,role,content,createdAt)
-           VALUES (?,?,?,?,?,?,?)`,
+          `INSERT OR REPLACE INTO messages (id,channel,chatId,userId,role,content,createdAt,accountId)
+           VALUES (?,?,?,?,?,?,?,?)`,
         )
-        .run(row.id, row.channel, row.chatId, row.userId, row.role, row.content, row.createdAt);
+        .run(
+          row.id,
+          row.channel,
+          row.chatId,
+          row.userId,
+          row.role,
+          row.content,
+          row.createdAt,
+          row.accountId || "",
+        );
       return;
     }
     this.data.messages.push(row);
@@ -243,7 +258,7 @@ export class NexusDatabase {
     if (this.sqlite) {
       return this.sqlite
         .prepare(
-          `SELECT id,channel,chatId,userId,role,content,createdAt FROM messages
+          `SELECT id,channel,chatId,userId,role,content,createdAt,accountId FROM messages
            WHERE chatId=? ORDER BY createdAt DESC LIMIT ?`,
         )
         .all(chatId, limit)
@@ -257,7 +272,7 @@ export class NexusDatabase {
     if (this.sqlite) {
       return this.sqlite
         .prepare(
-          `SELECT id,channel,chatId,userId,role,content,createdAt FROM messages
+          `SELECT id,channel,chatId,userId,role,content,createdAt,accountId FROM messages
            ORDER BY createdAt DESC LIMIT ?`,
         )
         .all(limit) as unknown as DbMessageRow[];
