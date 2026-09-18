@@ -28,7 +28,6 @@ export function startTerminalRepl(opts: {
     if (!busy) rl.prompt(true);
   };
 
-  opts.logTip?.("后端终端已可输入。发送 #帮助 查看指令；Ctrl+C 结束进程");
   rl.prompt();
 
   rl.on("line", (raw) => {

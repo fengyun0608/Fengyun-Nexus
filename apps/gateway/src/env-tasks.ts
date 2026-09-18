@@ -113,7 +113,9 @@ function which(bin: string): string | null {
     })
       .trim()
       .split(/\r?\n/)[0];
-    return out || null;
+    if (!out) return null;
+    if (process.platform === "win32" && /WindowsApps/i.test(out)) return null;
+    return out;
   } catch {
     return null;
   }

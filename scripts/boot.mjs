@@ -4,7 +4,6 @@
  */
 import { existsSync, readFileSync, unlinkSync, cpSync, statSync, mkdirSync, readdirSync } from "node:fs";
 import { spawn, execSync } from "node:child_process";
-import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -77,21 +76,6 @@ function guessEnv() {
     return "server";
   }
   return "desktop";
-}
-
-function consoleHints(port) {
-  const lines = [`进程绑定 0.0.0.0:${port}，不是只绑本机`];
-  lines.push(`本机快捷方式 http://127.0.0.1:${port}/`);
-  const nets = networkInterfaces();
-  for (const list of Object.values(nets)) {
-    for (const n of list || []) {
-      const fam = String(n.family);
-      if (n.internal || (fam !== "IPv4" && fam !== "4")) continue;
-      lines.push(`外网 http://${n.address}:${port}/`);
-    }
-  }
-  lines.push("云服务器请在安全组放行这个 TCP 端口，别的端口连不上");
-  return lines;
 }
 
 function which(bin) {
@@ -220,7 +204,7 @@ function sleep(ms) {
 }
 
 async function detectDeps() {
-  bootLog("INFO", ANSI.cyan, "── dependency check ──");
+  bootLog("INFO", ANSI.cyan, "[依赖]");
   if (nodeMajor() < 20) {
     throw new Error(`Node.js >= 20 required (got ${process.versions.node})`);
   }
@@ -235,12 +219,12 @@ async function detectDeps() {
     bootLog("WARN", ANSI.yellow, "pnpm not found — try: npm i -g pnpm@9.15.0");
     throw new Error("pnpm is required");
   }
-  bootLog("OK", ANSI.green, "pnpm available");
+  bootLog("OK", ANSI.green, "pnpm");
 
   if (!which("git") && !which("git.exe")) {
     bootLog("WARN", ANSI.yellow, "git not found (optional for plugin updates)");
   } else {
-    bootLog("OK", ANSI.green, "git available");
+    bootLog("OK", ANSI.green, "git");
   }
 
   if (!existsSync(join(root, "node_modules"))) {
@@ -252,7 +236,7 @@ async function detectDeps() {
     await run(["install"]);
     bootLog("OK", ANSI.green, "插件依赖已链接");
   } else {
-    bootLog("OK", ANSI.green, "node_modules present");
+    bootLog("OK", ANSI.green, "依赖已就绪");
   }
 }
 
@@ -265,7 +249,7 @@ async function ensureBuild() {
     await run(["run", "build:packages"]);
     bootLog("OK", ANSI.green, "packages built");
   } else {
-    bootLog("OK", ANSI.green, "packages ready");
+    bootLog("OK", ANSI.green, "内部包已就绪");
   }
 
   const webDistHtml = join(root, "apps/web/dist/index.html");
@@ -293,7 +277,7 @@ async function ensureBuild() {
     await run(["--filter", "@fengyun/nexus-web", "build"]);
     bootLog("OK", ANSI.green, "console built → apps/web/dist");
   } else {
-    bootLog("OK", ANSI.green, "Vite console dist ready");
+    bootLog("OK", ANSI.green, "控制台已就绪");
   }
 
   // 同步到 gateway/public，避免启动时 dist 缺失仍用旧 public
@@ -372,7 +356,7 @@ async function syncConsolePublic() {
   }
 
   if (consoleAlreadySynced(distDir, pubDir)) {
-    bootLog("OK", ANSI.green, "console public 已是最新，跳过同步");
+    bootLog("OK", ANSI.green, "控制台已同步");
     return;
   }
 
@@ -407,13 +391,7 @@ async function main() {
   await detectDeps();
   await ensureBuild();
 
-  const port = process.env.PORT || "8787";
   bootLog("OK", ANSI.green, `姿态=${process.env.NEXUS_ENV}`);
-  bootLog("INFO", ANSI.cyan, `即将拉起网关 → 先连数据库，再刷初始化日志`);
-  for (const line of consoleHints(port)) {
-    bootLog("INFO", ANSI.cyan, line);
-  }
-  bootLog("INFO", ANSI.cyan, "初始账号 console / console  |  或: pnpm nexus setup");
 
   // 正式启动用 start（无 watch）。开发热重载：NEXUS_DEV=1 或 pnpm --filter @fengyun/nexus-gateway dev
   const gatewayScript = process.env.NEXUS_DEV === "1" ? "dev" : "start";

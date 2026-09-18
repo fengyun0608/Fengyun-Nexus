@@ -26,7 +26,7 @@ import {
   type RegistryConfig,
 } from "@fengyun/nexus-shared";
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
-import { bootStep, printBootBanner, printBootSuccess } from "./boot-banner.js";
+import { bootGroup, printBootBanner, printBootSuccess } from "./boot-banner.js";
 import { checkPluginUpdates, applyPluginUpdates, ensurePluginSdkLinks } from "./registry-check.js";
 import {
   getChannelSettings,
@@ -388,36 +388,31 @@ async function bootstrap(): Promise<void> {
   printBootBanner();
   loadDotEnv();
 
-  await bootStep("初始化：加载环境变量与运行姿态…");
   const envId = resolveEnvId();
   const profile = loadEnvProfile(envId);
   let adminCfg = loadAdmin();
   adminCfg.sessionHours = adminCfg.sessionHours || 12;
   const registry = loadRegistry();
-  await bootStep(`运行姿态 → ${profile.id}（${profile.label}）`);
+  bootGroup("环境");
+  log.ok(profile.label || profile.id);
 
   function currentPassword(): string {
     return process.env[adminCfg.passwordEnv] || adminCfg.defaultPassword;
   }
 
-  await bootStep("连接数据库…");
+  bootGroup("数据库");
   let dbCfg = loadDbConfig(ROOT);
   const dbOpen = resolveDbOpenOpts(ROOT, dbCfg);
   let db = new NexusDatabase({ driver: dbOpen.driver, filePath: dbOpen.filePath });
   await db.open();
-  log.ok(`数据库已连接  驱动=${dbOpen.driver}  ${dbOpen.label}`);
-  await bootStep(`数据库统计 ${JSON.stringify(db.stats())}`);
-
-  await bootStep("初始化：会话管理器…");
+  log.ok(dbOpen.driver);
   const sessions = new SessionManager();
   const router = new MessageRouter();
 
-  await bootStep("初始化：消息通道适配器…");
+  bootGroup("通道");
   const channels = new ChannelRegistry();
   channels.register(new WebChannel());
-  await bootStep("  · 注册通道 web");
   channels.register(new WebhookChannel());
-  await bootStep("  · 注册通道 webhook");
   const onebotCfg = loadOneBotConfig();
   const onebot = new OneBot11Bridge(onebotCfg);
   const gatewayPortEarly = () => Number(process.env.PORT ?? profile.gateway.port);
@@ -448,10 +443,11 @@ async function bootstrap(): Promise<void> {
     }
   }
   channels.register(onebot.channel);
-  await bootStep(
-    onebotCfg.enabled
-      ? `  · 注册通道 onebot11（反向 WS ${onebotCfg.reverseWsPath}）`
-      : "  · 注册通道 onebot11（未启用）",
+  log.ok(
+    channels
+      .list()
+      .map((c) => c.id)
+      .join("、"),
   );
 
   setNapCatWireProvider(() => {
@@ -498,24 +494,22 @@ async function bootstrap(): Promise<void> {
     log.ok(`已写入 ${label} 的 QQ ${sid}`);
   });
 
-  await bootStep("初始化：AI 供应商（LLM）…");
+  bootGroup("AI");
   let llmStore = loadProvidersFile(ROOT);
   const llm = new LlmRouter();
   applyProviderToLlm(llm, activeProvider(llmStore));
   const ap = activeProvider(llmStore);
-  await bootStep(
+  log.ok(
     ap?.apiKey || process.env.NEXUS_LLM_API_KEY
-      ? `  · 当前供应商 ${ap?.name ?? ap?.id}  model=${ap?.model || "default"}`
-      : "  · 未配置密钥：无 AI 时不自动回复（插件仍可响应）",
+      ? `${ap?.name ?? ap?.id}  ${ap?.model || "default"}`
+      : "未配置密钥",
   );
 
   const plugins = new PluginHost();
-  await bootStep("初始化：扫描插件目录 plugins/ …");
+  bootGroup("插件");
   try {
     const linked = ensurePluginSdkLinks(ROOT);
-    if (linked.length) {
-      await bootStep(`  · 已补插件 SDK 链接：${linked.join("、")}`);
-    }
+    if (linked.length) log.ok(`SDK ${linked.join("、")}`);
   } catch {
     /* ignore */
   }
@@ -534,7 +528,7 @@ async function bootstrap(): Promise<void> {
           dirs: missing,
         });
         if (pulled.applied.length) {
-          await bootStep(`  · 已自动安装系统插件：${pulled.applied.join("、")}`);
+          log.ok(pulled.applied.join("、"));
           ensurePluginSdkLinks(ROOT, pulled.applied);
         }
       }
@@ -544,10 +538,8 @@ async function bootstrap(): Promise<void> {
   }
   const prevPlugins = db.listPlugins();
   const scan = await loadPluginsFromDir(PLUGINS_DIR, (tip) => {
-    if (tip.level === "ok") log.ok(`[插件] ${tip.id}  ${tip.message}`);
-    else if (tip.level === "warn") log.warn(`[插件] ${tip.id}  ${tip.message}`);
-    else if (tip.level === "error") log.error(`[插件] ${tip.id}  ${tip.message}`);
-    else log.info(`[插件] ${tip.id}  ${tip.message}`);
+    if (tip.level === "warn") log.warn(tip.message);
+    else if (tip.level === "error") log.error(tip.message);
   });
   for (const p of scan.host.values()) {
     plugins.register(p);
@@ -561,24 +553,16 @@ async function bootstrap(): Promise<void> {
       enabled,
       loadedAt: nowIso(),
     });
-    await bootStep(
-      `  · 挂载插件 ${p.manifest.id}@${p.manifest.version}${enabled ? "" : "（已停用）"}`,
-      18,
-    );
+    if (enabled) log.ok(p.manifest.name || p.manifest.id);
   }
-  // onReady 挪到通道配置注入之后
 
-  await bootStep("初始化：扫描插件 adapter/ 并自动挂载通道…");
-  await remountPluginChannels(
-    PLUGINS_DIR,
-    channels,
-    {
-      ok: (m) => log.ok(m),
-      warn: (m) => log.warn(m),
-      error: (m) => log.error(m),
-      info: (m) => log.info(m),
-    },
-  );
+  const quietBoot = {
+    ok: (_m: string) => undefined,
+    warn: (m: string) => log.warn(m),
+    error: (m: string) => log.error(m),
+    info: (_m: string) => undefined,
+  };
+  await remountPluginChannels(PLUGINS_DIR, channels, quietBoot);
 
   const pluginHotDeps = {
     pluginsDir: PLUGINS_DIR,
@@ -628,21 +612,24 @@ async function bootstrap(): Promise<void> {
     save: () => saveChannelsConfig(ROOT, channelCfg),
   });
   const appliedCfg = await applyStoredPluginConfigs(ROOT, plugins.values());
-  if (appliedCfg) log.info(`插件配置已套用 ${appliedCfg} 项`);
+  if (appliedCfg) log.ok(`配置 ${appliedCfg}`);
   watchPluginConfigFile(ROOT, () => {
     void applyStoredPluginConfigs(ROOT, plugins.values()).then((n) => {
-      if (n) log.info(`配置文件已改，立即套用 ${n} 项`);
+      if (n) log.info(`配置 ${n}`);
     });
   });
-  await plugins.emitReady((id) => makePluginCtx(id, (m) => log.plugin(id, m)));
-  await bootStep("初始化：消息通道配置（主人等，与插件装载独立）…");
+  await plugins.emitReady((id) =>
+    makePluginCtx(id, (m) => {
+      if (/就绪|ready/i.test(m)) return;
+      log.plugin(id, m);
+    }),
+  );
+  log.ok(`${plugins.list().length} 个`);
 
   /** Soft power-off: ignore normal chat until #开机. #重启 calls system restart executable. */
   let powerOff = false;
 
-  await bootStep(`插件就绪：${plugins.list().length} 个`);
-
-  await bootStep("初始化：工作流引擎…");
+  bootGroup("工作流");
   const workflows = new WorkflowRunner();
   workflows.register({
     id: "starter",
@@ -659,9 +646,8 @@ async function bootstrap(): Promise<void> {
   for (const w of listLocalWorkflows(ROOT)) {
     workflows.register(toWorkflowDef(w));
   }
-  await bootStep(`  · 工作流 ${workflows.list().length} 个`);
+  log.ok(`${workflows.list().length} 个`);
 
-  await bootStep("初始化：MCP Host…");
   const mcp = new McpHost();
   mcp.register({
     name: "nexus.status",
@@ -673,16 +659,8 @@ async function bootstrap(): Promise<void> {
       db: db.stats(),
     }),
   });
-  await bootStep("  · 注册工具 nexus.status");
 
-  await bootStep("初始化：环境安装队列…");
-  initEnvTasks(ROOT, {
-    onLog: (line) => log.info(line),
-  });
-  // 不自动装 Go/Python/浏览器/NapCat：只在控制台「环境配置」里点安装或「一键排队」
-  await bootStep("  · 环境安装改为手动，不会开机自装");
-
-  await bootStep("初始化：HTTP 网关路由…");
+  initEnvTasks(ROOT);
 
   const tokens = new Map<string, { user: string; exp: number }>();
 
@@ -2606,57 +2584,35 @@ async function bootstrap(): Promise<void> {
   // 默认听所有网卡。只要本机访问时再设 HOST=127.0.0.1
   const host = String(process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
 
-  await bootStep("初始化：检测环境并放行端口…");
   try {
     const opened = ensureGatewayPortOpen({ envId: profile.id, host, port });
-    if (opened.attempted && opened.ok) {
-      await bootStep(`  · ${opened.message}`);
-    } else if (opened.attempted && !opened.ok) {
-      log.warn(opened.message);
-      await bootStep(`  · ${opened.message}`);
-    } else {
-      await bootStep(`  · ${opened.message}`);
-    }
+    if (opened.attempted && !opened.ok) log.warn(opened.message);
   } catch (e) {
     log.warn(`端口放行跳过：${e instanceof Error ? e.message : String(e)}`);
   }
 
-  await bootStep("初始化：监听端口…");
   const urls = consoleUrls(port, host);
   const publicIp = host === "0.0.0.0" || host === "::" ? await lookupPublicIpv4() : "";
   if (publicIp) urls.unshift(`http://${publicIp}:${port}/`);
-  const publicUrl = urls.find((u) => !u.includes("127.0.0.1")) || urls[0]!;
   const server = app.listen(port, host, () => {
     onebot.attach(server);
-    if (host === "0.0.0.0" || host === "::") {
-      log.info(`进程绑定 ${host}:${port}`);
-      log.info("云服务器请在安全组放行这个 TCP 端口。别的端口连不上");
-    } else {
-      log.info(`进程只绑定 ${host}:${port}。外网要改成不设 HOST，或 HOST=0.0.0.0`);
-    }
-    for (const u of urls) {
-      if (u.includes("127.0.0.1")) log.info(`本机快捷方式 ${u}`);
-      else log.info(`控制台 ${u}`);
-    }
-    void printBootSuccess({
-      url: publicUrl,
-      env: profile.id,
-      plugins: plugins.list().length,
-      channels: channels.list().length,
-    });
-    log.info(
-      `管理账号=${adminCfg.username}  首次设置完成=${adminCfg.setupCompleted ? "是" : "否"}  会话=${adminCfg.sessionHours}小时`,
-    );
+    bootGroup("网关");
+    log.ok(`${host}:${port}`);
+    const primary = urls.find((u) => !u.includes("127.0.0.1"));
+    const local = urls.find((u) => u.includes("127.0.0.1"));
+    if (primary) log.ok(primary);
+    if (local && local !== primary) log.ok(local);
     if (onebot.getConfig().enabled) {
       const cfg = onebot.getConfig();
       const wsPath = cfg.reverseWsPath || "/onebot/v11/ws";
       const hosts = connectHosts(host, publicIp);
+      const show = hosts.find((h) => h !== "127.0.0.1") || hosts[0] || "127.0.0.1";
       const ports = new Set<number>([port]);
       for (const b of cfg.bots || []) {
         const p = Math.floor(Number(b.listenPort) || 0);
         if (p > 0 && p < 65536) ports.add(p);
       }
-      log.info("OneBot 11 当前可连接反向地址");
+      bootGroup("OneBot");
       for (const p of ports) {
         const names = (cfg.bots || [])
           .filter((b) => {
@@ -2666,11 +2622,10 @@ async function bootstrap(): Promise<void> {
           .map((b) => b.label || b.selfId || "")
           .filter(Boolean);
         const tag = names.length ? names.join("、") : p === port ? "网关" : "独立端口";
-        for (const hst of hosts) log.info(`  ${tag}  ws://${hst}:${p}${wsPath}`);
+        log.ok(`${tag}  ws://${show}:${p}${wsPath}`);
       }
-      log.info(`OneBot HTTP → ${cfg.httpPath}`);
-      log.info("文档 https://napneko.github.io");
     }
+    void printBootSuccess();
     void deliverRestartSuccessNotice();
 
     // 后端终端输入（跑代码的那个窗口），不是网页

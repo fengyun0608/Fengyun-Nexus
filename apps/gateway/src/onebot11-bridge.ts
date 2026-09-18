@@ -356,7 +356,6 @@ export class OneBot11Bridge {
       });
     });
     this.syncListenPorts();
-    log.info(`OneBot 11 反向 WS 就绪  path=${this.cfg.reverseWsPath}`);
   }
 
   private expectedToken(listenPort: number): string {

@@ -1,5 +1,4 @@
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import { join } from "node:path";
 import { loadPluginsFromDir } from "@fengyun/nexus-plugin-loader";
 import type { PluginHost } from "@fengyun/nexus-plugin-sdk";
 import { nowIso } from "@fengyun/nexus-shared";
@@ -140,6 +139,5 @@ export function watchPluginsHotReload(
     deps.log.warn(`插件热更监视异常：${err instanceof Error ? err.message : String(err)}`);
   });
 
-  deps.log.ok(`插件热更已启用 → ${join(deps.pluginsDir)}`);
   return watcher;
 }

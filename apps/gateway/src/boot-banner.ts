@@ -14,10 +14,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** 启动闪屏：多行短提示后继续。 */
-export async function bootStep(msg: string, ms = 28): Promise<void> {
+/** 启动时按模块分一块。一块结束再写下一块。 */
+export function bootGroup(name: string): void {
+  log.info(`[${name}]`);
+}
+
+/** 旧闪屏步进。新启动不再逐行停顿。 */
+export async function bootStep(msg: string, ms = 0): Promise<void> {
   log.info(msg);
-  if (process.env.NEXUS_BOOT_FAST === "1") return;
+  if (!ms || process.env.NEXUS_BOOT_FAST === "1") return;
   await sleep(ms);
 }
 
@@ -35,17 +40,10 @@ ${c.reset}${c.magenta}${c.bold}           N E X U S${c.reset}  ${c.gray}· AI co
   console.log(art);
 }
 
-export async function printBootSuccess(opts: {
-  url: string;
-  env: string;
-  plugins: number;
-  channels: number;
-}): Promise<void> {
+export async function printBootSuccess(): Promise<void> {
   console.log("");
   log.ok("────────────────────────────────────────");
   log.ok(`${c.bold}Fengyun Nexus 启动成功${c.reset}`);
-  log.ok(`环境 ${opts.env}  ·  插件 ${opts.plugins}  ·  通道 ${opts.channels}`);
-  log.ok(`控制台 ${opts.url}`);
   log.ok("开始使用吧");
   log.ok("────────────────────────────────────────");
   console.log("");
