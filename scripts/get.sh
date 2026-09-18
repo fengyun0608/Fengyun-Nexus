@@ -33,6 +33,20 @@ log() { echo ">>> $*"; }
 ok() { echo "OK  $*"; }
 warn() { echo "!!  $*"; }
 
+# Termux 的 /tmp 常不可写；优先 TMPDIR / PREFIX/tmp / HOME
+nexus_tmpdir() {
+  if [ -n "${TMPDIR:-}" ] && mkdir -p "$TMPDIR" 2>/dev/null && [ -w "$TMPDIR" ]; then
+    echo "$TMPDIR"
+    return 0
+  fi
+  if [ -n "${PREFIX:-}" ] && mkdir -p "$PREFIX/tmp" 2>/dev/null && [ -w "$PREFIX/tmp" ]; then
+    echo "$PREFIX/tmp"
+    return 0
+  fi
+  mkdir -p "$HOME/.nexus-tmp" 2>/dev/null || true
+  echo "$HOME/.nexus-tmp"
+}
+
 normalize_mirror() {
   case "$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')" in
     cn|china|gitcode|国内|zh) echo "cn" ;;
@@ -50,6 +64,7 @@ apply_mirror() {
     ZIP_URLS=(
       "https://github.com/fengyun0608/Fengyun-Nexus/archive/refs/heads/${BRANCH}.zip"
       "https://codeload.github.com/fengyun0608/Fengyun-Nexus/zip/refs/heads/${BRANCH}"
+      "https://ghfast.top/https://github.com/fengyun0608/Fengyun-Nexus/archive/refs/heads/${BRANCH}.zip"
     )
   else
     MIRROR="cn"
@@ -59,6 +74,9 @@ apply_mirror() {
     ZIP_URLS=(
       "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/repository/archive/${BRANCH}.zip"
       "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/-/archive/${BRANCH}/Fengyun-Nexus-${BRANCH}.zip"
+      # GitCode zip 偶发返回 HTML：再试 GitHub / 镜像
+      "https://codeload.github.com/fengyun0608/Fengyun-Nexus/zip/refs/heads/${BRANCH}"
+      "https://ghfast.top/https://github.com/fengyun0608/Fengyun-Nexus/archive/refs/heads/${BRANCH}.zip"
     )
   fi
 }
@@ -410,36 +428,49 @@ remove_install_dir() {
 
 clone_via_zip() {
   local zip_urls=("${ZIP_URLS[@]}")
-  local tmp="$HOME/.nexus-dl-$$"
+  local tmp
+  tmp="$(nexus_tmpdir)/nexus-dl-$$"
   mkdir -p "$tmp"
   local z="$tmp/nexus.zip"
   local ok_dl=0
   local u
   for u in "${zip_urls[@]}"; do
-    log "尝试 zip 下载"
-    if command -v curl >/dev/null 2>&1 && curl -fsSL --connect-timeout 20 -o "$z" "$u"; then
+    log "尝试 zip：$u"
+    rm -f "$z"
+    if command -v curl >/dev/null 2>&1 && curl -fsSL --connect-timeout 25 -L -o "$z" "$u"; then
+      :
+    elif command -v wget >/dev/null 2>&1 && wget -q -O "$z" "$u"; then
+      :
+    else
+      continue
+    fi
+    # 必须是真实 zip（PK…），GitCode 常下到登录 HTML
+    if [ ! -s "$z" ]; then
+      continue
+    fi
+    magic="$(head -c 2 "$z" 2>/dev/null || true)"
+    if [ "$magic" != "PK" ]; then
+      warn "不是 zip（多半是网页），跳过"
+      continue
+    fi
+    command -v unzip >/dev/null 2>&1 || pkg_install unzip || (is_termux && pkg install -y unzip) || true
+    rm -rf "$tmp/out"
+    mkdir -p "$tmp/out"
+    if unzip -q "$z" -d "$tmp/out"; then
       ok_dl=1
       break
     fi
-    if command -v wget >/dev/null 2>&1 && wget -q -O "$z" "$u"; then
-      ok_dl=1
-      break
-    fi
+    warn "unzip 失败，试下一个源"
   done
-  if [ "$ok_dl" != "1" ] || [ ! -s "$z" ]; then
+  if [ "$ok_dl" != "1" ]; then
     rm -rf "$tmp"
     return 1
   fi
-  command -v unzip >/dev/null 2>&1 || pkg_install unzip || (is_termux && pkg install -y unzip) || true
-  unzip -q "$z" -d "$tmp/out" || {
-    rm -rf "$tmp"
-    return 1
-  }
   local src=""
   while IFS= read -r f; do
     src="$(dirname "$f")"
     break
-  done < <(find "$tmp/out" -maxdepth 3 -type f \( -name package.json -o -name boot.sh \) 2>/dev/null)
+  done < <(find "$tmp/out" -maxdepth 4 -type f \( -name package.json -o -name boot.sh \) 2>/dev/null)
   if [ -z "$src" ] || [ ! -f "$src/boot.sh" ]; then
     rm -rf "$tmp"
     return 1
@@ -454,21 +485,26 @@ clone_via_zip() {
 clone_fresh() {
   safe_cd_home
   mkdir -p "$(dirname "$INSTALL_DIR")"
+  local err
+  err="$(nexus_tmpdir)/nexus-git-err.$$"
+  : > "$err" || err="$HOME/.nexus-git-err.$$"
   log "克隆 $REPO_URL"
-  if git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" 2>/tmp/nexus-git-err.$$ || \
-     git clone --depth 1 "$REPO_URL" "$INSTALL_DIR" 2>>/tmp/nexus-git-err.$$; then
-    rm -f /tmp/nexus-git-err.$$
+  # 不要写 /tmp：Termux 上常 Permission denied，连重定向都会让 clone「假失败」
+  if git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" 2>"$err" || \
+     git clone --depth 1 "$REPO_URL" "$INSTALL_DIR" 2>>"$err"; then
+    rm -f "$err"
     return 0
   fi
   warn "git clone 失败，尝试 zip 回退"
-  cat /tmp/nexus-git-err.$$ 2>/dev/null || true
-  rm -f /tmp/nexus-git-err.$$
+  cat "$err" 2>/dev/null || true
+  rm -f "$err"
   remove_install_dir
   if clone_via_zip; then
     return 0
   fi
   echo "克隆失败。请检查网络后重试："
   echo "  curl -fsSL \"$GET_SH_URL\" | bash"
+  echo "  或：NEXUS_MIRROR=global curl -fsSL \"https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.sh\" | bash"
   exit 1
 }
 
