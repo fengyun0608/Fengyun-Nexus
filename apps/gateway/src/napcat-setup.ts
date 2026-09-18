@@ -554,32 +554,38 @@ export async function installNapCat(opts: {
 
   if (flavor === "termux") {
     progress(15);
-    const script = join(home, "napcat.termux.sh");
-    // 官方文档同源；raw 走镜像链（downloadFile 只对 github/raw 套代理）
-    await downloadFirst(
-      [
-        "https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.termux.sh",
-        "https://raw.githubusercontent.com/NapNeko/NapCat-Installer/main/script/install.termux.sh",
-        "https://cdn.jsdelivr.net/gh/NapNeko/NapCat-Installer@main/script/install.termux.sh",
-      ],
-      script,
-      log,
-      signal,
-    );
-    progress(55);
-    log("执行 Termux 官方安装脚本…");
+    const script = join(home, "napcat.termux.nexus.sh");
+    writeTermuxInstallScript(script, url, token);
+    log("Termux 安装：proot-distro 拉 Debian 常被墙，将自动试本机代理端口");
+    log("若手机开了 Clash/梯子，请开「允许局域网」或系统代理，Termux 才能走 7890");
+    progress(25);
     const code = await runShell(script, home, log);
-    if (code !== 0) throw new Error(`Termux 安装脚本退出码 ${code}`);
-    const shellDir = findShellDir(home) || home;
+    if (code !== 0) {
+      throw new Error(
+        "Termux NapCat 安装失败。多半是 Docker Hub 拉不到 Debian。请在手机开梯子并允许局域网，或设置 HTTPS_PROXY 后重试",
+      );
+    }
+    const shellDir =
+      findShellDir(home) ||
+      findTermuxNapCatRoot() ||
+      home;
     wireNapCatConfigs(shellDir, url, token);
+    // 也尽量接线容器内真实 napcat 目录
+    const inner = findTermuxNapCatRoot();
+    if (inner) wireNapCatConfigs(inner, url, token);
     writeStartScripts(shellDir, flavor);
-    writeNapCatMarker(opts.root, { version: "termux", flavor, home: shellDir });
+    writeNapCatMarker(opts.root, {
+      version: "termux",
+      flavor,
+      home: inner || shellDir,
+    });
     progress(100);
+    log("启动示例：screen -dmS napcat bash -c 'proot-distro sh napcat -- bash -c \"xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox\"'");
     return {
-      home: shellDir,
+      home: inner || shellDir,
       flavor,
       version: "termux",
-      launchCmd: `bash "${join(shellDir, "start-nexus.sh")}"`,
+      launchCmd: `proot-distro sh napcat -- bash -c "xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox"`,
     };
   }
 
@@ -672,6 +678,148 @@ function findShellDir(dir: string): string | null {
     /* ignore */
   }
   return null;
+}
+
+function findTermuxNapCatRoot(): string | null {
+  const prefix = process.env.PREFIX || "/data/data/com.termux/files/usr";
+  const candidates = [
+    join(
+      prefix,
+      "var/lib/proot-distro/installed-rootfs/napcat/root/Napcat/opt/QQ/resources/app/app_launcher/napcat",
+    ),
+    join(prefix, "var/lib/proot-distro/installed-rootfs/napcat/root/Napcat"),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** Termux 专用：自动探测本机 HTTP 代理，避免 Docker Hub Network is unreachable */
+function writeTermuxInstallScript(scriptPath: string, reverseWsUrl: string, _token: string): void {
+  const ws = reverseWsUrl.replace(/"/g, '\\"');
+  const body = `#!/data/data/com.termux/files/usr/bin/bash
+set -e
+MAGENTA='\\033[0;1;35;95m'
+RED='\\033[0;1;31;91m'
+GREEN='\\033[0;1;32;92m'
+NC='\\033[0m'
+
+echo -e "准备 proot-distro / screen…"
+if ! command -v proot-distro >/dev/null 2>&1; then
+  pkg update -y || apt update -y
+  pkg install -y proot-distro screen || apt install -y proot-distro screen
+else
+  pkg install -y screen >/dev/null 2>&1 || true
+fi
+
+ROOTFS="$PREFIX/var/lib/proot-distro/installed-rootfs/napcat"
+has_napcat() {
+  [ -d "$ROOTFS" ] && [ -f "$ROOTFS/etc/os-release" ]
+}
+
+# 探测本机常见代理（Clash / v2rayN 等）
+pick_proxy() {
+  if [ -n "$HTTPS_PROXY$https_proxy$HTTP_PROXY$http_proxy$ALL_PROXY$all_proxy" ]; then
+    echo "\${HTTPS_PROXY:-\${https_proxy:-\${HTTP_PROXY:-\${http_proxy:-\${ALL_PROXY:-\$all_proxy}}}}}"
+    return 0
+  fi
+  if [ -n "$NEXUS_HTTP_PROXY" ]; then
+    echo "$NEXUS_HTTP_PROXY"
+    return 0
+  fi
+  for p in 7890 7891 10809 10808 2080 8080 6152; do
+    if command -v curl >/dev/null 2>&1; then
+      if curl -fsS --connect-timeout 1 "http://127.0.0.1:$p" >/dev/null 2>&1 \\
+        || curl -fsS --connect-timeout 1 -x "http://127.0.0.1:$p" "https://www.baidu.com" -o /dev/null >/dev/null 2>&1; then
+        echo "http://127.0.0.1:$p"
+        return 0
+      fi
+    fi
+    # 端口开着也算（部分代理不回 HTTP）
+    if command -v bash >/dev/null 2>&1; then
+      if (echo >/dev/tcp/127.0.0.1/$p) >/dev/null 2>&1; then
+        echo "http://127.0.0.1:$p"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+export_proxy() {
+  local px="$1"
+  export http_proxy="$px" https_proxy="$px" HTTP_PROXY="$px" HTTPS_PROXY="$px" ALL_PROXY="$px" all_proxy="$px"
+  echo -e "\${GREEN}使用代理 $px\${NC}"
+}
+
+try_install_debian() {
+  echo -e "安装 napcat 容器（debian）…"
+  # 半截失败先清掉
+  if [ -d "$ROOTFS" ] && ! has_napcat; then
+    proot-distro remove napcat >/dev/null 2>&1 || rm -rf "$ROOTFS" || true
+  fi
+  if has_napcat; then
+    echo -e "\${GREEN}已有 napcat 容器，跳过拉取\${NC}"
+    return 0
+  fi
+  if proot-distro install debian --override-alias napcat; then
+    return 0
+  fi
+  return 1
+}
+
+PROXY=""
+PROXY="\$(pick_proxy || true)"
+if [ -n "$PROXY" ]; then
+  export_proxy "$PROXY"
+fi
+
+if ! try_install_debian; then
+  echo -e "\${RED}直连 Docker Hub 失败，正在重试代理…\${NC}"
+  # 再扫一遍端口
+  for p in 7890 7891 10809 10808 2080 8080; do
+    if (echo >/dev/tcp/127.0.0.1/$p) >/dev/null 2>&1; then
+      export_proxy "http://127.0.0.1:$p"
+      if try_install_debian; then
+        break
+      fi
+    fi
+  done
+fi
+
+if ! has_napcat; then
+  echo -e "\${RED}debian 容器安装失败：Network unreachable 多半是 Docker Hub 被墙。\${NC}"
+  echo -e "请任选其一后重试："
+  echo -e "  1) 手机 Clash 开「允许局域网」，Termux 执行: export HTTPS_PROXY=http://127.0.0.1:7890"
+  echo -e "  2) 或设置 NEXUS_HTTP_PROXY 后重新点安装"
+  exit 1
+fi
+
+echo -e "\${GREEN}正在初始化 napcat 容器…\${NC}"
+# --proxy 1：官方安装脚本国内镜像；失败再试 --proxy 0
+init_cmd='apt update -y && apt install -y sudo curl libgcrypt20 ca-certificates && \\
+curl -fsSL -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh || \\
+curl -fsSL -o napcat.sh https://cdn.jsdelivr.net/gh/NapNeko/NapCat-Installer@main/script/install.sh && \\
+(sudo bash napcat.sh --docker n --cli n --proxy 1 --force || sudo bash napcat.sh --docker n --cli n --proxy 0 --force) && \\
+apt autoremove -y && apt clean && rm -rf /tmp/* /var/lib/apt/lists'
+
+if ! proot-distro sh napcat -- bash -c "$init_cmd"; then
+  echo -e "\${RED}napcat 容器初始化失败\${NC}"
+  exit 1
+fi
+
+echo -e "\${GREEN}napcat 容器安装完成\${NC}"
+echo -e "启动: proot-distro sh napcat -- bash -c \\"xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox\\""
+echo -e "后台: screen -dmS napcat bash -c 'proot-distro sh napcat -- bash -c \\"xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox\\"'"
+echo -e "反向 WS 目标: \${MAGENTA}${ws}\${NC}"
+`;
+  writeFileSync(scriptPath, body.replace(/\r\n/g, "\n"), "utf8");
+  try {
+    execSync(`chmod +x "${scriptPath}"`, { stdio: "ignore" });
+  } catch {
+    /* ignore */
+  }
 }
 
 function runShell(script: string, cwd: string, log: InstallNapCatLog): Promise<number> {
