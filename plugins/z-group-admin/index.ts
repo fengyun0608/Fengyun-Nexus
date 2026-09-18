@@ -66,6 +66,15 @@ function banFailTip(message?: string): string {
   return m;
 }
 
+function kickFailTip(message?: string): string {
+  const m = (message || "").trim();
+  if (!m || m === "Error" || /napcat\.mjs|_handle/i.test(m)) {
+    return "踢人失败。机器人需要是管理员，且不能踢群主或其他管理员";
+  }
+  if (/get Uid Error|uid/i.test(m)) return "找不到这个 QQ";
+  return m;
+}
+
 const TEASE = [
   "欸？你怎么被禁言了呀～是不是干了什么坏事了，杂鱼？",
   "哼哼，主人也被禁言啦？做了什么坏事被抓住了吗～",
@@ -77,7 +86,7 @@ export class ZGroupAdminPlugin extends Plugin {
   manifest = {
     id: "z.group.admin",
     name: "群管",
-    version: "0.1.1",
+    version: "0.1.2",
     priority: 850,
     category: "standard" as const,
     kind: "channel" as const,
@@ -188,13 +197,13 @@ export class ZGroupAdminPlugin extends Plugin {
     const r = await ctx.ob11.call(
       "set_group_kick",
       {
-        group_id: Number(gid) || gid,
-        user_id: Number(qq) || qq,
+        group_id: String(gid),
+        user_id: String(qq),
         reject_add_request: reject,
       },
       { botId: botIdOf(e) },
     );
-    await e.reply(r.ok ? (reject ? "已踢黑" : "已踢出") : r.message || "操作失败");
+    await e.reply(r.ok ? (reject ? "已踢黑" : "已踢出") : kickFailTip(r.message));
   }
 
   async ban(e: NexusEvent, ctx: PluginContext) {
@@ -250,7 +259,7 @@ export class ZGroupAdminPlugin extends Plugin {
       },
       { botId: botIdOf(e) },
     );
-    await e.reply(r.ok ? "已解禁" : r.message || "解禁失败");
+    await e.reply(r.ok ? "已解禁" : banFailTip(r.message));
   }
 
   async wholeBan(e: NexusEvent, ctx: PluginContext) {
@@ -273,10 +282,18 @@ export class ZGroupAdminPlugin extends Plugin {
     }
     const r = await ctx.ob11.call(
       "set_group_whole_ban",
-      { group_id: Number(gid) || gid, enable },
+      { group_id: String(gid), enable },
       { botId: botIdOf(e) },
     );
-    await e.reply(r.ok ? (enable ? "已全体禁言" : "已全体解禁") : r.message || "操作失败");
+    await e.reply(
+      r.ok
+        ? enable
+          ? "已全体禁言"
+          : "已全体解禁"
+        : r.message && r.message !== "Error"
+          ? r.message
+          : "操作失败。机器人需要是管理员",
+    );
   }
 
   async announce(e: NexusEvent, ctx: PluginContext) {
@@ -297,13 +314,13 @@ export class ZGroupAdminPlugin extends Plugin {
     const botId = botIdOf(e);
     let r = await ctx.ob11.call(
       "_send_group_notice",
-      { group_id: Number(gid) || gid, content },
+      { group_id: String(gid), content },
       { botId },
     );
     if (!r.ok) {
       r = await ctx.ob11.call(
         "send_group_notice",
-        { group_id: Number(gid) || gid, content },
+        { group_id: String(gid), content },
         { botId },
       );
     }
@@ -323,13 +340,13 @@ export class ZGroupAdminPlugin extends Plugin {
     const botId = botIdOf(e);
     let r = await ctx.ob11.call(
       "get_group_root_files",
-      { group_id: Number(gid) || gid },
+      { group_id: String(gid) },
       { botId },
     );
     if (!r.ok) {
       r = await ctx.ob11.call(
         "get_group_file_system_info",
-        { group_id: Number(gid) || gid },
+        { group_id: String(gid) },
         { botId },
       );
     }
