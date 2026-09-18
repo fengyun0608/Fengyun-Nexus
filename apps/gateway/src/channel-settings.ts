@@ -1,10 +1,18 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+export type MasterLevel = "core" | "new" | "normal";
+
 export type ChannelSettings = {
   label?: string;
-  /** Owner / master user ids for this channel (e.g. QQ numbers). */
+  /** 兼容旧配置：全部主人并集（读写时与三级字段同步） */
   masters: string[];
+  /** 核心主人：控制台可设；可管所有主人 */
+  coreMasters: string[];
+  /** 新主人：可加普通/新主人，删不了核心与新主人以外的更高权限 */
+  newMasters: string[];
+  /** 普通主人：可加普通主人，可删普通主人 */
+  normalMasters: string[];
   /** If true, only masters trigger bot replies. */
   onlyMasters: boolean;
   /**
@@ -36,17 +44,54 @@ function parseIdList(raw: unknown): string[] {
   return [];
 }
 
-function normalize(raw: Partial<ChannelSettings> | undefined): ChannelSettings {
-  const masters = parseIdList(raw?.masters);
+function uniq(ids: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const id of ids) {
+    const s = String(id).trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+function syncMastersUnion(s: ChannelSettings): ChannelSettings {
+  const coreMasters = uniq(s.coreMasters);
+  const newMasters = uniq(s.newMasters).filter((id) => !coreMasters.includes(id));
+  const normalMasters = uniq(s.normalMasters).filter(
+    (id) => !coreMasters.includes(id) && !newMasters.includes(id),
+  );
   return {
+    ...s,
+    coreMasters,
+    newMasters,
+    normalMasters,
+    masters: uniq([...coreMasters, ...newMasters, ...normalMasters]),
+  };
+}
+
+function normalize(raw: Partial<ChannelSettings> | undefined): ChannelSettings {
+  const legacy = parseIdList(raw?.masters);
+  let coreMasters = parseIdList(raw?.coreMasters);
+  let newMasters = parseIdList(raw?.newMasters);
+  let normalMasters = parseIdList(raw?.normalMasters);
+  // 旧配置只有 masters：全部视为核心主人
+  if (!coreMasters.length && !newMasters.length && !normalMasters.length && legacy.length) {
+    coreMasters = legacy;
+  }
+  return syncMastersUnion({
     ...(raw ?? {}),
     label: typeof raw?.label === "string" ? raw.label : undefined,
-    masters,
+    masters: legacy,
+    coreMasters,
+    newMasters,
+    normalMasters,
     onlyMasters: Boolean(raw?.onlyMasters),
     replyGroupIds: parseIdList(raw?.replyGroupIds),
     systemPrompt: typeof raw?.systemPrompt === "string" ? raw.systemPrompt : "",
     note: typeof raw?.note === "string" ? raw.note : "",
-  };
+  });
 }
 
 export function loadChannelsConfig(root: string): ChannelsConfigFile {
@@ -81,9 +126,13 @@ export function loadChannelsConfig(root: string): ChannelsConfigFile {
 }
 
 export function saveChannelsConfig(root: string, cfg: ChannelsConfigFile): void {
+  const channels: Record<string, ChannelSettings> = {};
+  for (const [id, s] of Object.entries(cfg.channels ?? {})) {
+    channels[id] = syncMastersUnion(normalize(s));
+  }
   writeFileSync(
     join(root, "configs/channels.local.json"),
-    `${JSON.stringify(cfg, null, 2)}\n`,
+    `${JSON.stringify({ channels }, null, 2)}\n`,
     "utf8",
   );
 }
@@ -95,12 +144,94 @@ export function getChannelSettings(
   return normalize(cfg.channels[id] ?? { masters: [], onlyMasters: false });
 }
 
+export function masterLevelOf(
+  settings: ChannelSettings,
+  userId: string,
+): MasterLevel | null {
+  const id = String(userId);
+  if (settings.coreMasters.includes(id)) return "core";
+  if (settings.newMasters.includes(id)) return "new";
+  if (settings.normalMasters.includes(id)) return "normal";
+  if (settings.masters.includes(id)) return "core";
+  return null;
+}
+
 export function isChannelMaster(
   settings: ChannelSettings,
   userId: string,
 ): boolean {
-  if (!settings.masters.length) return false;
-  return settings.masters.includes(String(userId));
+  return masterLevelOf(settings, userId) != null;
+}
+
+export function isCoreMaster(settings: ChannelSettings, userId: string): boolean {
+  return masterLevelOf(settings, userId) === "core";
+}
+
+const LEVEL_RANK: Record<MasterLevel, number> = {
+  core: 3,
+  new: 2,
+  normal: 1,
+};
+
+export type MasterMutateResult = { ok: true; settings: ChannelSettings } | { ok: false; error: string };
+
+/** 主人互加：核心可加任何级；新主人可加新/普通；普通只能加普通。 */
+export function addChannelMaster(
+  settings: ChannelSettings,
+  actorId: string,
+  targetId: string,
+  level: MasterLevel,
+): MasterMutateResult {
+  const actor = masterLevelOf(settings, actorId);
+  if (!actor) return { ok: false, error: "无权限" };
+  const target = String(targetId).trim();
+  if (!/^\d{5,}$/.test(target)) return { ok: false, error: "QQ 号无效" };
+  if (LEVEL_RANK[actor] < LEVEL_RANK[level]) {
+    return { ok: false, error: "权限不够，加不了这个级别" };
+  }
+  if (actor === "new" && level === "core") {
+    return { ok: false, error: "新主人加不了核心主人" };
+  }
+  if (actor === "normal" && level !== "normal") {
+    return { ok: false, error: "普通主人只能加普通主人" };
+  }
+  let next = { ...settings };
+  next.coreMasters = next.coreMasters.filter((x) => x !== target);
+  next.newMasters = next.newMasters.filter((x) => x !== target);
+  next.normalMasters = next.normalMasters.filter((x) => x !== target);
+  if (level === "core") next.coreMasters = [...next.coreMasters, target];
+  else if (level === "new") next.newMasters = [...next.newMasters, target];
+  else next.normalMasters = [...next.normalMasters, target];
+  next = syncMastersUnion(next);
+  return { ok: true, settings: next };
+}
+
+/** 新主人删不了核心/新主人；普通只能删普通；核心可删非自己（至少留一个核心）。 */
+export function removeChannelMaster(
+  settings: ChannelSettings,
+  actorId: string,
+  targetId: string,
+): MasterMutateResult {
+  const actor = masterLevelOf(settings, actorId);
+  if (!actor) return { ok: false, error: "无权限" };
+  const target = String(targetId).trim();
+  const targetLevel = masterLevelOf(settings, target);
+  if (!targetLevel) return { ok: false, error: "对方不是主人" };
+  if (actor === "new" && (targetLevel === "core" || targetLevel === "new")) {
+    return { ok: false, error: "新主人删不了核心或新主人" };
+  }
+  if (actor === "normal" && targetLevel !== "normal") {
+    return { ok: false, error: "普通主人只能删普通主人" };
+  }
+  if (targetLevel === "core" && settings.coreMasters.length <= 1) {
+    return { ok: false, error: "至少保留一位核心主人" };
+  }
+  let next = { ...settings };
+  next.coreMasters = next.coreMasters.filter((x) => x !== target);
+  next.newMasters = next.newMasters.filter((x) => x !== target);
+  next.normalMasters = next.normalMasters.filter((x) => x !== target);
+  next = syncMastersUnion(next);
+  return { ok: true, settings: next };
 }
 
 /** 群消息是否允许走 AI / 普通闲聊（空白名单 = 全部群；# 指令不走此判断） */

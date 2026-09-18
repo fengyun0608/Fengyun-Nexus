@@ -26,11 +26,13 @@ type OneBotInfo = {
   accessTokenSet?: boolean;
   lastEventAt?: string;
   message?: string;
+  bots?: Array<{ selfId: string; label: string; connected: boolean; apiBase: string }>;
   config?: {
     enabled?: boolean;
     accessToken?: string;
     reverseWsPath?: string;
     httpPath?: string;
+    bots?: Array<{ selfId?: string; label?: string; apiBase?: string; accessToken?: string }>;
   };
 };
 
@@ -45,6 +47,7 @@ const enabled = ref(false);
 const accessToken = ref("");
 const reverseWsPath = ref("/onebot/v11/ws");
 const httpPath = ref("/onebot/v11");
+const botsText = ref("");
 
 async function load() {
   loading.value = true;
@@ -55,6 +58,10 @@ async function load() {
     accessToken.value = info.value.config?.accessToken || "";
     reverseWsPath.value = info.value.config?.reverseWsPath || info.value.reverseWsPath || "/onebot/v11/ws";
     httpPath.value = info.value.config?.httpPath || info.value.httpPath || "/onebot/v11";
+    const bots = info.value.config?.bots || [];
+    botsText.value = bots
+      .map((b) => [b.selfId || "", b.label || "", b.apiBase || ""].join(" | "))
+      .join("\n");
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -65,6 +72,19 @@ async function load() {
 async function save() {
   saving.value = true;
   try {
+    const bots = botsText.value
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const parts = line.split("|").map((s) => s.trim());
+        return {
+          selfId: parts[0] || "",
+          label: parts[1] || "",
+          apiBase: parts[2] || "",
+          accessToken: parts[3] || "",
+        };
+      });
     info.value = await api<OneBotInfo>("/v1/channels/onebot11/config", {
       method: "POST",
       token: auth.token,
@@ -73,6 +93,7 @@ async function save() {
         accessToken: accessToken.value,
         reverseWsPath: reverseWsPath.value,
         httpPath: httpPath.value,
+        bots,
       }),
     });
     message.success(info.value.message || "已保存");
@@ -115,6 +136,10 @@ onMounted(() => void load());
           <label class="field">Access Token <n-input v-model:value="accessToken" type="password" show-password-on="click" /></label>
           <label class="field">反向 WS 路径 <n-input v-model:value="reverseWsPath" /></label>
           <label class="field">HTTP 路径 <n-input v-model:value="httpPath" /></label>
+          <label class="field">
+            多号（每行：QQ | 备注 | apiBase）
+            <n-input v-model:value="botsText" type="textarea" :rows="3" placeholder="123456 | 主号 | http://127.0.0.1:3000" />
+          </label>
           <n-space>
             <n-button type="primary" :loading="saving" @click="save">保存</n-button>
             <n-button @click="load">刷新</n-button>

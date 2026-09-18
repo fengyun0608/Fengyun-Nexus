@@ -3,5 +3,13 @@
   "accessToken": "",
   "reverseWsPath": "/onebot/v11/ws",
   "httpPath": "/onebot/v11/http",
-  "docsUrl": "https://napneko.github.io"
+  "docsUrl": "https://napneko.github.io",
+  "bots": [
+    {
+      "selfId": "",
+      "label": "主号",
+      "apiBase": "http://127.0.0.1:3000",
+      "accessToken": ""
+    }
+  ]
 }

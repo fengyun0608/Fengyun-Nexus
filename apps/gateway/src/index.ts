@@ -79,7 +79,7 @@ import {
 } from "./workflow-files.js";
 import { pathToFileURL } from "node:url";
 import { renderHtmlShot, renderMenuShot } from "./menu-shot.js";
-import { makePluginCtx, setPluginRuntime } from "./plugin-ctx.js";
+import { makePluginCtx, setPluginRuntime, setPluginChannelBag, setPluginOneBot } from "./plugin-ctx.js";
 import { splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
@@ -116,12 +116,20 @@ const PLUGINS_DIR = join(ROOT, "plugins");
 
 function loadOneBotConfig(): OneBotConfig {
   const base = loadJson<OneBotConfig>("configs/onebot.default.json");
-  if (!existsSync(ONEBOT_LOCAL)) return base;
+  const withBots: OneBotConfig = {
+    ...base,
+    bots: Array.isArray(base.bots) ? base.bots : [],
+  };
+  if (!existsSync(ONEBOT_LOCAL)) return withBots;
   try {
     const local = JSON.parse(readFileSync(ONEBOT_LOCAL, "utf8")) as Partial<OneBotConfig>;
-    return { ...base, ...local };
+    return {
+      ...withBots,
+      ...local,
+      bots: Array.isArray(local.bots) ? local.bots : withBots.bots,
+    };
   } catch {
-    return base;
+    return withBots;
   }
 }
 
@@ -338,6 +346,28 @@ async function bootstrap(): Promise<void> {
 
   const plugins = new PluginHost();
   await bootStep("初始化：扫描插件目录 plugins/ …");
+  try {
+    const repoUrl = String(registry.pluginsRepo?.url || "").trim();
+    if (repoUrl) {
+      const probe = checkPluginUpdates(ROOT, {
+        pluginsRepoUrl: repoUrl,
+        pluginsRepoBranch: registry.pluginsRepo?.branch || "main",
+      });
+      const missing = probe.items.filter((i) => i.status === "remote-only").map((i) => i.dir);
+      if (missing.length) {
+        const pulled = applyPluginUpdates(ROOT, {
+          pluginsRepoUrl: repoUrl,
+          pluginsRepoBranch: registry.pluginsRepo?.branch || "main",
+          dirs: missing,
+        });
+        if (pulled.applied.length) {
+          await bootStep(`  · 已自动安装系统插件：${pulled.applied.join("、")}`);
+        }
+      }
+    }
+  } catch (e) {
+    log.warn(`系统插件自动安装跳过：${e instanceof Error ? e.message : String(e)}`);
+  }
   const prevPlugins = db.listPlugins();
   const scan = await loadPluginsFromDir(PLUGINS_DIR, (tip) => {
     if (tip.level === "ok") log.ok(`[插件] ${tip.id}  ${tip.message}`);
@@ -362,7 +392,7 @@ async function bootstrap(): Promise<void> {
       18,
     );
   }
-  await plugins.emitReady((id) => makePluginCtx(id, (m) => log.plugin(id, m)));
+  // onReady 挪到通道配置注入之后
 
   await bootStep("初始化：扫描插件 adapter/ 并自动挂载通道…");
   await remountPluginChannels(
@@ -414,6 +444,15 @@ async function bootstrap(): Promise<void> {
   let channelCfg: ChannelsConfigFile = loadChannelsConfig(ROOT);
   let botCfg: BotConfig = loadBotConfig(ROOT);
   let consoleAppearance: ConsoleAppearance = loadConsoleAppearance(ROOT);
+  setPluginOneBot(onebot);
+  setPluginChannelBag({
+    getCfg: () => channelCfg,
+    setCfg: (cfg) => {
+      channelCfg = cfg;
+    },
+    save: () => saveChannelsConfig(ROOT, channelCfg),
+  });
+  await plugins.emitReady((id) => makePluginCtx(id, (m) => log.plugin(id, m)));
   await bootStep("初始化：消息通道配置（主人等，与插件装载独立）…");
 
   /** Soft power-off: ignore normal chat until #开机. #重启 calls system restart executable. */
@@ -800,7 +839,12 @@ async function bootstrap(): Promise<void> {
     const pluginMsg = trimmed !== trimmedRaw ? { ...msg, content: trimmed } : msg;
 
     const pluginReplies = await Promise.race([
-      plugins.onMessage(pluginMsg, (id) => makePluginCtx(id, (m) => log.plugin(id, m))),
+      plugins.onMessage(pluginMsg, (id) =>
+        makePluginCtx(id, (m) => log.plugin(id, m), {
+          channelId: msg.channel,
+          eventUserId: msg.userId,
+        }),
+      ),
       new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error("插件处理超时")), 55_000);
       }),
@@ -976,6 +1020,15 @@ async function bootstrap(): Promise<void> {
   }
 
   onebot.setInboundHandler(async (msg) => processInbound(msg));
+  onebot.setNoticeHandler(async (ev) => {
+    const channelId = "onebot11";
+    return plugins.emitNotice(ev, (id) =>
+      makePluginCtx(id, (m) => log.plugin(id, m), {
+        channelId,
+        eventUserId: String(ev.user_id ?? ""),
+      }),
+    );
+  });
 
   const app = express();
   if (profile.gateway.cors) app.use(cors());
@@ -1370,15 +1423,6 @@ async function bootstrap(): Promise<void> {
     }
     const body = (req.body ?? {}) as Partial<ChannelSettings>;
     const prev = getChannelSettings(channelCfg, id);
-    let masters = prev.masters;
-    if (typeof body.masters === "string") {
-      masters = String(body.masters)
-        .split(/[,，\s]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-    } else if (Array.isArray(body.masters)) {
-      masters = body.masters.map((m) => String(m).trim()).filter(Boolean);
-    }
     const parseList = (v: unknown, fallback: string[]): string[] => {
       if (typeof v === "string") {
         return v
@@ -1389,10 +1433,28 @@ async function bootstrap(): Promise<void> {
       if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
       return fallback;
     };
+    const hasTier =
+      body.coreMasters != null || body.newMasters != null || body.normalMasters != null;
+    let coreMasters = prev.coreMasters;
+    let newMasters = prev.newMasters;
+    let normalMasters = prev.normalMasters;
+    if (hasTier) {
+      coreMasters = parseList(body.coreMasters, prev.coreMasters);
+      newMasters = parseList(body.newMasters, prev.newMasters);
+      normalMasters = parseList(body.normalMasters, prev.normalMasters);
+    } else if (body.masters != null) {
+      // 旧字段：整表写成核心主人
+      coreMasters = parseList(body.masters, prev.masters);
+      newMasters = [];
+      normalMasters = [];
+    }
     const next: ChannelSettings = {
       ...prev,
       ...body,
-      masters,
+      coreMasters,
+      newMasters,
+      normalMasters,
+      masters: [...coreMasters, ...newMasters, ...normalMasters],
       replyGroupIds: parseList(body.replyGroupIds, prev.replyGroupIds),
       systemPrompt:
         typeof body.systemPrompt === "string" ? body.systemPrompt : prev.systemPrompt,
@@ -1405,14 +1467,15 @@ async function bootstrap(): Promise<void> {
       channels: { ...channelCfg.channels, [id]: next },
     };
     saveChannelsConfig(ROOT, channelCfg);
+    const saved = getChannelSettings(channelCfg, id);
     log.ok(
-      `通道配置已保存  ${id}  masters=${next.masters.join(",") || "—"}  AI回复群=${next.replyGroupIds.join(",") || "全部"}`,
+      `通道配置已保存  ${id}  核心=${saved.coreMasters.join(",") || "—"}  新=${saved.newMasters.join(",") || "—"}  普通=${saved.normalMasters.join(",") || "—"}`,
     );
     res.json({
       ok: true,
       message: "通道配置已保存（与插件装载独立）",
       id,
-      settings: next,
+      settings: saved,
     });
   });
 
@@ -1570,27 +1633,34 @@ async function bootstrap(): Promise<void> {
 
   app.post("/v1/channels/onebot11/config", authMiddleware, (req, res) => {
     const body = (req.body ?? {}) as Partial<OneBotConfig>;
+    const prev = onebot.getConfig();
+    const bots = Array.isArray(body.bots)
+      ? body.bots.map((b) => ({
+          selfId: String(b?.selfId || "").trim(),
+          label: String(b?.label || "").trim(),
+          apiBase: String(b?.apiBase || "").trim(),
+          accessToken: String(b?.accessToken || "").trim(),
+        }))
+      : prev.bots;
     const next: OneBotConfig = {
-      ...onebot.getConfig(),
-      enabled: typeof body.enabled === "boolean" ? body.enabled : onebot.getConfig().enabled,
-      accessToken:
-        typeof body.accessToken === "string" ? body.accessToken : onebot.getConfig().accessToken,
+      ...prev,
+      enabled: typeof body.enabled === "boolean" ? body.enabled : prev.enabled,
+      accessToken: typeof body.accessToken === "string" ? body.accessToken : prev.accessToken,
       reverseWsPath:
         typeof body.reverseWsPath === "string" && body.reverseWsPath
           ? body.reverseWsPath
-          : onebot.getConfig().reverseWsPath,
+          : prev.reverseWsPath,
       httpPath:
-        typeof body.httpPath === "string" && body.httpPath
-          ? body.httpPath
-          : onebot.getConfig().httpPath,
-      docsUrl: onebot.getConfig().docsUrl,
+        typeof body.httpPath === "string" && body.httpPath ? body.httpPath : prev.httpPath,
+      docsUrl: prev.docsUrl,
+      bots,
     };
     persistOneBotConfig(next);
     onebot.updateConfig(next);
-    log.info(`OneBot 11 配置已保存  enabled=${next.enabled}`);
+    log.info(`OneBot 11 配置已保存  enabled=${next.enabled}  bots=${next.bots.length}`);
     res.json({
       ok: true,
-      message: "已保存。反向 WS 路径变更需重启网关后生效。",
+      message: "已保存。反向 WS 路径变更需重启网关后生效；多号可用不同 apiBase 端口。",
       ...onebot.status(),
       config: next,
     });

@@ -4,12 +4,23 @@ import { OneBot11Channel, type Ob11MessageEvent } from "@fengyun/nexus-channel";
 import type { NexusMessage } from "@fengyun/nexus-shared";
 import { log } from "./log.js";
 
+export type OneBotBotConfig = {
+  /** 机器人 QQ；空则连上后再认 */
+  selfId?: string;
+  label?: string;
+  /** NapCat / go-cqhttp HTTP API，如 http://127.0.0.1:3000 — 多号可各写一个端口 */
+  apiBase?: string;
+  accessToken?: string;
+};
+
 export type OneBotConfig = {
   enabled: boolean;
   accessToken: string;
   reverseWsPath: string;
   httpPath: string;
   docsUrl: string;
+  /** 多 QQ 号：各号可指定 HTTP API 端口；反向 WS 仍可共用一条 path */
+  bots: OneBotBotConfig[];
 };
 
 export type OneBotStatus = {
@@ -22,23 +33,59 @@ export type OneBotStatus = {
   docsUrl: string;
   accessTokenSet: boolean;
   lastEventAt?: string;
+  bots: Array<{
+    selfId: string;
+    label: string;
+    connected: boolean;
+    apiBase: string;
+  }>;
+};
+
+export type Ob11CallResult = {
+  ok: boolean;
+  data?: unknown;
+  retcode?: number;
+  message?: string;
+};
+
+export type Ob11NoticeEvent = Record<string, unknown> & {
+  post_type?: string;
+  notice_type?: string;
+  sub_type?: string;
+  group_id?: number | string;
+  user_id?: number | string;
+  operator_id?: number | string;
+  duration?: number;
+  self_id?: number | string;
 };
 
 type InboundHandler = (msg: NexusMessage) => Promise<string[]>;
+type NoticeHandler = (ev: Ob11NoticeEvent) => Promise<string[]>;
+
+type Pending = {
+  resolve: (r: Ob11CallResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+type SockMeta = { selfId: string };
 
 /**
  * OneBot 11 bridge for NapCat / go-cqhttp.
- * - Reverse WS: NapCat「WS 客户端」连到本框架
+ * - Reverse WS: NapCat「WS 客户端」连到本框架（可多号同 path）
  * - HTTP: NapCat「HTTP 客户端」上报事件
+ * - callAction：WS echo 或按 bot.apiBase 走 HTTP（多端口）
  */
 export class OneBot11Bridge {
   readonly channel = new OneBot11Channel();
   private wss?: WebSocketServer;
   private sockets = new Set<WebSocket>();
+  private sockMeta = new WeakMap<WebSocket, SockMeta>();
   private selfId = "";
   private lastEventAt?: string;
   private echoSeq = 0;
+  private pending = new Map<string, Pending>();
   private onInbound?: InboundHandler;
+  private onNotice?: NoticeHandler;
 
   constructor(private cfg: OneBotConfig) {}
 
@@ -46,15 +93,57 @@ export class OneBot11Bridge {
     this.onInbound = fn;
   }
 
+  setNoticeHandler(fn: NoticeHandler): void {
+    this.onNotice = fn;
+  }
+
   updateConfig(next: Partial<OneBotConfig>): void {
-    this.cfg = { ...this.cfg, ...next };
+    this.cfg = {
+      ...this.cfg,
+      ...next,
+      bots: Array.isArray(next.bots) ? next.bots : this.cfg.bots,
+    };
   }
 
   getConfig(): OneBotConfig {
-    return { ...this.cfg };
+    return {
+      ...this.cfg,
+      bots: [...(this.cfg.bots || [])],
+    };
+  }
+
+  listConnectedSelfIds(): string[] {
+    const ids = new Set<string>();
+    for (const ws of this.sockets) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const sid = this.sockMeta.get(ws)?.selfId;
+      if (sid) ids.add(sid);
+    }
+    if (this.selfId) ids.add(this.selfId);
+    return [...ids];
   }
 
   status(): OneBotStatus {
+    const connectedIds = new Set(this.listConnectedSelfIds());
+    const bots = (this.cfg.bots || []).map((b) => {
+      const sid = String(b.selfId || "").trim();
+      return {
+        selfId: sid,
+        label: b.label || (sid ? `QQ ${sid}` : "未命名"),
+        connected: sid ? connectedIds.has(sid) : this.sockets.size > 0,
+        apiBase: String(b.apiBase || "").trim(),
+      };
+    });
+    for (const sid of connectedIds) {
+      if (!bots.some((b) => b.selfId === sid)) {
+        bots.push({
+          selfId: sid,
+          label: `QQ ${sid}`,
+          connected: true,
+          apiBase: "",
+        });
+      }
+    }
     return {
       enabled: this.cfg.enabled,
       connected: this.sockets.size > 0,
@@ -65,6 +154,7 @@ export class OneBot11Bridge {
       docsUrl: this.cfg.docsUrl,
       accessTokenSet: Boolean(this.cfg.accessToken),
       lastEventAt: this.lastEventAt,
+      bots,
     };
   }
 
@@ -89,6 +179,7 @@ export class OneBot11Bridge {
 
     this.wss.on("connection", (ws) => {
       this.sockets.add(ws);
+      this.sockMeta.set(ws, { selfId: "" });
       log.ok(`OneBot 11 已连接  clients=${this.sockets.size}`);
       ws.on("message", (data) => {
         void this.onSocketMessage(ws, data.toString());
@@ -121,31 +212,66 @@ export class OneBot11Bridge {
     } catch {
       return;
     }
-    // API response from bot
-    if (data.echo != null && data.status != null) return;
-    if (data.post_type === "meta_event") {
-      if (data.meta_event_type === "lifecycle" && data.self_id != null) {
-        this.selfId = String(data.self_id);
+
+    if (data.echo != null && (data.status != null || data.retcode != null)) {
+      const echo = String(data.echo);
+      const pend = this.pending.get(echo);
+      if (pend) {
+        clearTimeout(pend.timer);
+        this.pending.delete(echo);
+        const status = String(data.status || "");
+        const retcode = Number(data.retcode ?? (status === "ok" || status === "async" ? 0 : -1));
+        pend.resolve({
+          ok: retcode === 0 || status === "ok" || status === "async",
+          data: data.data,
+          retcode,
+          message: data.message != null ? String(data.message) : undefined,
+        });
       }
       return;
     }
-    // 自己发出的消息回传（NapCat message_sent）→ 绝不能再当入站，否则会 AI 复读刷屏
-    if (data.post_type === "message_sent" || data.post_type === "notice") {
+
+    if (data.post_type === "meta_event") {
+      if (data.meta_event_type === "lifecycle" && data.self_id != null) {
+        const sid = String(data.self_id);
+        this.selfId = sid;
+        this.sockMeta.set(ws, { selfId: sid });
+      }
       return;
     }
+
+    if (data.self_id != null) {
+      const sid = String(data.self_id);
+      this.selfId = sid;
+      const meta = this.sockMeta.get(ws);
+      if (meta) meta.selfId = sid;
+      else this.sockMeta.set(ws, { selfId: sid });
+    }
+
+    if (data.post_type === "message_sent") return;
+
+    if (data.post_type === "notice") {
+      await this.handleNotice(data as Ob11NoticeEvent, ws);
+      return;
+    }
+
     if (data.post_type === "message" || data.message_type) {
       await this.handleEvent(data as Ob11MessageEvent, ws);
     }
   }
 
   async handleHttpEvent(raw: unknown): Promise<{ ok: boolean; replied: number }> {
-    const ev = (raw ?? {}) as Ob11MessageEvent;
+    const ev = (raw ?? {}) as Ob11MessageEvent & Ob11NoticeEvent;
     if (ev.post_type === "meta_event") {
       if (ev.self_id != null) this.selfId = String(ev.self_id);
       return { ok: true, replied: 0 };
     }
-    if (ev.post_type === "message_sent" || ev.post_type === "notice") {
+    if (ev.post_type === "message_sent") {
       return { ok: true, replied: 0 };
+    }
+    if (ev.post_type === "notice") {
+      const texts = await this.handleNotice(ev);
+      return { ok: true, replied: texts };
     }
     if (ev.post_type !== "message" && !ev.message_type) {
       return { ok: true, replied: 0 };
@@ -154,12 +280,109 @@ export class OneBot11Bridge {
     return { ok: true, replied: replies };
   }
 
-  private openSockets(prefer?: WebSocket): WebSocket[] {
+  private async handleNotice(ev: Ob11NoticeEvent, prefer?: WebSocket): Promise<number> {
+    this.lastEventAt = new Date().toISOString();
+    if (ev.self_id != null) this.selfId = String(ev.self_id);
+    if (!this.onNotice) return 0;
+    const texts = await this.onNotice(ev);
+    let n = 0;
+    const gid = ev.group_id != null ? String(ev.group_id) : "";
+    for (let i = 0; i < texts.length; i++) {
+      const text = texts[i];
+      if (!text?.trim() || !gid) continue;
+      if (i > 0) await sleep(300);
+      await this.sendTextToGroup(gid, text, prefer);
+      n += 1;
+    }
+    return n;
+  }
+
+  private openSockets(prefer?: WebSocket, botId?: string): WebSocket[] {
     if (prefer && prefer.readyState === WebSocket.OPEN) return [prefer];
+    const want = String(botId || "").trim();
+    if (want) {
+      for (const ws of this.sockets) {
+        if (ws.readyState !== WebSocket.OPEN) continue;
+        if (this.sockMeta.get(ws)?.selfId === want) return [ws];
+      }
+    }
     for (const ws of this.sockets) {
       if (ws.readyState === WebSocket.OPEN) return [ws];
     }
     return [];
+  }
+
+  private findBotCfg(botId?: string): OneBotBotConfig | undefined {
+    const want = String(botId || "").trim();
+    const bots = this.cfg.bots || [];
+    if (want) {
+      const hit = bots.find((b) => String(b.selfId || "").trim() === want);
+      if (hit) return hit;
+    }
+    return bots.find((b) => String(b.apiBase || "").trim()) || bots[0];
+  }
+
+  /**
+   * 调 OneBot API：优先匹配 botId 的 WS；否则用该号的 apiBase HTTP；再否则任意已连接 WS。
+   */
+  async callAction(
+    action: string,
+    params: Record<string, unknown> = {},
+    opts?: { botId?: string; timeoutMs?: number; prefer?: WebSocket },
+  ): Promise<Ob11CallResult> {
+    const echo = `nx_${++this.echoSeq}`;
+    const timeoutMs = opts?.timeoutMs ?? 12_000;
+    const bot = this.findBotCfg(opts?.botId);
+    const targets = this.openSockets(opts?.prefer, opts?.botId || bot?.selfId);
+
+    if (targets.length) {
+      return new Promise<Ob11CallResult>((resolve) => {
+        const timer = setTimeout(() => {
+          this.pending.delete(echo);
+          resolve({ ok: false, message: "OneBot 调用超时" });
+        }, timeoutMs);
+        this.pending.set(echo, { resolve, timer });
+        try {
+          targets[0].send(JSON.stringify({ action, params, echo }));
+        } catch (e) {
+          clearTimeout(timer);
+          this.pending.delete(echo);
+          resolve({
+            ok: false,
+            message: e instanceof Error ? e.message : String(e),
+          });
+        }
+      });
+    }
+
+    const apiBase = String(bot?.apiBase || "").replace(/\/$/, "");
+    if (apiBase) {
+      try {
+        const token = bot?.accessToken || this.cfg.accessToken || "";
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+        };
+        if (token) headers.authorization = `Bearer ${token}`;
+        const res = await fetch(`${apiBase}/${action}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(params),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        const j = (await res.json()) as Record<string, unknown>;
+        const retcode = Number(j.retcode ?? (res.ok ? 0 : -1));
+        return {
+          ok: retcode === 0,
+          data: j.data,
+          retcode,
+          message: j.message != null ? String(j.message) : j.wording != null ? String(j.wording) : undefined,
+        };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+    }
+
+    return { ok: false, message: "没有可用的 OneBot 连接，请在控制台配置 apiBase 或连上反向 WS" };
   }
 
   private recentMsgIds = new Set<string>();
@@ -170,13 +393,11 @@ export class OneBot11Bridge {
 
     const uid = String(ev.user_id ?? ev.sender?.user_id ?? "");
     const sid = this.selfId || (ev.self_id != null ? String(ev.self_id) : "");
-    // 机器人自己的号发的内容（含群里回显）一律忽略
     if (sid && uid && uid === sid) {
       log.debug(`忽略自身消息 user=${uid}`);
       return 0;
     }
 
-    // 同 message_id 短时去重，防止 WS/HTTP 双推
     const mid = ev.message_id != null ? String(ev.message_id) : "";
     if (mid) {
       if (this.recentMsgIds.has(mid)) {
@@ -193,8 +414,11 @@ export class OneBot11Bridge {
     const msg = this.channel.normalizeInbound(ev);
     if (!msg.content.trim()) return 0;
     if (!this.onInbound) return 0;
+    if (sid) {
+      msg.meta = { ...msg.meta, botId: sid, selfId: sid };
+    }
     log.info(
-      `OneBot 入站  ${msg.meta?.messageType ?? "?"}  user=${msg.userId}  ${msg.content.slice(0, 80)}`,
+      `OneBot 入站  ${msg.meta?.messageType ?? "?"}  bot=${sid || "?"}  user=${msg.userId}  ${msg.content.slice(0, 80)}`,
     );
     const texts = await this.onInbound(msg);
     let n = 0;
@@ -214,19 +438,16 @@ export class OneBot11Bridge {
       content: text,
       userId: ctx.userId,
     });
-    const echo = `nx_${++this.echoSeq}`;
-    const payload = JSON.stringify({ action: "send_msg", params, echo });
-    // 只发一个连接，避免多 WS 客户端时同一条刷 N 遍
-    const targets = this.openSockets(prefer);
-    if (!targets.length) return false;
-    targets[0].send(payload);
-    return true;
+    const botId = String(ctx.meta?.botId || ctx.meta?.selfId || "");
+    const r = await this.callAction("send_msg", params as Record<string, unknown>, {
+      botId: botId || undefined,
+      prefer,
+    });
+    return r.ok;
   }
 
   /**
    * 合并转发：多段节点，显示为「匿名用户」。
-   * NapCat：content 必须是消息段数组，传纯字符串会乱码/空白。
-   * @see https://napneko.github.io/develop/msg
    */
   async sendForward(
     nodes: string[],
@@ -250,9 +471,6 @@ export class OneBot11Bridge {
     }));
 
     const mt = (ctx.meta?.messageType as string | undefined) ?? "private";
-    const targets = this.openSockets(opts?.prefer);
-    if (!targets.length) return false;
-
     let action = "send_private_forward_msg";
     let params: Record<string, unknown> = {
       user_id: Number(ctx.userId) || 0,
@@ -264,13 +482,14 @@ export class OneBot11Bridge {
       params = { group_id: gid, messages };
     }
 
-    const echo = `nx_fwd_${++this.echoSeq}`;
-    const payload = JSON.stringify({ action, params, echo });
-    targets[0].send(payload);
-    return true;
+    const botId = String(ctx.meta?.botId || ctx.meta?.selfId || "");
+    const r = await this.callAction(action, params, {
+      botId: botId || undefined,
+      prefer: opts?.prefer,
+    });
+    return r.ok;
   }
 
-  /** 向指定群发送合并转发（更新/重启多群通报） */
   async sendForwardToGroup(groupId: string, nodes: string[]): Promise<boolean> {
     const ctx: NexusMessage = {
       id: `fwd-${Date.now()}`,
@@ -285,7 +504,7 @@ export class OneBot11Bridge {
     return this.sendForward(nodes, ctx);
   }
 
-  async sendTextToGroup(groupId: string, text: string): Promise<boolean> {
+  async sendTextToGroup(groupId: string, text: string, prefer?: WebSocket): Promise<boolean> {
     const ctx: NexusMessage = {
       id: `txt-${Date.now()}`,
       channel: "onebot11",
@@ -296,7 +515,7 @@ export class OneBot11Bridge {
       meta: { messageType: "group", groupId: String(groupId) },
       createdAt: new Date().toISOString(),
     };
-    return this.sendText(text, ctx);
+    return this.sendText(text, ctx, prefer);
   }
 }
 

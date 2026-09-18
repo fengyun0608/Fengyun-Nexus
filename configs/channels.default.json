@@ -3,6 +3,9 @@
     "web": {
       "label": "网页控制台",
       "masters": [],
+      "coreMasters": [],
+      "newMasters": [],
+      "normalMasters": [],
       "onlyMasters": false,
       "replyGroupIds": [],
       "systemPrompt": "",
@@ -11,6 +14,9 @@
     "webhook": {
       "label": "HTTP Webhook",
       "masters": [],
+      "coreMasters": [],
+      "newMasters": [],
+      "normalMasters": [],
       "onlyMasters": false,
       "replyGroupIds": [],
       "systemPrompt": "",
@@ -19,10 +25,13 @@
     "onebot11": {
       "label": "QQ（OneBot 11）",
       "masters": [],
+      "coreMasters": [],
+      "newMasters": [],
+      "normalMasters": [],
       "onlyMasters": false,
       "replyGroupIds": [],
       "systemPrompt": "",
-      "note": "主人 QQ、AI 回复群、人设均可在控制台配置"
+      "note": "核心/新/普通主人、AI 回复群、人设均可在控制台配置"
     }
   }
 }

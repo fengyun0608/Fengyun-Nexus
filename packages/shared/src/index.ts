@@ -18,6 +18,8 @@ export interface NexusMessage {
     messageType?: "private" | "group" | string;
     groupId?: string;
     selfId?: string;
+    /** 多号时标明这条消息来自哪一个机器人 */
+    botId?: string;
     /** 消息里 @ 到的 QQ */
     atQqs?: string[];
     /** 是否 @ 了机器人自己 */

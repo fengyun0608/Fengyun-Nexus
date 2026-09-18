@@ -19,6 +19,9 @@ import { useAuthStore } from "@/stores/auth";
 type Settings = {
   label?: string;
   masters?: string[];
+  coreMasters?: string[];
+  newMasters?: string[];
+  normalMasters?: string[];
   onlyMasters?: boolean;
   replyGroupIds?: string[];
   systemPrompt?: string;
@@ -45,11 +48,13 @@ type OneBotInfo = {
   clients?: number;
   selfId?: string;
   message?: string;
+  bots?: Array<{ selfId: string; label: string; connected: boolean; apiBase: string }>;
   config?: {
     enabled?: boolean;
     accessToken?: string;
     reverseWsPath?: string;
     httpPath?: string;
+    bots?: Array<{ selfId?: string; label?: string; apiBase?: string; accessToken?: string }>;
   };
 };
 
@@ -64,7 +69,9 @@ const saving = ref(false);
 const err = ref("");
 
 const label = ref("");
-const masters = ref("");
+const coreMasters = ref("");
+const newMasters = ref("");
+const normalMasters = ref("");
 const onlyMasters = ref(false);
 const replyGroupIds = ref("");
 const systemPrompt = ref("");
@@ -81,6 +88,7 @@ const obEnabled = ref(false);
 const obToken = ref("");
 const obWs = ref("");
 const obHttp = ref("");
+const obBotsText = ref("");
 
 const showCfg = ref(false);
 const cfgId = ref("");
@@ -112,7 +120,9 @@ async function loadSettings() {
   );
   const s = res.settings || {};
   label.value = s.label || id.value;
-  masters.value = (s.masters || []).join(", ");
+  coreMasters.value = (s.coreMasters || s.masters || []).join(", ");
+  newMasters.value = (s.newMasters || []).join(", ");
+  normalMasters.value = (s.normalMasters || []).join(", ");
   onlyMasters.value = Boolean(s.onlyMasters);
   replyGroupIds.value = (s.replyGroupIds || []).join(", ");
   systemPrompt.value = s.systemPrompt || "";
@@ -137,6 +147,15 @@ async function loadOnebot() {
   obToken.value = onebot.value.config?.accessToken || "";
   obWs.value = onebot.value.config?.reverseWsPath || "/onebot/v11/ws";
   obHttp.value = onebot.value.config?.httpPath || "/onebot/v11";
+  const bots = onebot.value.config?.bots || [];
+  obBotsText.value = bots
+    .map((b) => {
+      const sid = b.selfId || "";
+      const label = b.label || "";
+      const api = b.apiBase || "";
+      return [sid, label, api].join(" | ");
+    })
+    .join("\n");
 }
 
 async function load() {
@@ -160,7 +179,9 @@ async function saveSettings() {
       token: auth.token,
       body: JSON.stringify({
         label: label.value,
-        masters: masters.value,
+        coreMasters: coreMasters.value,
+        newMasters: newMasters.value,
+        normalMasters: normalMasters.value,
         onlyMasters: onlyMasters.value,
         replyGroupIds: replyGroupIds.value,
         systemPrompt: systemPrompt.value,
@@ -295,6 +316,19 @@ async function saveFile() {
 async function saveOnebot() {
   saving.value = true;
   try {
+    const bots = obBotsText.value
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const parts = line.split("|").map((s) => s.trim());
+        return {
+          selfId: parts[0] || "",
+          label: parts[1] || "",
+          apiBase: parts[2] || "",
+          accessToken: parts[3] || "",
+        };
+      });
     onebot.value = await api<OneBotInfo>("/v1/channels/onebot11/config", {
       method: "POST",
       token: auth.token,
@@ -303,6 +337,7 @@ async function saveOnebot() {
         accessToken: obToken.value,
         reverseWsPath: obWs.value,
         httpPath: obHttp.value,
+        bots,
       }),
     });
     message.success(onebot.value.message || "已保存");
@@ -361,7 +396,18 @@ onMounted(() => void load());
       :style="{ width: 'min(520px, 94vw)' }"
     >
       <label class="field">显示名 <n-input v-model:value="label" /></label>
-      <label class="field">主人 QQ <n-input v-model:value="masters" placeholder="逗号分隔" /></label>
+      <label class="field">
+        核心主人 QQ
+        <n-input v-model:value="coreMasters" placeholder="逗号分隔；控制台也可设" />
+      </label>
+      <label class="field">
+        新主人 QQ
+        <n-input v-model:value="newMasters" placeholder="可加普通/新主人；删不了核心" />
+      </label>
+      <label class="field">
+        普通主人 QQ
+        <n-input v-model:value="normalMasters" placeholder="可加/删普通主人" />
+      </label>
       <label class="field row-switch">仅主人可用管理指令 <n-switch v-model:value="onlyMasters" /></label>
       <label class="field">
         AI 回复群
@@ -468,6 +514,15 @@ onMounted(() => void load());
       <label class="field">Access Token <n-input v-model:value="obToken" type="password" show-password-on="click" /></label>
       <label class="field">反向 WS 路径 <n-input v-model:value="obWs" /></label>
       <label class="field">HTTP 路径 <n-input v-model:value="obHttp" /></label>
+      <label class="field">
+        多号（每行：QQ | 备注 | apiBase端口）
+        <n-input
+          v-model:value="obBotsText"
+          type="textarea"
+          :rows="3"
+          placeholder="123456 | 主号 | http://127.0.0.1:3000"
+        />
+      </label>
       <template #footer>
         <n-space justify="end">
           <n-button @click="loadOnebot">刷新</n-button>

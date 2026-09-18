@@ -16,7 +16,15 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const PLUGINS = ["z-menu", "z-status", "z-draw", "z-echo"];
+const PLUGINS = [
+  "z-menu",
+  "z-status",
+  "z-draw",
+  "z-echo",
+  "z-like",
+  "z-group-admin",
+  "z-master",
+];
 const SKIP = new Set(["node_modules", "dist", ".git"]);
 
 const outArg = process.argv[2];
@@ -74,7 +82,7 @@ for (const name of PLUGINS) {
 
 const readme = `# Fengyun Nexus · 系统插件包
 
-菜单 / 状态 / 生图 / 回声。放到宿主 \`plugins/\` 下即可加载。
+菜单 / 状态 / 生图 / 回声 / 点赞 / 群管 / 主人。放到宿主 \`plugins/\` 下即可加载。
 
 专仓：https://gitcode.com/fengyunnb_admin/fengyun-system-plugins
 
@@ -86,6 +94,9 @@ const readme = `# Fengyun Nexus · 系统插件包
 | \`plugins/z-status\` | \`#状态\` | 框架 / 网络 / OneBot / AI / 群 |
 | \`plugins/z-draw\` | \`#生图\` | 菜单图截图发群 |
 | \`plugins/z-echo\` | \`#echo 文本\` | 回声示例 |
+| \`plugins/z-like\` | \`#赞我\` | QQ 点赞 |
+| \`plugins/z-group-admin\` | \`#踢\` \`#禁言\` \`#群公告\` \`#群文件\` | 群管 |
+| \`plugins/z-master\` | \`#添加主人\` | 核心 / 新 / 普通主人 |
 
 ## 更新
 
@@ -126,7 +137,7 @@ writeFileSync(
       name: "fengyun-system-plugins",
       version: "0.1.0",
       private: true,
-      description: "Fengyun Nexus 系统插件包（菜单 / 生图 / 回声）",
+      description: "Fengyun Nexus 系统插件包（菜单 / 生图 / 点赞 / 群管 / 主人）",
       license: "MIT",
     },
     null,

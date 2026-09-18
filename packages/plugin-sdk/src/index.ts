@@ -7,7 +7,18 @@ export type PluginPermission =
   | "mcp.expose"
   | "workflow.register"
   | "db.read"
-  | "db.write";
+  | "db.write"
+  | "onebot.api"
+  | "channel.master";
+
+export type MasterLevel = "core" | "new" | "normal";
+
+export type Ob11CallResult = {
+  ok: boolean;
+  data?: unknown;
+  retcode?: number;
+  message?: string;
+};
 
 export interface PluginManifest {
   /**
@@ -170,6 +181,45 @@ export interface PluginContext {
     /** 状态面板 HTML，配合 shot.renderHtml({ selector: "#panel" }) */
     statusHtml: () => string;
   };
+  /** 当前事件用户是否为本通道主人 */
+  isMaster?: (userId?: string) => boolean;
+  /** 主人级别；非主人返回 null */
+  masterLevel?: (userId?: string) => MasterLevel | null;
+  /** 当前入站通道 id */
+  channelId?: string;
+  /** OneBot API（仅 onebot11 可用） */
+  ob11?: {
+    call: (
+      action: string,
+      params?: Record<string, unknown>,
+      opts?: { botId?: string },
+    ) => Promise<Ob11CallResult>;
+    selfId: () => string;
+    listBots: () => Array<{
+      selfId: string;
+      label: string;
+      connected: boolean;
+      apiBase: string;
+    }>;
+  };
+  /** 主人管理（通道级） */
+  masters?: {
+    list: (channelId?: string) => {
+      core: string[];
+      new: string[];
+      normal: string[];
+      all: string[];
+    };
+    add: (
+      targetId: string,
+      level: MasterLevel,
+      opts?: { channelId?: string; actorId?: string },
+    ) => { ok: boolean; error?: string };
+    remove: (
+      targetId: string,
+      opts?: { channelId?: string; actorId?: string },
+    ) => { ok: boolean; error?: string };
+  };
 }
 
 export interface PluginConfigField {
@@ -190,6 +240,8 @@ export interface NexusPlugin {
   setConfig?(cfg: Record<string, unknown>): void | Promise<void>;
   onReady?(ctx: PluginContext): Promise<void> | void;
   onMessage?(msg: NexusMessage, ctx: PluginContext): Promise<NexusMessage | null> | NexusMessage | null;
+  /** OneBot notice 等非消息事件（如群禁言） */
+  onNotice?(ev: Record<string, unknown>, ctx: PluginContext): Promise<string[] | void> | string[] | void;
   accept?(e: NexusEvent, ctx: PluginContext): Promise<boolean | void> | boolean | void;
 }
 
@@ -202,6 +254,7 @@ export abstract class Plugin implements NexusPlugin {
 
   onReady?(ctx: PluginContext): Promise<void> | void;
   onMessage?(msg: NexusMessage, ctx: PluginContext): Promise<NexusMessage | null> | NexusMessage | null;
+  onNotice?(ev: Record<string, unknown>, ctx: PluginContext): Promise<string[] | void> | string[] | void;
   getConfig?(): Record<string, unknown> | Promise<Record<string, unknown>>;
   setConfig?(cfg: Record<string, unknown>): void | Promise<void>;
 
@@ -209,6 +262,14 @@ export abstract class Plugin implements NexusPlugin {
     for (const r of this.rule) {
       const re = typeof r.reg === "string" ? new RegExp(r.reg) : r.reg;
       if (!re.test(e.msg)) continue;
+      const need = r.permission || "all";
+      if (need === "master" || need === "admin") {
+        const ok = ctx.isMaster?.(e.userId) ?? false;
+        if (!ok) {
+          await e.reply("无权限");
+          return true;
+        }
+      }
       const fn = (this as unknown as Record<string, unknown>)[r.fnc];
       if (typeof fn === "function") {
         await (fn as (e: NexusEvent, ctx: PluginContext) => Promise<void>).call(this, e, ctx);
@@ -304,6 +365,21 @@ export class PluginHost {
       if (!this.isEnabled(p.manifest.id)) continue;
       await p.onReady?.(makeCtx(p.manifest.id));
     }
+  }
+
+  async emitNotice(
+    ev: Record<string, unknown>,
+    makeCtx: (id: string) => PluginContext,
+  ): Promise<string[]> {
+    const out: string[] = [];
+    for (const p of this.values()) {
+      if (!this.isEnabled(p.manifest.id)) continue;
+      if (typeof p.onNotice !== "function") continue;
+      const ctx = makeCtx(p.manifest.id);
+      const r = await p.onNotice(ev, ctx);
+      if (Array.isArray(r)) out.push(...r.filter((x) => String(x || "").trim()));
+    }
+    return out;
   }
 
   async dispatchEvent(e: NexusEvent, makeCtx: (id: string) => PluginContext): Promise<NexusMessage[]> {
