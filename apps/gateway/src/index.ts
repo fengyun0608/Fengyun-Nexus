@@ -383,6 +383,16 @@ function validatePassword(password: string): string | null {
   return null;
 }
 
+/** 每次问 AI 都先带上。通道人设写在后面，不把这句盖掉。 */
+function frameworkSystemPrompt(): string {
+  return [
+    "你在 Fengyun Nexus 里运作，你就是 Fengyun Nexus。",
+    "有人问你是谁、是什么模型，就说你是 Fengyun Nexus，在这个框架里陪对方说话、办事。",
+    "不要说自己是别的模型，也不要说自己是别的产品。",
+    "这个通道如果另外写了人设，就在 Fengyun Nexus 这个身份上按那个人设说话。",
+  ].join("\n");
+}
+
 async function bootstrap(): Promise<void> {
   const startedAt = Date.now();
   printBootBanner();
@@ -1091,11 +1101,11 @@ async function bootstrap(): Promise<void> {
       return [];
     }
 
-    const history: Array<{ role: "user" | "assistant" | "system"; content: string }> = [];
+    const history: Array<{ role: "user" | "assistant" | "system"; content: string }> = [
+      { role: "system", content: frameworkSystemPrompt() },
+    ];
     const persona = String(chSettings.systemPrompt || "").trim();
-    if (persona) {
-      history.push({ role: "system", content: persona });
-    }
+    if (persona) history.push({ role: "system", content: persona });
     // 给模型：去掉 @ 和呼唤前缀
     const userAsk = stripAtMentions(
       stripWakeForChat(trimmedRaw, botCfg),
