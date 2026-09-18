@@ -255,6 +255,26 @@ async function lookupPublicIpv4(): Promise<string> {
   return "";
 }
 
+function connectHosts(bindHost: string, publicIp = ""): string[] {
+  const hosts: string[] = [];
+  const h = String(bindHost || "").trim();
+  const open = h === "0.0.0.0" || h === "::" || h === "[::]";
+  if (!open) {
+    hosts.push(!h || h === "localhost" ? "127.0.0.1" : h);
+    return hosts;
+  }
+  hosts.push("127.0.0.1");
+  for (const list of Object.values(networkInterfaces())) {
+    for (const n of list || []) {
+      const fam = String(n.family);
+      if (n.internal || (fam !== "IPv4" && fam !== "4")) continue;
+      if (!hosts.includes(n.address)) hosts.push(n.address);
+    }
+  }
+  if (publicIp && !hosts.includes(publicIp)) hosts.push(publicIp);
+  return hosts;
+}
+
 function consoleUrls(port: number, host: string): string[] {
   const urls: string[] = [];
   const open = host === "0.0.0.0" || host === "::" || host === "[::]";
@@ -2608,11 +2628,29 @@ async function bootstrap(): Promise<void> {
     log.info(
       `管理账号=${adminCfg.username}  首次设置完成=${adminCfg.setupCompleted ? "是" : "否"}  会话=${adminCfg.sessionHours}小时`,
     );
-    if (onebotCfg.enabled) {
-      log.info(
-        `OneBot 11 对接：NapCat 反向 WS → ws://127.0.0.1:${port}${onebotCfg.reverseWsPath}  |  HTTP → ${onebotCfg.httpPath}`,
-      );
-      log.info(`文档 https://napneko.github.io`);
+    if (onebot.getConfig().enabled) {
+      const cfg = onebot.getConfig();
+      const wsPath = cfg.reverseWsPath || "/onebot/v11/ws";
+      const hosts = connectHosts(host, publicIp);
+      const ports = new Set<number>([port]);
+      for (const b of cfg.bots || []) {
+        const p = Math.floor(Number(b.listenPort) || 0);
+        if (p > 0 && p < 65536) ports.add(p);
+      }
+      log.info("OneBot 11 当前可连接反向地址");
+      for (const p of ports) {
+        const names = (cfg.bots || [])
+          .filter((b) => {
+            const lp = Math.floor(Number(b.listenPort) || 0);
+            return lp === p || (p === port && !lp);
+          })
+          .map((b) => b.label || b.selfId || "")
+          .filter(Boolean);
+        const tag = names.length ? names.join("、") : p === port ? "网关" : "独立端口";
+        for (const hst of hosts) log.info(`  ${tag}  ws://${hst}:${p}${wsPath}`);
+      }
+      log.info(`OneBot HTTP → ${cfg.httpPath}`);
+      log.info("文档 https://napneko.github.io");
     }
     void deliverRestartSuccessNotice();
 
