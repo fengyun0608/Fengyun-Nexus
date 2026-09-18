@@ -33,6 +33,8 @@ export function scaffoldWorkflowGuide(root: string): {
     docs: [
       docLink("产品介绍 · 能力总览", "docs/product/README.md"),
       docLink("目录与本地文件说明", "docs/product/directory.md"),
+      docLink("各平台启动", "docs/product/start.md"),
+      docLink("环境要求", "docs/product/environment.md"),
       docLink("本地工作流目录", "workflows"),
     ],
     steps: [

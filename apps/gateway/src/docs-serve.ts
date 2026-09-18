@@ -2,7 +2,8 @@
  * 控制台「编写文档」：只读打开仓库内教程 / 模板，路径白名单防穿越。
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ALLOW_PREFIXES = ["docs/", "plugins/templates/", "workflows/"] as const;
 
@@ -27,19 +28,66 @@ function toPosix(p: string): string {
   return p.replace(/\\/g, "/");
 }
 
+const SELF_DIR = dirname(fileURLToPath(import.meta.url));
+
+function looksLikeRepo(dir: string): boolean {
+  return (
+    existsSync(join(dir, "package.json")) &&
+    existsSync(join(dir, "docs", "ecosystem", "plugins.md"))
+  );
+}
+
+/** 网关 ROOT 若落在 apps/ 或 dist，往上找到真正仓库根，避免教程一律找不到。 */
+export function findRepoRoot(hint?: string): string {
+  const starts = [hint, SELF_DIR, process.cwd()].filter((x): x is string => Boolean(x));
+  for (const start of starts) {
+    let cur = resolve(start);
+    for (let i = 0; i < 8; i++) {
+      if (looksLikeRepo(cur)) return cur;
+      const parent = resolve(cur, "..");
+      if (parent === cur) break;
+      cur = parent;
+    }
+  }
+  return resolve(hint || SELF_DIR);
+}
+
+function isAllowed(clean: string): boolean {
+  return ALLOW_PREFIXES.some((pre) => clean === pre.slice(0, -1) || clean.startsWith(pre));
+}
+
+function posixDir(rel: string): string {
+  const i = rel.lastIndexOf("/");
+  return i >= 0 ? rel.slice(0, i) : "";
+}
+
+function joinPosix(baseDir: string, href: string): string {
+  const raw = href.split("?")[0]?.split("#")[0] ?? href;
+  const combined = baseDir ? `${baseDir}/${raw}` : raw;
+  const stack: string[] = [];
+  for (const part of toPosix(combined).split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") stack.pop();
+    else stack.push(part);
+  }
+  return stack.join("/");
+}
+
 function underRoot(root: string, rel: string): string | null {
   const clean = toPosix(rel)
     .replace(/^\/+/, "")
     .replace(/\/+/g, "/");
   if (!clean || clean.includes("\0") || clean.split("/").includes("..")) return null;
-  const ok = ALLOW_PREFIXES.some(
-    (pre) => clean === pre.slice(0, -1) || clean.startsWith(pre),
-  );
-  if (!ok) return null;
+  if (!isAllowed(clean)) return null;
   const abs = resolve(root, ...clean.split("/"));
   const rootAbs = resolve(root);
   const relToRoot = toPosix(relative(rootAbs, abs));
-  if (!relToRoot || relToRoot === ".." || relToRoot.startsWith("../")) {
+  if (
+    !relToRoot ||
+    relToRoot === ".." ||
+    relToRoot.startsWith("../") ||
+    relToRoot.includes(":")
+  ) {
     return null;
   }
   return abs;
@@ -53,8 +101,8 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** 够教程用的轻量 Markdown → HTML，不引入依赖 */
-export function mdToHtml(md: string): string {
+/** 够教程用的轻量 Markdown → HTML。仓内相对链接改走 /v1/docs/view，避免点开变成找不到。 */
+export function mdToHtml(md: string, baseDir = ""): string {
   const lines = md.replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   let inCode = false;
@@ -73,10 +121,15 @@ export function mdToHtml(md: string): string {
     let s = escapeHtml(t);
     s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    s = s.replace(
-      /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
-    );
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_full, text: string, href: string) => {
+      if (/^https?:\/\//i.test(href)) {
+        return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+      }
+      const next = joinPosix(baseDir, href);
+      if (!isAllowed(next)) return `${text}`;
+      const url = `/v1/docs/view?path=${encodeURIComponent(next)}`;
+      return `<a href="${url}">${text}</a>`;
+    });
     return s;
   };
 
@@ -242,7 +295,8 @@ export function renderDocView(root: string, rawPath: string): DocViewResult {
       html: pageShell("无效路径", `<p class="err">缺少 path 参数</p>`),
     };
   }
-  const abs = underRoot(root, rel);
+  const repo = findRepoRoot(root);
+  const abs = underRoot(repo, rel);
   if (!abs || !existsSync(abs)) {
     return {
       ok: false,
@@ -259,7 +313,7 @@ export function renderDocView(root: string, rawPath: string): DocViewResult {
       const title = `${basename(abs)} · ${basename(readme)}`;
       return {
         ok: true,
-        html: pageShell(title, `<h1>${escapeHtml(title)}</h1>\n${mdToHtml(md)}`),
+        html: pageShell(title, `<h1>${escapeHtml(title)}</h1>\n${mdToHtml(md, rel)}`),
       };
     }
     const entries = readdirSync(abs)
@@ -286,7 +340,7 @@ export function renderDocView(root: string, rawPath: string): DocViewResult {
   if (/\.(md|markdown)$/i.test(name)) {
     return {
       ok: true,
-      html: pageShell(name, `<h1>${escapeHtml(name)}</h1>\n${mdToHtml(text)}`),
+      html: pageShell(name, `<h1>${escapeHtml(name)}</h1>\n${mdToHtml(text, posixDir(rel))}`),
     };
   }
   return {

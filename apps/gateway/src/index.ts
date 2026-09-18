@@ -93,7 +93,7 @@ import {
 } from "./restart-notify.js";
 import { scheduleSystemRestart } from "./restart-exec.js";
 import { remountPluginChannels } from "./channel-adapters.js";
-import { renderDocView } from "./docs-serve.js";
+import { renderDocView, findRepoRoot } from "./docs-serve.js";
 import { reloadPlugins, watchPluginsHotReload } from "./plugin-hot-reload.js";
 import { getLogEntries, log } from "./log.js";
 import {
@@ -106,7 +106,7 @@ import {
 import { OneBot11Bridge, type OneBotConfig } from "./onebot11-bridge.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "../../..");
+const ROOT = findRepoRoot(resolve(__dirname, "../../.."));
 const ADMIN_LOCAL = join(ROOT, "configs/admin.local.json");
 const RUNTIME_LOCAL = join(ROOT, "configs/runtime.local.json");
 const ONEBOT_LOCAL = join(ROOT, "configs/onebot.local.json");

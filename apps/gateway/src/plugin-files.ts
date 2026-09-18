@@ -178,8 +178,10 @@ export function scaffoldPluginGuide(root: string): {
   const docs = [
     docLink("插件编写教程", "docs/ecosystem/plugins.md"),
     docLink("通道插件教程", "docs/ecosystem/channel-plugins.md"),
+    docLink("OneBot 11 说明", "docs/ecosystem/onebot11.md"),
     docLink("简单示例模板", "plugins/templates/ts-plugin"),
     docLink("模块化示例模板", "plugins/templates/modular-plugin"),
+    docLink("模块化 adapter 说明", "plugins/templates/modular-plugin/adapter/README.md"),
   ];
   return {
     pluginsDir,
