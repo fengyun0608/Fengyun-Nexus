@@ -1861,12 +1861,25 @@ async function bootstrap(): Promise<void> {
     res.json(result);
   });
 
-  app.get("/v1/channels/onebot11", authMiddleware, (_req, res) => {
+  function onebotPayload() {
     const st = onebot.status();
     const cfg = onebot.getConfig();
+    const gwPort = Number(process.env.PORT ?? profile.gateway.port);
+    const wsPath = cfg.reverseWsPath || st.reverseWsPath || "/onebot/v11/ws";
+    const path = wsPath.startsWith("/") ? wsPath : `/${wsPath}`;
+    const bind = String(process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
+    const wsHosts = connectHosts(bind);
+    const urlsFor = (listenPort: number) => {
+      const p = listenPort > 0 ? listenPort : gwPort;
+      return wsHosts.map((h) => `ws://${h}:${p}${path}`);
+    };
+    const bots = st.bots.map((b) => ({
+      ...b,
+      reverseWsUrls: urlsFor(b.listenPort),
+    }));
     const reverseWsUrl = buildReverseWsUrl({
-      port: Number(process.env.PORT ?? profile.gateway.port),
-      path: cfg.reverseWsPath || st.reverseWsPath || "/onebot/v11/ws",
+      port: gwPort,
+      path,
       token: cfg.accessToken,
     });
     const napcat = getNapCatStatus({
@@ -1875,13 +1888,20 @@ async function bootstrap(): Promise<void> {
       connected: st.connected,
       selfId: st.selfId,
     });
-    res.json({
-      ok: true,
+    return {
       ...st,
+      bots,
       reverseWsUrl,
+      wsHosts,
+      wsPath: path,
+      gatewayPort: gwPort,
       napcat,
       config: cfg,
-    });
+    };
+  }
+
+  app.get("/v1/channels/onebot11", authMiddleware, (_req, res) => {
+    res.json({ ok: true, ...onebotPayload() });
   });
 
   app.get("/v1/admin/napcat", authMiddleware, (_req, res) => {
@@ -1965,8 +1985,7 @@ async function bootstrap(): Promise<void> {
     res.json({
       ok: true,
       message: "已改好，立即生效",
-      ...onebot.status(),
-      config: next,
+      ...onebotPayload(),
     });
   });
 

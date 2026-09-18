@@ -41,6 +41,9 @@ type OneBotInfo = {
   lastEventAt?: string;
   message?: string;
   reverseWsUrl?: string;
+  wsHosts?: string[];
+  wsPath?: string;
+  gatewayPort?: number;
   napcat?: NapCatInfo;
   bots?: Array<{ selfId: string; label: string; connected: boolean; apiBase: string; listenPort?: number }>;
   config?: {
@@ -68,11 +71,12 @@ const httpPath = ref("/onebot/v11");
 const botCards = ref<BotDraft[]>([]);
 let timer: number | undefined;
 
-async function load() {
-  loading.value = true;
+async function load(quiet = false) {
+  if (!quiet) loading.value = true;
   err.value = "";
   try {
     info.value = await api<OneBotInfo>("/v1/channels/onebot11", { token: auth.token });
+    if (quiet) return;
     enabled.value = Boolean(info.value.config?.enabled ?? info.value.enabled);
     accessToken.value = info.value.config?.accessToken || "";
     reverseWsPath.value = info.value.config?.reverseWsPath || info.value.reverseWsPath || "/onebot/v11/ws";
@@ -86,9 +90,9 @@ async function load() {
       listenPort: Number(b.listenPort) || 0,
     }));
   } catch (e) {
-    err.value = e instanceof Error ? e.message : String(e);
+    if (!quiet) err.value = e instanceof Error ? e.message : String(e);
   } finally {
-    loading.value = false;
+    if (!quiet) loading.value = false;
   }
 }
 
@@ -118,17 +122,6 @@ async function save() {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {
     saving.value = false;
-  }
-}
-
-async function copyWs() {
-  const url = info.value?.reverseWsUrl || info.value?.napcat?.reverseWsUrl || "";
-  if (!url) return;
-  try {
-    await navigator.clipboard.writeText(url);
-    message.success("已复制反向 WS 地址");
-  } catch {
-    message.info(url);
   }
 }
 
@@ -165,7 +158,7 @@ async function rewire() {
 
 onMounted(() => {
   void load();
-  timer = window.setInterval(() => void load(), 5000);
+  timer = window.setInterval(() => void load(true), 5000);
 });
 onUnmounted(() => {
   if (timer) window.clearInterval(timer);
@@ -194,7 +187,6 @@ onUnmounted(() => {
             <n-button :loading="acting === 'wire'" :disabled="!info?.napcat?.installed" @click="rewire">
               重新写入反向 WS
             </n-button>
-            <n-button @click="copyWs">复制 WS 地址</n-button>
             <a
               class="doc-link"
               :href="info?.napcat?.docsUrl || 'https://napneko.github.io/guide/boot/Shell'"
@@ -204,9 +196,6 @@ onUnmounted(() => {
               官网 Shell 说明
             </a>
           </n-space>
-          <p v-if="info?.reverseWsUrl" class="ws-line">
-            <code>{{ info.reverseWsUrl }}</code>
-          </p>
           <p v-if="info?.napcat?.home" class="hint">安装目录：{{ info.napcat.home }}</p>
           <p v-if="info?.napcat?.launchCmd" class="hint">启动命令：{{ info.napcat.launchCmd }}</p>
         </n-card>
@@ -240,8 +229,9 @@ onUnmounted(() => {
           <BotAccountCards
             v-model="botCards"
             :live="info?.bots || []"
-            :reverse-ws-url="info?.reverseWsUrl || info?.napcat?.reverseWsUrl || ''"
-            :gateway-port="8787"
+            :ws-hosts="info?.wsHosts || []"
+            :ws-path="info?.wsPath || reverseWsPath"
+            :gateway-port="info?.gatewayPort || 8787"
           />
           <n-space>
             <n-button type="primary" :loading="saving" @click="save">保存</n-button>

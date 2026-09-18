@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   NButton,
@@ -51,6 +51,9 @@ type OneBotInfo = {
   selfId?: string;
   message?: string;
   reverseWsUrl?: string;
+  wsHosts?: string[];
+  wsPath?: string;
+  gatewayPort?: number;
   bots?: Array<{ selfId: string; label: string; connected: boolean; apiBase: string; listenPort?: number }>;
   config?: {
     enabled?: boolean;
@@ -92,6 +95,12 @@ const obToken = ref("");
 const obWs = ref("");
 const obHttp = ref("/onebot/v11");
 const obBotCards = ref<BotDraft[]>([]);
+let onebotTimer: number | undefined;
+
+async function refreshOnebotLive() {
+  if (id.value !== "onebot11") return;
+  onebot.value = await api<OneBotInfo>("/v1/channels/onebot11", { token: auth.token });
+}
 
 const showCfg = ref(false);
 const cfgId = ref("");
@@ -352,6 +361,17 @@ async function saveOnebot() {
 
 watch(id, () => void load(), { immediate: false });
 onMounted(() => void load());
+onUnmounted(() => {
+  if (onebotTimer) window.clearInterval(onebotTimer);
+});
+watch(showOnebot, (open) => {
+  if (onebotTimer) window.clearInterval(onebotTimer);
+  onebotTimer = undefined;
+  if (!open || id.value !== "onebot11") return;
+  onebotTimer = window.setInterval(() => {
+    void refreshOnebotLive().catch(() => undefined);
+  }, 5000);
+});
 </script>
 
 <template>
@@ -544,8 +564,9 @@ onMounted(() => void load());
       <BotAccountCards
         v-model="obBotCards"
         :live="onebot?.bots || []"
-        :reverse-ws-url="onebot?.reverseWsUrl || ''"
-        :gateway-port="8787"
+        :ws-hosts="onebot?.wsHosts || []"
+        :ws-path="onebot?.wsPath || obWs"
+        :gateway-port="onebot?.gatewayPort || 8787"
       />
       <template #footer>
         <n-space justify="end">

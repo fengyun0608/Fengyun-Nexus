@@ -13,7 +13,8 @@ export type BotDraft = {
 const props = defineProps<{
   modelValue: BotDraft[];
   live?: Array<{ selfId: string; connected?: boolean; listenPort?: number }>;
-  reverseWsUrl?: string;
+  wsHosts?: string[];
+  wsPath?: string;
   gatewayPort?: number;
 }>();
 
@@ -74,19 +75,16 @@ function connected(b: BotDraft): boolean {
   );
 }
 
-function cardUrl(b: BotDraft): string {
-  const port = Number(b.listenPort) || props.gatewayPort || 8787;
-  const raw = props.reverseWsUrl || "";
-  if (raw) {
-    try {
-      const u = new URL(raw);
-      u.port = String(port);
-      return u.toString();
-    } catch {
-      /* 用下面的默认 */
-    }
-  }
-  return `ws://127.0.0.1:${port}/onebot/v11/ws`;
+function cardUrls(b: BotDraft): string[] {
+  const port = Number(b.listenPort) || Number(props.gatewayPort) || 8787;
+  const path = (props.wsPath || "/onebot/v11/ws").startsWith("/")
+    ? props.wsPath || "/onebot/v11/ws"
+    : `/${props.wsPath}`;
+  const hosts = (props.wsHosts || []).map((h) => String(h || "").trim()).filter(Boolean);
+  const list = hosts.length ? hosts : ["127.0.0.1"];
+  const urls = list.map((h) => `ws://${h}:${port}${path}`);
+  urls.sort((a, c) => Number(a.includes("127.0.0.1")) - Number(c.includes("127.0.0.1")));
+  return urls;
 }
 
 function setPort(i: number, raw: string) {
@@ -136,9 +134,12 @@ async function copyUrl(url: string) {
       </label>
       <label class="field">
         反向地址
-        <n-input :value="cardUrl(b)" readonly />
+        <n-input :value="cardUrls(b)[0] || ''" readonly />
       </label>
-      <n-button size="tiny" @click="copyUrl(cardUrl(b))">复制这个号的反向地址</n-button>
+      <p v-for="url in cardUrls(b).slice(1)" :key="url" class="extra-url">
+        <code>{{ url }}</code>
+      </p>
+      <n-button size="tiny" @click="copyUrl(cardUrls(b)[0] || '')">复制这个号的反向地址</n-button>
       <n-button size="tiny" quaternary @click="remove(i)">去掉这个号</n-button>
     </article>
     <n-button @click="openAsk">添加一个号</n-button>
@@ -190,5 +191,10 @@ async function copyUrl(url: string) {
   gap: 4px;
   margin-bottom: 8px;
   font-size: 13px;
+}
+.extra-url {
+  margin: 0 0 6px;
+  font-size: 12px;
+  word-break: break-all;
 }
 </style>
