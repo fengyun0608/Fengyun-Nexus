@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { NButton, NInput, NForm, NFormItem, useMessage } from "naive-ui";
 import { api } from "@/api/client";
@@ -12,9 +12,19 @@ const route = useRoute();
 const router = useRouter();
 const message = useMessage();
 const navOpen = ref(false);
+const isMobile = ref(
+  typeof window !== "undefined" && window.matchMedia("(max-width: 860px)").matches,
+);
 
 const user = ref("fengyun");
 const pass = ref("");
+
+let mobileMq: MediaQueryList | null = null;
+function syncMobileNav() {
+  const mobile = !!mobileMq?.matches;
+  isMobile.value = mobile;
+  if (!mobile) navOpen.value = false;
+}
 
 watch(
   () => route.fullPath,
@@ -22,6 +32,15 @@ watch(
     navOpen.value = false;
   },
 );
+
+watch(navOpen, (open) => {
+  if (typeof document === "undefined") return;
+  if (!isMobile.value) {
+    document.body.style.overflow = "";
+    return;
+  }
+  document.body.style.overflow = open ? "hidden" : "";
+});
 
 type NavItem = { to: string; label: string; names?: string[] };
 type NavGroup = { title: string; items: NavItem[] };
@@ -112,8 +131,16 @@ async function refreshChannelNav() {
 }
 
 onMounted(() => {
+  mobileMq = window.matchMedia("(max-width: 860px)");
+  syncMobileNav();
+  mobileMq.addEventListener("change", syncMobileNav);
   void consoleUi.refresh();
   void auth.refreshMe().then(() => refreshChannelNav());
+});
+
+onUnmounted(() => {
+  mobileMq?.removeEventListener("change", syncMobileNav);
+  if (typeof document !== "undefined") document.body.style.overflow = "";
 });
 
 watch(
@@ -187,38 +214,42 @@ async function onLogin() {
       </button>
       <strong>Fengyun Nexus</strong>
     </div>
-    <div class="shell" :class="{ 'nav-open': navOpen }">
-      <button
-        v-if="navOpen"
-        type="button"
-        class="nav-mask"
-        aria-label="关闭菜单"
-        @click="navOpen = false"
-      />
-      <aside class="sidebar">
-        <div class="sidebar-brand">
-          <strong>Fengyun Nexus</strong>
-          <span>{{ auth.username || "已登录" }}</span>
-        </div>
-        <nav class="nav">
-          <div v-for="g in navGroups" :key="g.title" class="nav-group">
-            <div class="nav-group-title">{{ g.title }}</div>
-            <router-link
-              v-for="item in g.items"
-              :key="item.to"
-              :to="item.to"
-              class="nav-item"
-              :class="{ active: isActive(item) }"
-              @click="navOpen = false"
-            >
-              {{ item.label }}
-            </router-link>
+    <div class="shell">
+      <Teleport to="body" :disabled="!isMobile">
+        <aside class="sidebar" :class="{ 'drawer-open': !isMobile || navOpen }">
+          <div class="sidebar-brand">
+            <strong>Fengyun Nexus</strong>
+            <span>{{ auth.username || "已登录" }}</span>
           </div>
-        </nav>
-        <div class="sidebar-foot">
-          <n-button quaternary size="small" @click="auth.logout()">退出</n-button>
-        </div>
-      </aside>
+          <nav class="nav">
+            <div v-for="g in navGroups" :key="g.title" class="nav-group">
+              <div class="nav-group-title">{{ g.title }}</div>
+              <router-link
+                v-for="item in g.items"
+                :key="item.to"
+                :to="item.to"
+                class="nav-item"
+                :class="{ active: isActive(item) }"
+                @click="navOpen = false"
+              >
+                {{ item.label }}
+              </router-link>
+            </div>
+          </nav>
+          <div class="sidebar-foot">
+            <n-button quaternary size="small" @click="auth.logout()">退出</n-button>
+          </div>
+        </aside>
+      </Teleport>
+      <Teleport to="body">
+        <button
+          v-if="isMobile && navOpen"
+          type="button"
+          class="nav-mask"
+          aria-label="关闭菜单"
+          @click="navOpen = false"
+        />
+      </Teleport>
       <main class="main">
         <router-view />
       </main>
@@ -566,12 +597,12 @@ async function onLogin() {
     padding: 6px 12px;
     font-weight: 700;
   }
-  /* 遮罩与侧栏同属 .shell 层叠上下文，侧栏必须高于遮罩 */
+  /* 抽屉 Teleport 到 body，避开壁纸/壳层叠上下文 */
   .nav-mask {
     display: block;
     position: fixed;
     inset: 0;
-    z-index: 40;
+    z-index: 10050;
     border: 0;
     padding: 0;
     margin: 0;
@@ -580,7 +611,7 @@ async function onLogin() {
   }
   .sidebar {
     position: fixed;
-    z-index: 45;
+    z-index: 10060;
     top: 0;
     left: 0;
     width: min(280px, 86vw);
@@ -592,7 +623,7 @@ async function onLogin() {
     box-shadow: 8px 0 28px rgba(20, 40, 32, 0.12);
     pointer-events: auto;
   }
-  .shell.nav-open .sidebar {
+  .sidebar.drawer-open {
     transform: translateX(0);
   }
   .main {
