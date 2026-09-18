@@ -100,49 +100,29 @@ Fengyun-Nexus/
 
 ## 快速开始
 
-推荐远程一条命令（每次拉最新安装逻辑）。  
-**按部署机器所在地选源**：国内机器用 GitCode，海外机器用 GitHub。脚本也会再问一次。
+机器在哪就选哪边。装完打开 http://127.0.0.1:8787/ ，账号 `console` / `console`。
 
-### 国内（GitCode）
-
-**Linux / macOS / Termux**
+**国内**
 
 ```bash
 curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
 ```
 
-**Windows（PowerShell）**
-
 ```powershell
 irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.ps1?ref=main" | iex
 ```
 
-### 国外（GitHub）
-
-**Linux / macOS / Termux**
+**国外**
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.sh" | bash
 ```
 
-**Windows（PowerShell）**
-
 ```powershell
 irm "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.ps1" | iex
 ```
 
-也可不换命令、只改环境变量：`NEXUS_MIRROR=global`（或 PowerShell `$env:NEXUS_MIRROR="global"`）。
-
-> 国内：网页 `gitcode.com/.../raw/...` 是 HTML，管道请用上面的 `api.gitcode.com`。  
-> 地址规律：`…/raw/…` 后是仓内路径（安装器在 `scripts/get.sh` / `scripts/get.ps1`）。
-
-强制重装环境+目录：`NEXUS_REINSTALL=1` 加在命令前。  
-更多开关见 [上手](docs/product/start.md)。
-
-已安装后日常启动：`~/Fengyun-Nexus` 下 `./boot.sh` 或双击 `start.bat`。
-
-控制台：<http://127.0.0.1:8787/>  
-初始账号：`console` / `console`（登录后请改掉）
+已装过：目录里 `./boot.sh` 或双击 `start.bat`。细节见 [上手](docs/product/start.md)。
 
 ---
 
