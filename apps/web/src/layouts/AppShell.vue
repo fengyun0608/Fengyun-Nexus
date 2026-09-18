@@ -187,14 +187,14 @@ async function onLogin() {
       </button>
       <strong>Fengyun Nexus</strong>
     </div>
-    <button
-      v-if="navOpen"
-      type="button"
-      class="nav-mask"
-      aria-label="关闭菜单"
-      @click="navOpen = false"
-    />
     <div class="shell" :class="{ 'nav-open': navOpen }">
+      <button
+        v-if="navOpen"
+        type="button"
+        class="nav-mask"
+        aria-label="关闭菜单"
+        @click="navOpen = false"
+      />
       <aside class="sidebar">
         <div class="sidebar-brand">
           <strong>Fengyun Nexus</strong>
@@ -209,6 +209,7 @@ async function onLogin() {
               :to="item.to"
               class="nav-item"
               :class="{ active: isActive(item) }"
+              @click="navOpen = false"
             >
               {{ item.label }}
             </router-link>
@@ -548,7 +549,7 @@ async function onLogin() {
     gap: 10px;
     position: sticky;
     top: 0;
-    z-index: 30;
+    z-index: 50;
     padding: 10px 12px;
     background: rgba(255, 255, 255, 0.94);
     border-bottom: 1px solid var(--line);
@@ -565,17 +566,21 @@ async function onLogin() {
     padding: 6px 12px;
     font-weight: 700;
   }
+  /* 遮罩与侧栏同属 .shell 层叠上下文，侧栏必须高于遮罩 */
   .nav-mask {
     display: block;
     position: fixed;
     inset: 0;
-    z-index: 35;
+    z-index: 40;
     border: 0;
-    background: rgba(20, 40, 32, 0.35);
+    padding: 0;
+    margin: 0;
+    background: rgba(20, 40, 32, 0.42);
+    -webkit-tap-highlight-color: transparent;
   }
   .sidebar {
     position: fixed;
-    z-index: 40;
+    z-index: 45;
     top: 0;
     left: 0;
     width: min(280px, 86vw);
@@ -585,6 +590,7 @@ async function onLogin() {
     transform: translateX(-105%);
     transition: transform 0.2s ease;
     box-shadow: 8px 0 28px rgba(20, 40, 32, 0.12);
+    pointer-events: auto;
   }
   .shell.nav-open .sidebar {
     transform: translateX(0);
