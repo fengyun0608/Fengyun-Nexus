@@ -278,7 +278,7 @@ export function createInstallTask(input: {
   return { ...task, logs: [...task.logs] };
 }
 
-/** Auto-queue every runtime that is not installed. NapCat 需手动点装。 */
+/** 注释：仅控制台「一键排队缺失项」调用；开机不再自动装。NapCat 仍跳过，需单独点装。 */
 export function autoQueueMissing(): { queued: EnvTask[]; skipped: string[] } {
   refreshInstalledFlags();
   const queued: EnvTask[] = [];

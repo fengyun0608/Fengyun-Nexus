@@ -555,17 +555,8 @@ async function bootstrap(): Promise<void> {
   initEnvTasks(ROOT, {
     onLog: (line) => log.info(line),
   });
-  // 启动时自动把未装环境排进队列，进度打在本终端
-  try {
-    const aq = autoQueueMissing();
-    if (aq.queued.length) {
-      await bootStep(`  · 已自动排队 ${aq.queued.length} 个未安装环境`);
-    } else {
-      await bootStep("  · 运行时环境已就绪");
-    }
-  } catch (e) {
-    log.warn(`环境自动排队跳过：${e instanceof Error ? e.message : String(e)}`);
-  }
+  // 不自动装 Go/Python/浏览器/NapCat：只在控制台「环境配置」里点安装或「一键排队」
+  await bootStep("  · 环境安装改为手动，不会开机自装");
 
   await bootStep("初始化：HTTP 网关路由…");
 

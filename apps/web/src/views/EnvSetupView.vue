@@ -122,7 +122,7 @@ onUnmounted(() => {
   <div class="page">
     <header class="page-head">
       <h1>环境配置</h1>
-      <p class="muted">Go / Python / 浏览器可自动排队；NapCat 需手动安装，装完扫码即连 QQ。</p>
+      <p class="muted">Go / Python / 浏览器 / NapCat 都要自己点安装；「一键排队」才会批量装缺失项。</p>
     </header>
     <n-space style="margin-bottom: 12px">
       <n-button type="primary" :loading="busy === 'auto'" @click="autoQueue">一键排队缺失项</n-button>
