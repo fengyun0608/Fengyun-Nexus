@@ -316,7 +316,7 @@ export class OneBot11Bridge {
           return;
         }
         const url = new URL(req.url ?? "/", "http://localhost");
-        if (!this.authOk(req.headers.authorization, url.searchParams.get("access_token"))) {
+        if (!this.authOk(req.headers.authorization, url.searchParams.get("access_token"), port)) {
           socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
           socket.destroy();
           return;
@@ -327,7 +327,7 @@ export class OneBot11Bridge {
       });
       server.on("error", (err) => {
         const msg = err instanceof Error ? err.message : String(err);
-        log.warn(`反向端口 ${port} 没打开：${msg}。这个号会一直显示未连接`);
+        log.warn(`反向端口 ${port} 没打开：${msg}`);
         this.extra.delete(port);
       });
       server.listen(port, "0.0.0.0", () => {
@@ -346,7 +346,7 @@ export class OneBot11Bridge {
     server.on("upgrade", (req, socket, head) => {
       const url = new URL(req.url ?? "/", "http://localhost");
       if (url.pathname !== this.cfg.reverseWsPath) return;
-      if (!this.authOk(req.headers.authorization, url.searchParams.get("access_token"))) {
+      if (!this.authOk(req.headers.authorization, url.searchParams.get("access_token"), this.gatewayPort)) {
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
         return;
@@ -359,10 +359,26 @@ export class OneBot11Bridge {
     log.info(`OneBot 11 反向 WS 就绪  path=${this.cfg.reverseWsPath}`);
   }
 
-  private authOk(authorization?: string, queryToken?: string | null): boolean {
-    if (!this.cfg.accessToken) return true;
+  private expectedToken(listenPort: number): string {
+    const bots = this.cfg.bots || [];
+    if (listenPort > 0) {
+      const exact = bots.find((b) => Math.floor(Number(b.listenPort) || 0) === listenPort);
+      const own = String(exact?.accessToken || "").trim();
+      if (own) return own;
+    }
+    if (!listenPort || listenPort === this.gatewayPort) {
+      const shared = bots.find((b) => !Number(b.listenPort) && String(b.accessToken || "").trim());
+      const own = String(shared?.accessToken || "").trim();
+      if (own) return own;
+    }
+    return String(this.cfg.accessToken || "").trim();
+  }
+
+  private authOk(authorization?: string, queryToken?: string | null, listenPort = 0): boolean {
+    const token = this.expectedToken(listenPort);
+    if (!token) return true;
     const bearer = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
-    return bearer === this.cfg.accessToken || queryToken === this.cfg.accessToken;
+    return bearer === token || queryToken === token;
   }
 
   checkHttpAuth(authorization?: string, queryToken?: string | null): boolean {

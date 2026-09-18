@@ -538,7 +538,7 @@ onMounted(() => void load());
         · QQ {{ onebot?.selfId || "—" }}
       </p>
       <label class="field row-switch">启用 <n-switch v-model:value="obEnabled" /></label>
-      <label class="field">Access Token <n-input v-model:value="obToken" type="password" show-password-on="click" /></label>
+      <label class="field">共用令牌 <n-input v-model:value="obToken" type="password" show-password-on="click" placeholder="某个号单独填了就以那个号为准" /></label>
       <label class="field">反向 WS 路径 <n-input v-model:value="obWs" /></label>
       <label class="field">HTTP 路径 <n-input v-model:value="obHttp" /></label>
       <BotAccountCards
