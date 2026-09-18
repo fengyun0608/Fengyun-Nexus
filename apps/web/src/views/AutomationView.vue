@@ -116,9 +116,14 @@ onMounted(() => void load());
       <n-button @click="load">刷新</n-button>
       <n-button type="primary" @click="openCreate">创建本地工作流</n-button>
     </n-space>
-    <p v-if="guide?.workflowsDir" class="hint path-tip">
-      本地目录：<code>{{ guide.workflowsDir }}</code>
-    </p>
+    <div v-if="guide?.docs?.length" class="docs-mini page-docs">
+      <strong>教程与示例（新窗口）</strong>
+      <ul class="doc-links">
+        <li v-for="d in guide.docs" :key="d.path">
+          <a :href="docHref(d)" target="_blank" rel="noopener noreferrer">{{ d.title }}</a>
+        </li>
+      </ul>
+    </div>
     <n-spin :show="loading">
       <p v-if="err" class="err">{{ err }}</p>
       <div v-else class="grid-2">
@@ -158,11 +163,7 @@ onMounted(() => void load());
       title="创建本地工作流"
       :style="{ width: 'min(560px, 94vw)' }"
     >
-      <p class="hint">
-        会写到
-        <code>{{ guide?.workflowsDir || "workflows/" }}</code>
-        ，创建后按文档继续改节点。
-      </p>
+      <p class="hint">创建后生成本机工作流骨架。教程请点下面链接，新窗口打开。</p>
       <template v-if="!createResult">
         <label class="field">工作流 id（英文） <n-input v-model:value="createForm.id" placeholder="例如 demo.flow" /></label>
         <label class="field">名称 <n-input v-model:value="createForm.name" placeholder="中文显示名" /></label>
@@ -179,7 +180,7 @@ onMounted(() => void load());
       </template>
       <template v-else>
         <p class="ok-line">{{ createResult.message }}</p>
-        <p class="hint">路径：<code>{{ createResult.path }}</code></p>
+        <p v-if="createResult.path" class="hint">已生成：<code>{{ createResult.path }}</code></p>
         <div v-if="createResult.docs?.length" class="docs-mini">
           <strong>接下来点这些链接开始写</strong>
           <ul class="doc-links">
@@ -246,6 +247,9 @@ onMounted(() => void load());
 }
 .doc-links a:hover {
   text-decoration: underline;
+}
+.page-docs {
+  margin: 0 0 14px;
 }
 .ok-line {
   color: var(--amber);

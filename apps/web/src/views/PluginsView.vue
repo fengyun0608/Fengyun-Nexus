@@ -389,7 +389,7 @@ onMounted(() => void refresh());
       <div v-if="layer.step === 'home'" class="layer-grid tight">
         <button type="button" class="layer-card" @click="openCreateLocal">
           <strong>创建本地插件</strong>
-          <span>生成本机 plugins/ 目录骨架，填名称 / 版本 / 作者，再按文档编写。</span>
+          <span>生成本机骨架，填名称 / 版本 / 作者；教程与示例用下面链接打开。</span>
         </button>
         <button type="button" class="layer-card" @click="layer = { step: 'channels' }">
           <strong>消息通道插件包</strong>
@@ -411,6 +411,14 @@ onMounted(() => void refresh());
           <strong>系统插件编写</strong>
           <span>系统插件的编写基准与示例。</span>
         </button>
+        <div v-if="pluginGuide?.docs?.length" class="docs-mini home-docs">
+          <strong>教程与示例（新窗口）</strong>
+          <ul class="doc-links">
+            <li v-for="d in pluginGuide.docs" :key="d.path">
+              <a :href="docHref(d)" target="_blank" rel="noopener noreferrer">{{ d.title }}</a>
+            </li>
+          </ul>
+        </div>
       </div>
 
       <div v-else-if="layer.step === 'channels'" class="list">
@@ -517,9 +525,7 @@ onMounted(() => void refresh());
       :style="{ width: 'min(560px, 94vw)' }"
     >
       <p class="hint">
-        会写到本机目录
-        <code>{{ pluginGuide?.pluginsDir || "plugins/" }}</code>
-        ，创建后按文档继续编写。
+        创建后会生成本机插件骨架。教程与示例请点下面链接，新窗口打开。
       </p>
       <template v-if="!createResult">
         <label class="field">插件 id（英文） <n-input v-model:value="createForm.id" placeholder="例如 z.hello" /></label>
@@ -545,7 +551,7 @@ onMounted(() => void refresh());
       </template>
       <template v-else>
         <p class="ok-line">{{ createResult.message }}</p>
-        <p class="hint">路径：<code>{{ createResult.path }}</code></p>
+        <p v-if="createResult.path" class="hint">已生成：<code>{{ createResult.path }}</code></p>
         <div v-if="createResult.docs?.length" class="docs-mini">
           <strong>接下来点这些链接开始写</strong>
           <ul class="doc-links">
@@ -666,6 +672,9 @@ onMounted(() => void refresh());
 }
 .doc-links a:hover {
   text-decoration: underline;
+}
+.home-docs {
+  grid-column: 1 / -1;
 }
 .kind-select {
   width: 100%;

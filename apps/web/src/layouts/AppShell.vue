@@ -428,7 +428,9 @@ async function onLogin() {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line);
-  background: rgba(18, 20, 16, 0.96);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   min-height: 100vh;
   position: sticky;
   top: 0;
@@ -463,20 +465,22 @@ async function onLogin() {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
-  opacity: 0.85;
 }
 .nav-item {
   display: block;
   padding: 8px 12px;
   border-radius: 8px;
-  color: var(--muted);
+  color: var(--ink);
   text-decoration: none;
   font-size: 0.92rem;
+  opacity: 0.78;
 }
 .nav-item:hover,
 .nav-item.active {
-  color: var(--ink);
+  opacity: 1;
+  color: var(--amber-deep);
   background: rgba(47, 155, 120, 0.12);
+  font-weight: 600;
 }
 .sidebar-foot {
   padding: 12px;
