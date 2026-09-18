@@ -11,7 +11,7 @@
     "checkOnStart": true
   },
   "pluginsRepo": {
-    "url": "",
+    "url": "https://gitcode.com/fengyunnb_admin/fengyun-system-plugins.git",
     "branch": "main"
   }
 }

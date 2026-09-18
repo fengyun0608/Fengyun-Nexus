@@ -7,6 +7,7 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   rmSync,
   writeFileSync,
   readFileSync,
@@ -56,8 +57,14 @@ function copyPlugin(name, destBase) {
   }
 }
 
+// 清空输出目录但保留已有的 .git（方便反复 pack 后 push 专仓）
 if (existsSync(outRoot)) {
-  rmSync(outRoot, { recursive: true, force: true });
+  for (const name of readdirSync(outRoot)) {
+    if (name === ".git") continue;
+    rmSync(join(outRoot, name), { recursive: true, force: true });
+  }
+} else {
+  mkdirSync(outRoot, { recursive: true });
 }
 mkdirSync(join(outRoot, "plugins"), { recursive: true });
 
