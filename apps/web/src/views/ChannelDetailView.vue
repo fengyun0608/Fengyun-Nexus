@@ -458,9 +458,20 @@ onMounted(() => void load());
     >
       <p v-if="!cfgSupported" class="muted">{{ cfgMsg || "该插件暂未支持配置" }}</p>
       <template v-else>
-        <label v-for="f in cfgSchema" :key="f.key" class="field">
+        <label
+          v-for="f in cfgSchema"
+          :key="f.key"
+          class="field"
+          :class="{ 'row-switch': f.type === 'boolean' }"
+        >
           {{ f.label }}
+          <n-switch
+            v-if="f.type === 'boolean'"
+            :value="Boolean(cfgValues[f.key])"
+            @update:value="(v) => (cfgValues[f.key] = v)"
+          />
           <n-input
+            v-else
             :value="String(cfgValues[f.key] ?? '')"
             @update:value="(v) => (cfgValues[f.key] = v)"
           />

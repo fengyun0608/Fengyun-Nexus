@@ -24,6 +24,12 @@
   color: var(--muted);
   font-size: 0.9rem;
 }
+.field.row-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 .row-actions {
   display: flex;
   flex-wrap: wrap;

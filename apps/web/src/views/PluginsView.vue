@@ -8,6 +8,7 @@ import {
   NModal,
   NSpace,
   NSpin,
+  NSwitch,
   NTag,
   NThing,
   useMessage,
@@ -470,17 +471,13 @@ onMounted(() => void refresh());
               <span v-if="!p.enabled"> · 已停用</span>
             </div>
           </div>
-          <n-space>
+          <n-space align="center">
             <n-button size="tiny" quaternary @click="openConfig(p)">配置</n-button>
             <n-button size="tiny" type="primary" @click="openSource(p)">编辑</n-button>
-            <n-button
-              size="tiny"
-              :type="p.enabled ? 'warning' : 'default'"
-              secondary
-              @click="toggle(p, !p.enabled)"
-            >
-              {{ p.enabled ? "停用" : "启用" }}
-            </n-button>
+            <n-switch
+              :value="Boolean(p.enabled)"
+              @update:value="(v) => toggle(p, v)"
+            />
           </n-space>
         </div>
         <p v-if="!listPlugins.length" class="muted">这个包里暂时没有插件</p>
@@ -579,9 +576,20 @@ onMounted(() => void refresh());
     >
       <p v-if="!cfgSupported" class="muted">{{ cfgMsg || "该插件暂未支持配置" }}</p>
       <template v-else>
-        <label v-for="f in cfgSchema" :key="f.key" class="field">
+        <label
+          v-for="f in cfgSchema"
+          :key="f.key"
+          class="field"
+          :class="{ 'row-switch': f.type === 'boolean' }"
+        >
           {{ f.label }}
+          <n-switch
+            v-if="f.type === 'boolean'"
+            :value="Boolean(cfgValues[f.key])"
+            @update:value="(v) => (cfgValues[f.key] = v)"
+          />
           <n-input
+            v-else
             :value="String(cfgValues[f.key] ?? '')"
             @update:value="(v) => (cfgValues[f.key] = v)"
           />
