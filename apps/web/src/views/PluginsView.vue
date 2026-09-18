@@ -178,16 +178,20 @@ async function saveConfig() {
 }
 
 function findDev(p: PluginItem): DevPlugin | undefined {
+  const norm = (s: string) => s.toLowerCase().replace(/[._]/g, "-");
+  const pid = norm(p.id);
   return (
     devItems.value.find((d) => d.id === p.id) ||
-    devItems.value.find((d) => d.dir === p.id || d.name === p.name)
+    devItems.value.find((d) => d.dir === p.id) ||
+    devItems.value.find((d) => d.name && p.name && d.name === p.name) ||
+    devItems.value.find((d) => norm(d.id) === pid || norm(d.dir) === pid)
   );
 }
 
 async function openSource(p: PluginItem) {
   const hit = findDev(p);
   if (!hit) {
-    message.warning("未找到对应插件目录");
+    message.warning("未找到对应插件目录，无法编辑");
     return;
   }
   activeDir.value = hit.dir;
@@ -200,6 +204,13 @@ async function openSource(p: PluginItem) {
       { token: auth.token },
     );
     files.value = res.files || [];
+    // 默认打开入口文件，少点一次
+    const prefer =
+      files.value.find((f) => f.path.endsWith("/index.ts")) ||
+      files.value.find((f) => f.path.endsWith("/index.js")) ||
+      files.value.find((f) => /\/plugin\/.+\.ts$/.test(f.path)) ||
+      files.value[0];
+    if (prefer) await loadFile(prefer.path);
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   }
@@ -330,13 +341,11 @@ onMounted(() => void refresh());
             </div>
           </div>
           <n-space>
-            <n-button size="tiny" @click="openConfig(p)">管理</n-button>
-            <n-button v-if="findDev(p)" size="tiny" type="primary" secondary @click="openSource(p)">
-              在线编辑
-            </n-button>
+            <n-button size="tiny" quaternary @click="openConfig(p)">配置</n-button>
+            <n-button size="tiny" type="primary" @click="openSource(p)">编辑</n-button>
             <n-button
               size="tiny"
-              :type="p.enabled ? 'warning' : 'primary'"
+              :type="p.enabled ? 'warning' : 'default'"
               secondary
               @click="toggle(p, !p.enabled)"
             >
@@ -360,7 +369,7 @@ onMounted(() => void refresh());
             插件编写：用 <code>ctx.shot.renderMenu</code> / <code>ctx.shot.renderHtml</code>，
             再用 <code>e.replyImage(fileUrl)</code> 只发图（不要旁文）。
           </p>
-          <p>列表里点「在线编辑」可改本机插件源码，保存后按需热重载。</p>
+          <p>列表里点「编辑」可改本机插件源码，保存后按需热重载；「配置」只改运行参数。</p>
         </template>
         <template v-else>
           <p>通道插件：`kind=channel`，`adapterScope=channel` 或 `specified`，并用 `channels` 绑定通道。</p>
@@ -398,7 +407,7 @@ onMounted(() => void refresh());
     <n-modal
       v-model:show="showSource"
       preset="card"
-      :title="`在线编辑 · ${activeDir}`"
+      :title="`编辑源码 · ${activeDir}`"
       :style="{ width: 'min(720px, 96vw)' }"
       :segmented="{ content: true, footer: 'soft' }"
     >

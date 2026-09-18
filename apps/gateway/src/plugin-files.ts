@@ -53,6 +53,7 @@ export function listPluginDirs(root: string): Array<{
   modular: boolean;
   /** 已有的分目录 */
   layout: string[];
+  name?: string;
 }> {
   const base = pluginsRoot(root);
   if (!existsSync(base)) return [];
@@ -80,7 +81,22 @@ export function listPluginDirs(root: string): Array<{
         const p = join(abs, n);
         return existsSync(p) && statSync(p).isDirectory();
       });
-      return { id: dir, dir, hasIndex, modular, layout };
+      let id = dir;
+      let name: string | undefined;
+      const manPath = join(abs, "nexus.plugin.json");
+      if (existsSync(manPath)) {
+        try {
+          const j = JSON.parse(readFileSync(manPath, "utf8")) as {
+            id?: string;
+            name?: string;
+          };
+          if (j.id) id = String(j.id);
+          if (j.name) name = String(j.name);
+        } catch {
+          /* ignore */
+        }
+      }
+      return { id, dir, hasIndex, modular, layout, name };
     });
 }
 
