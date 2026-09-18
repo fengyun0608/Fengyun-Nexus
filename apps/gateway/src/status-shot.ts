@@ -38,7 +38,6 @@ export type StatusShotInput = {
   pluginsEnabled: number;
   pluginsTotal: number;
   replyGroupIds: string[];
-  notifyGroupIds: string[];
 };
 
 function escapeHtml(s: string): string {
@@ -206,7 +205,6 @@ export function buildStatusLines(s: StatusShotInput): string[] {
   );
   lines.push(`插件 ${s.pluginsEnabled}/${s.pluginsTotal}`);
   lines.push(`AI 回复群 ${fmtGroups(s.replyGroupIds, "不限")}`);
-  lines.push(`通知群 ${fmtGroups(s.notifyGroupIds, "无")}`);
   return lines;
 }
 
@@ -434,7 +432,6 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
 
     <div class="box foot">
       <span>AI 回复群 <b>${escapeHtml(fmtGroups(s.replyGroupIds, "不限"))}</b></span>
-      <span>通知群 <b>${escapeHtml(fmtGroups(s.notifyGroupIds, "无"))}</b></span>
       <span class="stamp">${escapeHtml(stamp)}</span>
     </div>
   </div>

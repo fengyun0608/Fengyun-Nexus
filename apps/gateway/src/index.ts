@@ -504,7 +504,6 @@ async function bootstrap(): Promise<void> {
       pluginsEnabled: enabled,
       pluginsTotal: list.length,
       replyGroupIds: ch.replyGroupIds || [],
-      notifyGroupIds: ch.notifyGroupIds || [],
     };
   }
 
@@ -650,19 +649,6 @@ async function bootstrap(): Promise<void> {
                     ? `更新报告已发回原${mt === "group" ? `群 ${gid}` : "会话"}`
                     : "更新报告发送失败，将回退由回复通道再试",
                 );
-                if (sent && upd.forwardNodes?.length) {
-                  const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
-                  for (const extra of notifyIds) {
-                    if (gid && extra === gid) continue;
-                    await onebot.sendForwardToGroup(extra, upd.forwardNodes);
-                  }
-                } else if (sent) {
-                  const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
-                  for (const extra of notifyIds) {
-                    if (gid && extra === gid) continue;
-                    await onebot.sendTextToGroup(extra, report);
-                  }
-                }
                 if (sent) {
                   db.insertMessage({
                     id: newId("msg"),
@@ -1301,7 +1287,6 @@ async function bootstrap(): Promise<void> {
       ...body,
       masters,
       replyGroupIds: parseList(body.replyGroupIds, prev.replyGroupIds),
-      notifyGroupIds: parseList(body.notifyGroupIds, prev.notifyGroupIds),
       systemPrompt:
         typeof body.systemPrompt === "string" ? body.systemPrompt : prev.systemPrompt,
       onlyMasters:
@@ -1872,20 +1857,6 @@ async function bootstrap(): Promise<void> {
     }
     res.json(result);
     if (result.shouldExit) {
-      const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
-      const targetGid = notifyIds[0];
-      if (targetGid) {
-        saveRestartNotify(ROOT, {
-          channel: "onebot11",
-          chatId: `group:${targetGid}`,
-          userId: "console",
-          messageType: "group",
-          groupId: targetGid,
-          requestedAt: nowIso(),
-          previousUptime: formatUptime(Date.now() - startedAt),
-          updateSummary: result.updateSummary || result.changeItems || [],
-        });
-      }
       const r = scheduleSystemRestart(ROOT);
       if (r.ok) {
         log.ok(`更新完成，同窗口重启（退出码 ${r.exitCode}）`);
@@ -2112,11 +2083,6 @@ async function bootstrap(): Promise<void> {
             log.ok(
               `重启成功已发回原${mt === "group" ? `群 ${gid}` : "会话"}`,
             );
-            const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
-            for (const extra of notifyIds) {
-              if (gid && extra === gid) continue;
-              await onebot.sendTextToGroup(extra, sendPayload);
-            }
             clearRestartNotify(ROOT);
             return;
           }

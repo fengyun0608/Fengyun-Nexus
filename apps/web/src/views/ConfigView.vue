@@ -82,7 +82,7 @@ async function applyUpdate() {
     });
     applyReport.value = res.reportText || res.message || "更新完成";
     if (res.shouldExit) {
-      message.success("已拉取，网关即将重启；群通知群会收到回执");
+      message.success("已拉取，网关即将重启");
     } else {
       message.success(res.message || "已是最新");
     }

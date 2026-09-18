@@ -21,7 +21,6 @@ type Settings = {
   masters?: string[];
   onlyMasters?: boolean;
   replyGroupIds?: string[];
-  notifyGroupIds?: string[];
   systemPrompt?: string;
   note?: string;
 };
@@ -68,7 +67,6 @@ const label = ref("");
 const masters = ref("");
 const onlyMasters = ref(false);
 const replyGroupIds = ref("");
-const notifyGroupIds = ref("");
 const systemPrompt = ref("");
 const note = ref("");
 
@@ -117,7 +115,6 @@ async function loadSettings() {
   masters.value = (s.masters || []).join(", ");
   onlyMasters.value = Boolean(s.onlyMasters);
   replyGroupIds.value = (s.replyGroupIds || []).join(", ");
-  notifyGroupIds.value = (s.notifyGroupIds || []).join(", ");
   systemPrompt.value = s.systemPrompt || "";
   note.value = s.note || "";
 }
@@ -166,7 +163,6 @@ async function saveSettings() {
         masters: masters.value,
         onlyMasters: onlyMasters.value,
         replyGroupIds: replyGroupIds.value,
-        notifyGroupIds: notifyGroupIds.value,
         systemPrompt: systemPrompt.value,
         note: note.value,
       }),
@@ -339,7 +335,7 @@ onMounted(() => void load());
         <div class="layer-grid tight">
           <button type="button" class="layer-card" @click="showSettings = true">
             <strong>通道设置</strong>
-            <span>主人、通知群、人设等</span>
+            <span>主人、AI 回复群、人设等</span>
           </button>
           <button type="button" class="layer-card" @click="showPlugins = true">
             <strong>本通道插件</strong>
@@ -371,7 +367,6 @@ onMounted(() => void load());
         AI 回复群
         <n-input v-model:value="replyGroupIds" placeholder="空=不限；# 指令不受此限" />
       </label>
-      <label class="field">通知群 <n-input v-model:value="notifyGroupIds" /></label>
       <label class="field">人设 / 系统提示 <n-input v-model:value="systemPrompt" type="textarea" :rows="4" /></label>
       <label class="field">备注 <n-input v-model:value="note" /></label>
       <template #footer>

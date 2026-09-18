@@ -5,7 +5,6 @@
       "masters": [],
       "onlyMasters": false,
       "replyGroupIds": [],
-      "notifyGroupIds": [],
       "systemPrompt": "",
       "note": ""
     },
@@ -14,7 +13,6 @@
       "masters": [],
       "onlyMasters": false,
       "replyGroupIds": [],
-      "notifyGroupIds": [],
       "systemPrompt": "",
       "note": ""
     },
@@ -23,9 +21,8 @@
       "masters": [],
       "onlyMasters": false,
       "replyGroupIds": [],
-      "notifyGroupIds": [],
       "systemPrompt": "",
-      "note": "主人 QQ、可回复群、更新通报群、人设均可在控制台配置"
+      "note": "主人 QQ、AI 回复群、人设均可在控制台配置"
     }
   }
 }
