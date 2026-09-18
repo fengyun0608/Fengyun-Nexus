@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
@@ -1728,8 +1728,17 @@ async function bootstrap(): Promise<void> {
       : null;
 
   if (staticRoot) {
-    app.use(express.static(staticRoot));
+    app.use(
+      express.static(staticRoot, {
+        setHeaders(res, filePath) {
+          if (filePath.endsWith("index.html") || filePath.endsWith(`${sep}index.html`)) {
+            res.setHeader("Cache-Control", "no-store");
+          }
+        },
+      }),
+    );
     app.get(["/", "/console", "/index.html"], (_req, res) => {
+      res.setHeader("Cache-Control", "no-store");
       res.sendFile(join(staticRoot, "index.html"));
     });
   } else {
