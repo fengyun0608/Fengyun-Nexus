@@ -219,7 +219,7 @@ async function saveConfig() {
       },
     );
     if (res.values) cfgValues.value = { ...res.values };
-    cfgSaved.value = res.message || "已改好，立即生效";
+    cfgSaved.value = res.message || "已修改成功，立即生效";
     message.success(cfgSaved.value);
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));

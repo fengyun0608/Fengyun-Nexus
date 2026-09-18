@@ -1593,7 +1593,7 @@ async function bootstrap(): Promise<void> {
     await p.setConfig(next);
     const values = (await p.getConfig?.()) ?? next;
     savePluginConfig(ROOT, id, values);
-    res.json({ ok: true, message: "已改好，立即生效", id, values });
+    res.json({ ok: true, message: "已修改成功，立即生效", id, values });
   });
 
   app.get("/v1/channels", (_req, res) => {
@@ -1685,7 +1685,7 @@ async function bootstrap(): Promise<void> {
     );
     res.json({
       ok: true,
-      message: "已改好，立即生效",
+      message: "已修改成功，立即生效",
       id,
       settings: saved,
     });
@@ -1962,7 +1962,7 @@ async function bootstrap(): Promise<void> {
     log.info(`OneBot 11 配置已保存  enabled=${next.enabled}  bots=${next.bots.length}`);
     res.json({
       ok: true,
-      message: "已改好，立即生效",
+      message: "已修改成功，立即生效",
       ...onebotPayload(),
     });
   });
