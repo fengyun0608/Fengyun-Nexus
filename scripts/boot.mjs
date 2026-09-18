@@ -242,11 +242,21 @@ async function ensureBuild() {
   }
 
   const webDistHtml = join(root, "apps/web/dist/index.html");
-  const webSrc = join(root, "apps/web/src/App.tsx");
+  const webSrcDir = join(root, "apps/web/src");
+  const webMarkers = [
+    join(root, "apps/web/src/App.vue"),
+    join(root, "apps/web/src/layouts/AppShell.vue"),
+    join(root, "apps/web/package.json"),
+    join(root, "package.json"),
+  ];
   let needWeb = !existsSync(webDistHtml);
-  if (!needWeb && existsSync(webSrc)) {
+  if (!needWeb) {
     try {
-      needWeb = statSync(webSrc).mtimeMs > statSync(webDistHtml).mtimeMs;
+      const distM = statSync(webDistHtml).mtimeMs;
+      needWeb = webMarkers.some((f) => existsSync(f) && statSync(f).mtimeMs > distM);
+      if (!needWeb && existsSync(webSrcDir)) {
+        needWeb = latestMtime(webSrcDir) > distM;
+      }
     } catch {
       needWeb = true;
     }
@@ -262,6 +272,23 @@ async function ensureBuild() {
   // 同步到 gateway/public，避免启动时 dist 缺失仍用旧 public
   // Windows 上对中文路径做整树 rmSync/cpSync 偶发原生崩溃（0xC0000409），故：可跳过 / 可失败继续 / Win 优先 robocopy
   await syncConsolePublic();
+}
+
+/** 目录树最新 mtime（跳过 node_modules / dist） */
+function latestMtime(p) {
+  if (!existsSync(p)) return 0;
+  try {
+    const st = statSync(p);
+    if (!st.isDirectory()) return st.mtimeMs;
+    let max = st.mtimeMs;
+    for (const name of readdirSync(p)) {
+      if (name === "node_modules" || name === "dist" || name === ".git") continue;
+      max = Math.max(max, latestMtime(join(p, name)));
+    }
+    return max;
+  } catch {
+    return 0;
+  }
 }
 
 function consoleAlreadySynced(distDir, pubDir) {
@@ -295,10 +322,28 @@ function syncViaRobocopy(distDir, pubDir) {
 async function syncConsolePublic() {
   const distDir = join(root, "apps/web/dist");
   const pubDir = join(root, "apps/gateway/public");
-  if (!existsSync(join(distDir, "index.html"))) {
+  const distHtml = join(distDir, "index.html");
+  const pubHtml = join(pubDir, "index.html");
+  if (!existsSync(distHtml)) {
     bootLog("WARN", ANSI.yellow, "apps/web/dist 缺失，跳过同步 public");
     return;
   }
+
+  // 仓库里的 public 比本地 dist 新（常见于 #更新只拉了 git）→ 禁止用旧 dist 覆盖，先强制重建
+  if (existsSync(pubHtml)) {
+    try {
+      const distM = statSync(distHtml).mtimeMs;
+      const pubM = statSync(pubHtml).mtimeMs;
+      if (pubM > distM + 2000) {
+        bootLog("INFO", ANSI.cyan, "gateway/public 比 dist 新，强制重建控制台以免盖掉更新…");
+        await run(["--filter", "@fengyun/nexus-web", "build"]);
+        bootLog("OK", ANSI.green, "console rebuilt → apps/web/dist");
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   if (consoleAlreadySynced(distDir, pubDir)) {
     bootLog("OK", ANSI.green, "console public 已是最新，跳过同步");
     return;

@@ -225,6 +225,10 @@ async function onLogin() {
       </aside>
       <Teleport to="body">
         <div v-if="isMobile && navOpen" class="mnav" role="dialog" aria-modal="true">
+          <div class="mnav-head">
+            <button type="button" class="menu-btn" @click="navOpen = false">关闭</button>
+            <strong>Fengyun Nexus</strong>
+          </div>
           <aside class="sidebar mnav-panel">
             <ConsoleSidebar
               :username="auth.username || ''"
@@ -234,12 +238,6 @@ async function onLogin() {
               @logout="auth.logout()"
             />
           </aside>
-          <button
-            type="button"
-            class="mnav-scrim"
-            aria-label="关闭菜单"
-            @click="navOpen = false"
-          />
         </div>
       </Teleport>
       <main class="main">
@@ -512,38 +510,47 @@ async function onLogin() {
 .mobile-bar {
   display: none;
 }
-/* 手机抽屉：侧栏与遮罩左右并排，互不重叠，点菜单不会点到蒙层 */
+/* 手机菜单：全屏侧栏，无蒙层；关菜单用抽屉内「关闭」 */
 .mnav {
   position: fixed;
   inset: 0;
   z-index: 2147483000;
   display: flex;
-  flex-direction: row;
-  align-items: stretch;
+  flex-direction: column;
+  background: #f3faf6;
+}
+.mnav-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid var(--line);
+}
+.mnav-head strong {
+  color: var(--amber);
+  font-family: var(--font-display);
+}
+.mnav-head .menu-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-weight: 700;
 }
 .mnav-panel {
   position: relative !important;
   top: auto !important;
-  z-index: 1;
-  flex: 0 0 auto;
-  width: min(280px, 86vw);
-  height: 100%;
-  min-height: 100%;
-  max-height: 100dvh;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  max-height: none;
+  border-right: 0;
   overflow: auto;
-  box-shadow: 8px 0 28px rgba(20, 40, 32, 0.12);
   pointer-events: auto;
   -webkit-overflow-scrolling: touch;
-}
-.mnav-scrim {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  background: rgba(20, 40, 32, 0.42);
-  -webkit-tap-highlight-color: transparent;
-  cursor: pointer;
 }
 @media (max-width: 860px) {
   .shell {

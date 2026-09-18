@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { dirname, join, resolve, sep, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import cors from "cors";
@@ -2358,11 +2358,24 @@ async function bootstrap(): Promise<void> {
     });
   });
 
-  const staticRoot = existsSync(join(WEB_DIST, "index.html"))
-    ? WEB_DIST
-    : existsSync(join(PUBLIC_FALLBACK, "index.html"))
-      ? PUBLIC_FALLBACK
-      : null;
+  const distHtml = join(WEB_DIST, "index.html");
+  const pubHtml = join(PUBLIC_FALLBACK, "index.html");
+  const distOk = existsSync(distHtml);
+  const pubOk = existsSync(pubHtml);
+  let staticRoot: string | null = null;
+  if (distOk && pubOk) {
+    // 谁新用谁：避免旧 dist 一直压住 git 里已更新的 public
+    try {
+      staticRoot =
+        statSync(distHtml).mtimeMs >= statSync(pubHtml).mtimeMs ? WEB_DIST : PUBLIC_FALLBACK;
+    } catch {
+      staticRoot = WEB_DIST;
+    }
+  } else if (distOk) {
+    staticRoot = WEB_DIST;
+  } else if (pubOk) {
+    staticRoot = PUBLIC_FALLBACK;
+  }
 
   /** 默认壁纸：优先 Web public，其次 assets/console */
   const wallPublic = join(ROOT, "apps/web/public/wallpapers/default.jpg");
