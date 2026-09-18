@@ -51,7 +51,7 @@ import {
   type EnvTaskStatus,
 } from "./env-tasks.js";
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
-import { loadBotConfig, saveBotConfig, stripWakePrefix, type BotConfig } from "./bot-config.js";
+import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
 import {
   listPluginDirs,
   listPluginFiles,
@@ -769,17 +769,43 @@ async function bootstrap(): Promise<void> {
       return [];
     }
 
+    // 群聊：必须 @ 机器人，或开头呼唤词，才走 AI
+    if (
+      !shouldTriggerAi({
+        channel: msg.channel,
+        messageType: msg.meta?.messageType as string | undefined,
+        content: trimmedRaw,
+        atSelf: Boolean(msg.meta?.atSelf),
+        bot: botCfg,
+        isAdminConsole,
+      })
+    ) {
+      return [];
+    }
+
     const history: Array<{ role: "user" | "assistant" | "system"; content: string }> = [];
     const persona = String(chSettings.systemPrompt || "").trim();
     if (persona) {
       history.push({ role: "system", content: persona });
     }
+    // 给模型：去掉 @ 和呼唤前缀
+    const userAsk = stripAtMentions(
+      stripWakeForChat(trimmedRaw, botCfg),
+      msg.meta?.selfId as string | undefined,
+    );
+    if (!userAsk) return [];
+
     history.push(
       ...session.turns.slice(-12).map((t) => ({
         role: t.role as "user" | "assistant" | "system",
         content: t.content,
       })),
     );
+    if (history.length && history[history.length - 1]?.role === "user") {
+      history[history.length - 1] = { role: "user", content: userAsk };
+    } else {
+      history.push({ role: "user", content: userAsk });
+    }
     const assistant = (
       await Promise.race([
         llm.chat(history),

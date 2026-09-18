@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 export type BotConfig = {
   name: string;
-  /** 呼唤前缀，如 nexus / 风云；留空不强制 */
+  /** 呼唤前缀，如 nexus / 风云；群聊里开头带这个才触发 AI（或 @ 机器人） */
   wakePrefixes: string[];
   /** 指令前缀，默认 # */
   commandPrefix: string;
@@ -61,11 +61,46 @@ export function saveBotConfig(root: string, cfg: BotConfig): void {
   );
 }
 
+export function matchWakePrefix(
+  text: string,
+  cfg: BotConfig,
+): { matched: boolean; rest: string } {
+  let t = text.trim();
+  if (!t) return { matched: false, rest: t };
+  const prefixes = cfg.wakePrefixes
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  if (!prefixes.length) return { matched: false, rest: t };
+
+  const cmd = cfg.commandPrefix || "#";
+  for (const p of prefixes) {
+    const reHash = new RegExp(`^${escapeReg(cmd)}\\s*${escapeReg(p)}\\s*`, "i");
+    if (reHash.test(t)) {
+      return { matched: true, rest: t.replace(reHash, cmd).trim() };
+    }
+    const rePlain = new RegExp(`^${escapeReg(p)}\\s*`, "i");
+    if (rePlain.test(t)) {
+      let rest = t.replace(rePlain, "").trim();
+      // nexus帮助 → #帮助；nexus 你好 → 你好（有空格不加 #）
+      if (rest && !rest.startsWith(cmd) && !rest.startsWith("#") && !/\s/.test(rest)) {
+        rest = `${cmd}${rest}`;
+      }
+      return { matched: true, rest };
+    }
+  }
+  return { matched: false, rest: t };
+}
+
 /**
  * 去掉呼唤前缀，方便匹配 #帮助 / nexus帮助 / #nexus帮助。
- * 返回规范化后的文本（尽量保留 #指令形态）。
  */
 export function stripWakePrefix(text: string, cfg: BotConfig): string {
+  return matchWakePrefix(text, cfg).rest;
+}
+
+/** 闲聊用：只摘掉开头呼唤词，绝不自动加 # */
+export function stripWakeForChat(text: string, cfg: BotConfig): string {
   let t = text.trim();
   if (!t) return t;
   const prefixes = cfg.wakePrefixes
@@ -73,26 +108,50 @@ export function stripWakePrefix(text: string, cfg: BotConfig): string {
     .filter(Boolean)
     .sort((a, b) => b.length - a.length);
   if (!prefixes.length) return t;
-
   const cmd = cfg.commandPrefix || "#";
   for (const p of prefixes) {
     const reHash = new RegExp(`^${escapeReg(cmd)}\\s*${escapeReg(p)}\\s*`, "i");
-    if (reHash.test(t)) {
-      t = t.replace(reHash, cmd);
-      return t.trim();
-    }
+    if (reHash.test(t)) return t.replace(reHash, "").trim();
     const rePlain = new RegExp(`^${escapeReg(p)}\\s*`, "i");
-    if (rePlain.test(t)) {
-      t = t.replace(rePlain, "");
-      t = t.trim();
-      if (t && !t.startsWith(cmd) && !t.startsWith("#")) {
-        // nexus帮助 → #帮助
-        t = `${cmd}${t}`;
-      }
-      return t;
-    }
+    if (rePlain.test(t)) return t.replace(rePlain, "").trim();
   }
   return t;
+}
+
+export function hasWakePrefix(text: string, cfg: BotConfig): boolean {
+  return matchWakePrefix(text, cfg).matched;
+}
+
+/** 去掉 @机器人 / CQ:at，留给模型干净句子 */
+export function stripAtMentions(text: string, selfId?: string): string {
+  let t = String(text || "");
+  t = t.replace(/\[CQ:at,[^\]]*\]/gi, " ");
+  if (selfId) {
+    t = t.replace(new RegExp(`@${escapeReg(selfId)}\\s*`, "g"), " ");
+  }
+  // 残留 @123456
+  t = t.replace(/@\d{5,}\s*/g, " ");
+  return t.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * 群聊要不要走 AI：必须 @ 机器人，或开头呼唤词。
+ * 私聊 / 控制台 / 非 QQ：直接放行。
+ */
+export function shouldTriggerAi(opts: {
+  channel: string;
+  messageType?: string;
+  content: string;
+  atSelf?: boolean;
+  bot: BotConfig;
+  isAdminConsole?: boolean;
+}): boolean {
+  if (opts.isAdminConsole) return true;
+  if (opts.channel !== "onebot11") return true;
+  if (opts.messageType !== "group") return true;
+  if (opts.atSelf) return true;
+  if (hasWakePrefix(opts.content, opts.bot)) return true;
+  return false;
 }
 
 function escapeReg(s: string): string {

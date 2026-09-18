@@ -33,6 +33,24 @@ export function extractOb11Text(message: string | Ob11Segment[] | undefined, raw
   return String(raw ?? "").trim();
 }
 
+/** 消息里被 @ 的 QQ 号（含 CQ 字符串） */
+export function extractOb11AtQqs(
+  message: string | Ob11Segment[] | undefined,
+  raw?: string,
+): string[] {
+  const out: string[] = [];
+  if (Array.isArray(message)) {
+    for (const seg of message) {
+      if (seg.type === "at" && seg.data?.qq != null) out.push(String(seg.data.qq));
+    }
+  }
+  const blob = `${typeof message === "string" ? message : ""} ${raw ?? ""}`;
+  for (const m of blob.matchAll(/\[CQ:at,qq=([^\]]+)\]/gi)) {
+    out.push(String(m[1]).trim());
+  }
+  return [...new Set(out.filter(Boolean))];
+}
+
 /**
  * Built-in OneBot 11 adapter (NapCat / go-cqhttp compatible).
  * @see https://napneko.github.io
@@ -44,6 +62,8 @@ export class OneBot11Channel {
   normalizeInbound(raw: unknown): NexusMessage {
     const ev = (raw ?? {}) as Ob11MessageEvent;
     const text = extractOb11Text(ev.message, ev.raw_message);
+    const atQqs = extractOb11AtQqs(ev.message, ev.raw_message);
+    const selfId = ev.self_id != null ? String(ev.self_id) : undefined;
     const isGroup = ev.message_type === "group";
     const chatId = isGroup
       ? `group:${ev.group_id ?? "0"}`
@@ -59,7 +79,9 @@ export class OneBot11Channel {
         replyTo: ev.message_id != null ? String(ev.message_id) : undefined,
         messageType: isGroup ? "group" : "private",
         groupId: ev.group_id != null ? String(ev.group_id) : undefined,
-        selfId: ev.self_id != null ? String(ev.self_id) : undefined,
+        selfId,
+        atQqs,
+        atSelf: Boolean(selfId && atQqs.includes(selfId)),
       },
       createdAt: nowIso(),
     };

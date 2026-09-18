@@ -2,5 +2,5 @@
   "name": "Nexus",
   "wakePrefixes": [],
   "commandPrefix": "#",
-  "note": "wakePrefixes：群聊里呼唤前缀，留空表示不强制。例如填 nexus 后可用 nexus帮助 / #nexus帮助"
+  "note": "群聊触发 AI：@机器人，或开头呼唤词（wakePrefixes）。私聊不限制。#指令不受影响。"
 }
