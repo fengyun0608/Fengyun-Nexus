@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { NButton, NCard, NInput, NSpace, useMessage } from "naive-ui";
+import { NButton, NInput, NModal, NSpace, useMessage } from "naive-ui";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 
@@ -11,6 +11,7 @@ const botName = ref("Nexus");
 const botWake = ref("");
 const saving = ref(false);
 const updateBusy = ref(false);
+const showUpdate = ref(false);
 const updateInfo = ref<{
   currentVersion?: string;
   remoteVersion?: string;
@@ -52,7 +53,7 @@ async function checkUpdate() {
   updateBusy.value = true;
   try {
     updateInfo.value = await api("/v1/admin/update/check", { token: auth.token });
-    message.info(updateInfo.value?.message || "已检查");
+    showUpdate.value = true;
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {
@@ -68,7 +69,8 @@ async function applyUpdate() {
       token: auth.token,
       body: JSON.stringify({ confirm: true }),
     });
-    message.success(res.reportText || res.message || "更新中");
+    message.success(res.reportText || res.message || "更新中，网关即将重启");
+    showUpdate.value = false;
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {
@@ -83,68 +85,74 @@ onMounted(() => void loadBot());
   <div class="page">
     <header class="page-head">
       <h1>配置</h1>
-      <p class="muted">呼唤前缀、更新都在后台改，不用去群里敲指令确认。</p>
+      <p class="muted">呼唤前缀在此改；框架更新点右侧按钮，结果在中央弹窗确认。</p>
     </header>
 
-    <n-card title="机器人" size="small" style="margin-bottom: 14px">
-      <label class="field">
-        名称
-        <n-input v-model:value="botName" />
-      </label>
+    <div class="surface">
+      <h2>机器人</h2>
+      <label class="field">名称 <n-input v-model:value="botName" /></label>
       <label class="field">
         呼唤前缀
         <n-input v-model:value="botWake" placeholder="例如 nexus，逗号分隔；留空=群里只能@" />
       </label>
       <p class="hint">群聊：@ 机器人或开头呼唤词才走 AI。私聊/本控制台不限。</p>
       <n-button type="primary" :loading="saving" @click="saveBot">保存</n-button>
-    </n-card>
+    </div>
 
-    <n-card title="框架更新" size="small">
-      <n-space>
-        <n-button :loading="updateBusy" @click="checkUpdate">检查更新</n-button>
-        <n-button
-          type="primary"
-          :disabled="!updateInfo?.updateAvailable"
-          :loading="updateBusy"
-          @click="applyUpdate"
-        >
-          拉取并重启
-        </n-button>
-      </n-space>
-      <div v-if="updateInfo" class="upd">
-        <p>
-          {{ updateInfo.currentVersion }} → {{ updateInfo.remoteVersion || "—" }}
-          ·
-          {{ updateInfo.currentCommit || "?" }} → {{ updateInfo.remoteCommit || "?" }}
-        </p>
-        <p class="hint">{{ updateInfo.message }}</p>
+    <div class="admin-row surface" style="margin-top: 14px">
+      <div>
+        <strong>框架更新</strong>
+        <p class="muted">检查远端版本；有更新时在弹窗里确认拉取并重启。</p>
       </div>
-    </n-card>
+      <n-button type="primary" :loading="updateBusy" @click="checkUpdate">检查更新</n-button>
+    </div>
+
+    <n-modal
+      v-model:show="showUpdate"
+      preset="card"
+      title="框架更新"
+      :style="{ width: 'min(440px, 92vw)' }"
+    >
+      <p v-if="updateInfo" class="upd-line">
+        {{ updateInfo.currentVersion }} → {{ updateInfo.remoteVersion || "—" }}
+      </p>
+      <p v-if="updateInfo" class="hint mono">
+        {{ updateInfo.currentCommit || "?" }} → {{ updateInfo.remoteCommit || "?" }}
+      </p>
+      <p class="hint">{{ updateInfo?.message }}</p>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showUpdate = false">关闭</n-button>
+          <n-button
+            type="primary"
+            :disabled="!updateInfo?.updateAvailable"
+            :loading="updateBusy"
+            @click="applyUpdate"
+          >
+            拉取并重启
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <style scoped>
-.page-head h1 {
-  margin: 0 0 4px;
+@import "@/styles/page.css";
+.surface {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  padding: 16px;
+}
+.surface h2 {
+  margin: 0 0 12px;
   font-family: var(--font-display);
-  font-size: 1.75rem;
+  font-size: 1.1rem;
   color: var(--amber);
 }
-.muted { color: var(--muted); margin: 0 0 12px; }
-.field {
-  display: grid;
-  gap: 6px;
-  margin-bottom: 12px;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-.hint {
-  color: var(--muted);
-  font-size: 0.85rem;
-  margin: 8px 0 14px;
-}
-.upd {
-  margin-top: 12px;
-  color: var(--ink);
+.upd-line {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
 }
 </style>
