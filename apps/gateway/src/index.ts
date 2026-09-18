@@ -53,6 +53,7 @@ import {
 } from "./env-tasks.js";
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
 import { applyFullUpdate } from "./full-update.js";
+import { ensureGatewayPortOpen } from "./open-port.js";
 import { buildRestartOkLines, buildRestartOkPanelHtml, buildStatusLines, buildStatusPanelHtml, type StatusShotInput } from "./status-shot.js";
 import { execFileSync } from "node:child_process";
 import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
@@ -2246,6 +2247,21 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(process.env.PORT ?? profile.gateway.port);
   const host = process.env.HOST ?? profile.gateway.host;
+
+  await bootStep("初始化：检测环境并放行端口…");
+  try {
+    const opened = ensureGatewayPortOpen({ envId: profile.id, host, port });
+    if (opened.attempted && opened.ok) {
+      await bootStep(`  · ${opened.message}`);
+    } else if (opened.attempted && !opened.ok) {
+      log.warn(opened.message);
+      await bootStep(`  · ${opened.message}`);
+    } else {
+      await bootStep(`  · ${opened.message}`);
+    }
+  } catch (e) {
+    log.warn(`端口放行跳过：${e instanceof Error ? e.message : String(e)}`);
+  }
 
   await bootStep("初始化：监听端口…");
   const server = app.listen(port, host, () => {
