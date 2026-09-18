@@ -53,6 +53,8 @@ import {
 } from "./env-tasks.js";
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
 import { applyFullUpdate } from "./full-update.js";
+import { buildRestartOkLines, buildStatusLines } from "./status-shot.js";
+import { execFileSync } from "node:child_process";
 import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
 import {
   listPluginDirs,
@@ -68,7 +70,6 @@ import { splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
   buildRestartingMessage,
-  buildRestartOkMessage,
   clearRestartNotify,
   formatUptime,
   originGroupId,
@@ -451,6 +452,52 @@ async function bootstrap(): Promise<void> {
     next();
   }
 
+  function shortCommit(): string {
+    try {
+      return execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+        cwd: ROOT,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5_000,
+      }).trim();
+    } catch {
+      return "";
+    }
+  }
+
+  function collectStatusLines(): string[] {
+    const ob = onebot.status();
+    const snap = llm.snapshot();
+    const ch = getChannelSettings(channelCfg, "onebot11");
+    const list = plugins.listConsole();
+    const enabled = list.filter((p) => p.enabled !== false).length;
+    const ap = activeProvider(llmStore);
+    return buildStatusLines({
+      version: readLocalVersion(ROOT),
+      commit: shortCommit() || undefined,
+      envId: profile.id,
+      envLabel: profile.label,
+      powerOff,
+      uptime: formatUptime(Date.now() - startedAt),
+      gatewayPort: Number(process.env.PORT ?? profile.gateway.port),
+      onebot: {
+        enabled: ob.enabled,
+        connected: ob.connected,
+        selfId: ob.selfId,
+        clients: ob.clients,
+      },
+      ai: {
+        hasKey: Boolean(snap.hasKey),
+        activeName: ap?.name,
+        model: snap.model || ap?.model,
+      },
+      pluginsEnabled: enabled,
+      pluginsTotal: list.length,
+      replyGroupIds: ch.replyGroupIds || [],
+      notifyGroupIds: ch.notifyGroupIds || [],
+    });
+  }
+
   /** Process inbound message: # admin → plugins (first match) → LLM. Never local-echo. */
   async function processInbound(
     msg: NexusMessage,
@@ -491,6 +538,11 @@ async function bootstrap(): Promise<void> {
         if (typeof cmd.powerOff === "boolean") powerOff = cmd.powerOff;
 
         let replies = [...cmd.replies];
+
+        // #状态：补齐框架 / 网络 / 通道等基础信息
+        if (hashCmd === "#状态") {
+          replies = [collectStatusLines().join("\n")];
+        }
 
         // #帮助 / #状态：和生图一样渲成图片再发（群里好看）
         if (
@@ -1916,7 +1968,25 @@ async function bootstrap(): Promise<void> {
       .listConsole()
       .filter((p) => p.enabled !== false)
       .map((p) => ({ id: p.id, name: p.name, version: p.version }));
-    const text = buildRestartOkMessage(loaded, pending.previousUptime);
+    const lines = buildRestartOkLines(loaded, {
+      previousUptime: pending.previousUptime,
+      version: readLocalVersion(ROOT),
+      commit: shortCommit() || undefined,
+    });
+    const text = lines.join("\n");
+
+    let sendPayload = text;
+    try {
+      const shot = await renderMenuShot({
+        title: "重启成功",
+        lines,
+      });
+      if (shot.ok) {
+        sendPayload = `[CQ:image,file=${pathToFileURL(shot.pngPath).href}]`;
+      }
+    } catch (e) {
+      log.warn(`重启报告出图失败：${e instanceof Error ? e.message : String(e)}`);
+    }
 
     db.insertMessage({
       id: newId("msg"),
@@ -1939,7 +2009,7 @@ async function bootstrap(): Promise<void> {
         chatId: gid ? `group:${gid}` : pending.chatId,
         userId: pending.userId,
         type: "text" as const,
-        content: text,
+        content: sendPayload,
         meta: {
           messageType: mt,
           groupId: gid,
@@ -1948,9 +2018,9 @@ async function bootstrap(): Promise<void> {
       };
       for (let i = 0; i < 45; i++) {
         if (onebot.status().connected) {
-          let ok = await onebot.sendText(text, ctx);
+          let ok = await onebot.sendText(sendPayload, ctx);
           if (!ok && gid) {
-            ok = await onebot.sendTextToGroup(gid, text);
+            ok = await onebot.sendTextToGroup(gid, sendPayload);
           }
           if (ok) {
             log.ok(
@@ -1959,7 +2029,7 @@ async function bootstrap(): Promise<void> {
             const notifyIds = getChannelSettings(channelCfg, "onebot11").notifyGroupIds;
             for (const extra of notifyIds) {
               if (gid && extra === gid) continue;
-              await onebot.sendTextToGroup(extra, text);
+              await onebot.sendTextToGroup(extra, sendPayload);
             }
             clearRestartNotify(ROOT);
             return;
