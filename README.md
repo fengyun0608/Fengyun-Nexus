@@ -11,7 +11,9 @@
 </p>
 
 <p align="center">
-  <a href="https://gitcode.com/fengyunnb_admin/Fengyun-Nexus">GitCode</a>
+  <a href="https://gitcode.com/fengyunnb_admin/Fengyun-Nexus">GitCode（国内）</a>
+  ·
+  <a href="https://github.com/fengyun0608/Fengyun-Nexus">GitHub（国外）</a>
   ·
   <a href="docs/product/start.md">上手</a>
   ·
@@ -98,7 +100,10 @@ Fengyun-Nexus/
 
 ## 快速开始
 
-推荐远程一条命令（每次拉最新安装逻辑）：
+推荐远程一条命令（每次拉最新安装逻辑）。  
+**按部署机器所在地选源**：国内机器用 GitCode，海外机器用 GitHub。脚本也会再问一次。
+
+### 国内（GitCode）
 
 **Linux / macOS / Termux**
 
@@ -112,7 +117,24 @@ curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/r
 irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.ps1?ref=main" | iex
 ```
 
-> 地址规律同手机端：`…/raw/…` 后是仓内路径（本脚本在 `scripts/get.sh`）。网页 raw 是 HTML，用上面的 `api.gitcode.com`。
+### 国外（GitHub）
+
+**Linux / macOS / Termux**
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.sh" | bash
+```
+
+**Windows（PowerShell）**
+
+```powershell
+irm "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.ps1" | iex
+```
+
+也可不换命令、只改环境变量：`NEXUS_MIRROR=global`（或 PowerShell `$env:NEXUS_MIRROR="global"`）。
+
+> 国内：网页 `gitcode.com/.../raw/...` 是 HTML，管道请用上面的 `api.gitcode.com`。  
+> 地址规律：`…/raw/…` 后是仓内路径（安装器在 `scripts/get.sh` / `scripts/get.ps1`）。
 
 强制重装环境+目录：`NEXUS_REINSTALL=1` 加在命令前。  
 更多开关见 [上手](docs/product/start.md)。

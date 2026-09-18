@@ -1,31 +1,109 @@
 #!/usr/bin/env bash
 # Fengyun Nexus — 一键装环境 + 拉仓 + 启动（推荐远程管道执行，永远用最新）
 #
+# 国内（GitCode）：
 #   curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
+# 国外（GitHub）：
+#   curl -fsSL "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.sh" | bash
 #
-# 地址规律（同手机端）：raw 后面跟仓内路径 → 本文件即 scripts/get.sh
-# 网页 gitcode.com/.../raw/... 是 HTML；raw.gitcode.com/.../raw/main/... 常 403；管道用上面 api。
+# 按「部署机器所在地」选国内或国外源。也可：NEXUS_MIRROR=cn|global
+# 网页 gitcode.com/.../raw/... 是 HTML；raw.gitcode.com 常 403；国内管道用 api.gitcode.com。
 #
 # 开关：
-#   NEXUS_REINSTALL=1     重装运行环境，并清空后重装框架目录
-#   NEXUS_REINSTALL_ENV=1 只重装 Node/pnpm 等环境，不动项目目录
-#   NEXUS_SKIP_BOOT=1     只装不启
+#   NEXUS_MIRROR=cn|global  国内 GitCode / 国外 GitHub（也可写 china|github|cn|intl）
+#   NEXUS_REINSTALL=1       重装运行环境，并清空后重装框架目录
+#   NEXUS_REINSTALL_ENV=1   只重装 Node/pnpm 等环境，不动项目目录
+#   NEXUS_SKIP_BOOT=1       只装不启
 #   NEXUS_ENV=desktop|server|termux
-#   NEXUS_INSTALL_DIR=…   安装目录（默认 ~/Fengyun-Nexus）
+#   NEXUS_INSTALL_DIR=…     安装目录（默认 ~/Fengyun-Nexus）
 #   NEXUS_BRANCH=main
-#   NEXUS_REPO_URL=…
+#   NEXUS_REPO_URL=…        自定义仓地址时跳过镜像选择
 #
 set -euo pipefail
 
-REPO_URL="${NEXUS_REPO_URL:-https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git}"
 INSTALL_DIR="${NEXUS_INSTALL_DIR:-$HOME/Fengyun-Nexus}"
 BRANCH="${NEXUS_BRANCH:-main}"
-RAW_BASE="${NEXUS_RAW_BASE:-https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw}"
-GET_SH_URL="${NEXUS_GET_SH_URL:-${RAW_BASE}/scripts/get.sh?ref=${BRANCH}}"
+MIRROR=""
+REPO_URL=""
+RAW_BASE=""
+GET_SH_URL=""
+ZIP_URLS=()
 
 log() { echo ">>> $*"; }
 ok() { echo "OK  $*"; }
 warn() { echo "!!  $*"; }
+
+normalize_mirror() {
+  case "$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    cn|china|gitcode|国内|zh) echo "cn" ;;
+    global|intl|international|github|gh|国外|en|us) echo "global" ;;
+    *) echo "" ;;
+  esac
+}
+
+apply_mirror() {
+  MIRROR="$1"
+  if [ "$MIRROR" = "global" ]; then
+    REPO_URL="${NEXUS_REPO_URL:-https://github.com/fengyun0608/Fengyun-Nexus.git}"
+    RAW_BASE="${NEXUS_RAW_BASE:-https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/${BRANCH}}"
+    GET_SH_URL="${NEXUS_GET_SH_URL:-${RAW_BASE}/scripts/get.sh}"
+    ZIP_URLS=(
+      "https://github.com/fengyun0608/Fengyun-Nexus/archive/refs/heads/${BRANCH}.zip"
+      "https://codeload.github.com/fengyun0608/Fengyun-Nexus/zip/refs/heads/${BRANCH}"
+    )
+  else
+    MIRROR="cn"
+    REPO_URL="${NEXUS_REPO_URL:-https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git}"
+    RAW_BASE="${NEXUS_RAW_BASE:-https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw}"
+    GET_SH_URL="${NEXUS_GET_SH_URL:-${RAW_BASE}/scripts/get.sh?ref=${BRANCH}}"
+    ZIP_URLS=(
+      "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/repository/archive/${BRANCH}.zip"
+      "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/-/archive/${BRANCH}/Fengyun-Nexus-${BRANCH}.zip"
+    )
+  fi
+}
+
+choose_mirror() {
+  local picked="" saved=""
+  if [ -n "${NEXUS_REPO_URL:-}" ]; then
+    case "$NEXUS_REPO_URL" in
+      *github.com*) picked="global" ;;
+      *) picked="cn" ;;
+    esac
+    apply_mirror "$picked"
+    return 0
+  fi
+  picked="$(normalize_mirror "${NEXUS_MIRROR:-}")"
+  if [ -z "$picked" ] && [ -f "$INSTALL_DIR/.nexus-mirror" ]; then
+    saved="$(tr -d '[:space:]' < "$INSTALL_DIR/.nexus-mirror" 2>/dev/null || true)"
+    picked="$(normalize_mirror "$saved")"
+  fi
+  if [ -z "$picked" ] && [ -r /dev/tty ]; then
+    echo ""
+    echo "请选择下载源（按「这台机器」所在地选，不是按你人在哪）："
+    echo "  1) 国内 — GitCode（国内服务器 / 手机推荐）"
+    echo "  2) 国外 — GitHub（海外机器推荐）"
+    printf "请输入 1 或 2 [默认 1]： "
+    local ans=""
+    read -r ans < /dev/tty || ans=""
+    case "$ans" in
+      2|g|G|global|github|国外) picked="global" ;;
+      *) picked="cn" ;;
+    esac
+  fi
+  if [ -z "$picked" ]; then
+    picked="cn"
+    warn "非交互环境，默认国内源 GitCode。海外机器请加：NEXUS_MIRROR=global"
+  fi
+  apply_mirror "$picked"
+}
+
+persist_mirror() {
+  mkdir -p "$INSTALL_DIR" 2>/dev/null || true
+  if [ -d "$INSTALL_DIR" ]; then
+    printf '%s\n' "$MIRROR" > "$INSTALL_DIR/.nexus-mirror"
+  fi
+}
 
 safe_cd_home() {
   cd "$HOME" 2>/dev/null || cd / 2>/dev/null || true
@@ -228,10 +306,7 @@ remove_install_dir() {
 }
 
 clone_via_zip() {
-  local zip_urls=(
-    "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/repository/archive/${BRANCH}.zip"
-    "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/-/archive/${BRANCH}/Fengyun-Nexus-${BRANCH}.zip"
-  )
+  local zip_urls=("${ZIP_URLS[@]}")
   local tmp="$HOME/.nexus-dl-$$"
   mkdir -p "$tmp"
   local z="$tmp/nexus.zip"
@@ -306,7 +381,8 @@ finalize_tree() {
     printf 'package-manager-strict=false\n' > .npmrc
   fi
   date -u +%Y-%m-%dT%H:%M:%SZ > "$INSTALL_DIR/.nexus-installed"
-  ok "框架已就绪  env=$NEXUS_ENV  $(git -C "$INSTALL_DIR" log -1 --oneline 2>/dev/null || echo ready)"
+  persist_mirror
+  ok "框架已就绪  env=$NEXUS_ENV  mirror=$MIRROR  $(git -C "$INSTALL_DIR" log -1 --oneline 2>/dev/null || echo ready)"
 }
 
 ensure_framework() {
@@ -361,6 +437,7 @@ boot_now() {
 
 # —— 主流程 ——
 safe_cd_home
+choose_mirror
 NEXUS_ENV="$(detect_env)"
 export NEXUS_ENV
 
@@ -369,6 +446,12 @@ echo "=== Fengyun Nexus · 一键安装 ==="
 echo "目录: $INSTALL_DIR"
 echo "姿态: $NEXUS_ENV"
 echo "分支: $BRANCH"
+if [ "$MIRROR" = "global" ]; then
+  echo "镜像: 国外 · GitHub"
+else
+  echo "镜像: 国内 · GitCode"
+fi
+echo "仓库: $REPO_URL"
 echo ""
 
 install_env
@@ -376,7 +459,11 @@ ensure_framework
 
 if ! framework_ok; then
   echo "安装失败。可强制重装："
-  echo "  NEXUS_REINSTALL=1 curl -fsSL \"$GET_SH_URL\" | bash"
+  if [ "$MIRROR" = "global" ]; then
+    echo "  NEXUS_REINSTALL=1 NEXUS_MIRROR=global curl -fsSL \"$GET_SH_URL\" | bash"
+  else
+    echo "  NEXUS_REINSTALL=1 curl -fsSL \"$GET_SH_URL\" | bash"
+  fi
   exit 1
 fi
 

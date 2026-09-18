@@ -10,26 +10,48 @@ Local `*.local.json` files stay on your machine.
 One command: detect OS, install Git / Node 20+ / pnpm, sync the repo, then boot.  
 The installer is always fetched from `main`.
 
-> **URL rule** (same as the old Termux raw link): everything after `…/raw/main/` (or api `…/raw/…?ref=main`) is the **repo-relative path**.  
-> e.g. `…/scripts/termux-setup.sh` → file `scripts/termux-setup.sh`; installer → `scripts/get.sh` / `scripts/get.ps1`.  
-> Web `gitcode.com/.../raw/...` returns HTML; `raw.gitcode.com/.../raw/main/...` often 403 — use the api URLs below (same path).
+**Two mirrors only — pick by where the machine is:**
 
-### Linux / macOS / Termux
+| Machine location | Site | Notes |
+|------------------|------|--------|
+| China / CN network | [GitCode](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus) | Better for domestic servers & phones |
+| Outside China | [GitHub](https://github.com/fengyun0608/Fengyun-Nexus) | Default open-source host abroad |
+
+The script also asks interactively. Or set `NEXUS_MIRROR=cn` / `NEXUS_MIRROR=global`. Choice is saved to `.nexus-mirror` so later updates keep the same `origin`.
+
+> **URL rule**: everything after `…/raw/main/` (or api `…/raw/…?ref=main`) is the **repo-relative path**.  
+> Installer → `scripts/get.sh` / `scripts/get.ps1`.  
+> Web `gitcode.com/.../raw/...` returns HTML — use the api URLs below for China.
+
+### China · Linux / macOS / Termux
 
 ```bash
 curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
 ```
 
-### Windows (PowerShell)
+### China · Windows (PowerShell)
 
 ```powershell
 irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.ps1?ref=main" | iex
+```
+
+### International · Linux / macOS / Termux
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.sh" | bash
+```
+
+### International · Windows (PowerShell)
+
+```powershell
+irm "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.ps1" | iex
 ```
 
 ### Flags
 
 | Variable | Meaning |
 |----------|---------|
+| `NEXUS_MIRROR=cn\|global` | GitCode (CN) / GitHub (abroad) |
 | `NEXUS_REINSTALL=1` | Reinstall runtime and wipe/reclone the install dir |
 | `NEXUS_REINSTALL_ENV=1` | Reinstall Node / pnpm only |
 | `NEXUS_SKIP_BOOT=1` | Install only, do not start |

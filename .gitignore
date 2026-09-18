@@ -40,3 +40,7 @@ docs/internal/
 
 # 旧 React 控制台备份（已迁 Vue3）
 apps/web/_legacy-react/
+
+# 安装器本机标记（国内/国外源选择等）
+.nexus-mirror
+.nexus-installed

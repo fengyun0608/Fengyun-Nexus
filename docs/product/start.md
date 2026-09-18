@@ -10,28 +10,49 @@
 一条命令：自动检测环境、装 Git / Node 20+ / pnpm、拉齐仓库并启动。  
 每次从远程拉最新安装逻辑。
 
+**只分国内 / 国外两套源。** 看「这台服务器 / 手机 / 电脑」在哪，就选哪边：
+
+| 机器所在地 | 用哪个站 | 说明 |
+|------------|----------|------|
+| 国内 | [GitCode](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus) | 国内网络更稳 |
+| 国外 | [GitHub](https://github.com/fengyun0608/Fengyun-Nexus) | 海外开源站 |
+
+安装脚本也会弹出选项；也可直接设 `NEXUS_MIRROR=cn` 或 `NEXUS_MIRROR=global`。选过的会记在安装目录 `.nexus-mirror`，以后 `#更新` 仍走当时的 origin。
+
 > **地址规律**（和手机端旧引用同一套）：  
 > `…/raw/main/`（或 api 的 `…/raw/…?ref=main`）后面跟的就是**仓库里的相对路径**。  
-> 例：手机端 `…/raw/main/scripts/termux-setup.sh` → 文件在 `scripts/termux-setup.sh`。  
-> 统一安装器同理 → `scripts/get.sh` / `scripts/get.ps1`。  
-> 网页 `gitcode.com/.../raw/...` 会下到 HTML；`raw.gitcode.com/.../raw/main/...` 目前常 403，**管道请用下面 api 地址**（路径不变）。
+> 例：`…/scripts/get.sh` → 文件在 `scripts/get.sh`。  
+> 国内网页 `gitcode.com/.../raw/...` 会下到 HTML；请用下面 api 地址。
 
-### Linux / macOS / Termux
+### 国内 · Linux / macOS / Termux
 
 ```bash
 curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
 ```
 
-### Windows（PowerShell）
+### 国内 · Windows（PowerShell）
 
 ```powershell
 irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.ps1?ref=main" | iex
+```
+
+### 国外 · Linux / macOS / Termux
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.sh" | bash
+```
+
+### 国外 · Windows（PowerShell）
+
+```powershell
+irm "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.ps1" | iex
 ```
 
 ### 常用开关
 
 | 变量 | 作用 |
 |------|------|
+| `NEXUS_MIRROR=cn\|global` | 国内 GitCode / 国外 GitHub（也可写 china / github） |
 | `NEXUS_REINSTALL=1` | 重装运行环境，并清空后重装框架目录 |
 | `NEXUS_REINSTALL_ENV=1` | 只重装 Node / pnpm，不动项目目录 |
 | `NEXUS_SKIP_BOOT=1` | 只装不启 |
@@ -42,11 +63,13 @@ irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scri
 
 ```bash
 NEXUS_REINSTALL=1 curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
+NEXUS_MIRROR=global curl -fsSL "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.sh" | bash
 NEXUS_SKIP_BOOT=1 curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
 ```
 
 ```powershell
 $env:NEXUS_REINSTALL="1"; irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.ps1?ref=main" | iex
+$env:NEXUS_MIRROR="global"; irm "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.ps1" | iex
 ```
 
 ## 已安装后日常启动
