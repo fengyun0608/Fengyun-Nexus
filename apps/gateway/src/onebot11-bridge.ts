@@ -113,6 +113,7 @@ export class OneBot11Bridge {
   private sockets = new Set<WebSocket>();
   private sockMeta = new WeakMap<WebSocket, SockMeta>();
   private selfId = "";
+  private gatewayPort = 0;
   private lastEventAt?: string;
   private echoSeq = 0;
   private pending = new Map<string, Pending>();
@@ -132,6 +133,24 @@ export class OneBot11Bridge {
 
   setSelfIdHandler(fn: (selfId: string) => void): void {
     this.onSelfId = fn;
+  }
+
+  setGatewayPort(port: number): void {
+    this.gatewayPort = Math.floor(Number(port) || 0);
+  }
+
+  /** 写成网关自己的端口不算 NapCat 接口，留空走反向连接。 */
+  napcatApi(raw?: string): string {
+    const s = String(raw || "").trim().replace(/\/$/, "");
+    if (!s) return "";
+    try {
+      const u = new URL(s);
+      const port = Number(u.port || (u.protocol === "https:" ? 443 : 80));
+      if (this.gatewayPort && port === this.gatewayPort) return "";
+    } catch {
+      return "";
+    }
+    return s;
   }
 
   private noteSelfId(sid: string): void {
@@ -177,8 +196,8 @@ export class OneBot11Bridge {
       return {
         selfId: sid,
         label: b.label || (sid ? `QQ ${sid}` : "未命名"),
-        connected: sid ? connectedIds.has(sid) : this.sockets.size > 0,
-        apiBase: String(b.apiBase || "").trim(),
+        connected: Boolean(sid) && connectedIds.has(sid),
+        apiBase: this.napcatApi(b.apiBase),
       };
     });
     for (const sid of connectedIds) {
@@ -300,10 +319,16 @@ export class OneBot11Bridge {
 
     if (data.self_id != null) {
       const sid = String(data.self_id);
+      const prev = this.sockMeta.get(ws)?.selfId || "";
       this.noteSelfId(sid);
       const meta = this.sockMeta.get(ws);
       if (meta) meta.selfId = sid;
       else this.sockMeta.set(ws, { selfId: sid });
+      if (prev !== sid) {
+        const label =
+          (this.cfg.bots || []).find((b) => String(b.selfId || "").trim() === sid)?.label || "新号";
+        log.ok(`消息通道已连接  ${label || "新号"}  QQ=${sid}`);
+      }
     }
 
     if (data.post_type === "message_sent") return;
@@ -413,7 +438,7 @@ export class OneBot11Bridge {
       });
     }
 
-    const apiBase = String(bot?.apiBase || "").replace(/\/$/, "");
+    const apiBase = this.napcatApi(bot?.apiBase);
     if (apiBase) {
       try {
         const token = bot?.accessToken || this.cfg.accessToken || "";

@@ -416,7 +416,7 @@ async function runWorker(): Promise<void> {
   try {
     await executeInstall(next, ac.signal);
     if (!tasks.includes(next)) return;
-    if (ac.signal.aborted || next.status === "cancelled") {
+    if (ac.signal.aborted || (next.status as EnvTaskStatus) === "cancelled") {
       next.status = "cancelled";
       appendLog(next, "已取消");
       return;
@@ -431,7 +431,7 @@ async function runWorker(): Promise<void> {
     }
   } catch (e) {
     if (!tasks.includes(next)) return;
-    if (ac.signal.aborted || next.status === "cancelled") {
+    if (ac.signal.aborted || (next.status as EnvTaskStatus) === "cancelled") {
       next.status = "cancelled";
       appendLog(next, "已取消");
       return;

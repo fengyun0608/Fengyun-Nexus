@@ -17,6 +17,11 @@
   font-size: 0.85rem;
   margin: 8px 0 14px;
 }
+.ok-line {
+  color: #1f7a4d;
+  font-size: 0.9rem;
+  margin: 0 0 10px;
+}
 .field {
   display: grid;
   gap: 6px;

@@ -108,6 +108,11 @@ import { scheduleSystemRestart } from "./restart-exec.js";
 import { remountPluginChannels } from "./channel-adapters.js";
 import { renderDocView, findRepoRoot } from "./docs-serve.js";
 import { reloadPlugins, watchPluginsHotReload } from "./plugin-hot-reload.js";
+import {
+  applyStoredPluginConfigs,
+  savePluginConfig,
+  watchPluginConfigFile,
+} from "./plugin-config-store.js";
 import { getLogEntries, log } from "./log.js";
 import {
   activeProvider,
@@ -395,6 +400,21 @@ async function bootstrap(): Promise<void> {
   await bootStep("  · 注册通道 webhook");
   const onebotCfg = loadOneBotConfig();
   const onebot = new OneBot11Bridge(onebotCfg);
+  const gatewayPortEarly = () => Number(process.env.PORT ?? profile.gateway.port);
+  onebot.setGatewayPort(gatewayPortEarly());
+  {
+    const cleaned = (onebot.getConfig().bots || []).map((b) => ({
+      ...b,
+      apiBase: onebot.napcatApi(b.apiBase),
+    }));
+    const prev = onebot.getConfig().bots || [];
+    if (JSON.stringify(cleaned) !== JSON.stringify(prev)) {
+      const next = { ...onebot.getConfig(), bots: cleaned };
+      persistOneBotConfig(next);
+      onebot.updateConfig(next);
+      log.info("机器人接口写成了网关端口，已改成留空，走反向连接");
+    }
+  }
   channels.register(onebot.channel);
   await bootStep(
     onebotCfg.enabled
@@ -402,7 +422,6 @@ async function bootstrap(): Promise<void> {
       : "  · 注册通道 onebot11（未启用）",
   );
 
-  const gatewayPortEarly = () => Number(process.env.PORT ?? profile.gateway.port);
   setNapCatWireProvider(() => {
     const cfg = onebot.getConfig();
     return {
@@ -433,7 +452,7 @@ async function bootstrap(): Promise<void> {
     const bots = [...(cfg.bots || [])];
     if (!bots.some((b) => String(b.selfId) === sid)) {
       if (bots[0] && !bots[0].selfId) bots[0] = { ...bots[0], selfId: sid };
-      else bots.push({ selfId: sid, label: "主号", apiBase: "http://127.0.0.1:3000", accessToken: "" });
+      else bots.push({ selfId: sid, label: "新号", apiBase: "", accessToken: "" });
       const next = { ...cfg, enabled: true, bots };
       persistOneBotConfig(next);
       onebot.updateConfig(next);
@@ -539,6 +558,7 @@ async function bootstrap(): Promise<void> {
       error: (m: string) => log.error(m),
       info: (m: string) => log.info(m),
     },
+    root: ROOT,
     remountChannels: async () => {
       await remountPluginChannels(
         PLUGINS_DIR,
@@ -567,6 +587,13 @@ async function bootstrap(): Promise<void> {
       channelCfg = cfg;
     },
     save: () => saveChannelsConfig(ROOT, channelCfg),
+  });
+  const appliedCfg = await applyStoredPluginConfigs(ROOT, plugins.values());
+  if (appliedCfg) log.info(`插件配置已套用 ${appliedCfg} 项`);
+  watchPluginConfigFile(ROOT, () => {
+    void applyStoredPluginConfigs(ROOT, plugins.values()).then((n) => {
+      if (n) log.info(`配置文件已改，立即套用 ${n} 项`);
+    });
   });
   await plugins.emitReady((id) => makePluginCtx(id, (m) => log.plugin(id, m)));
   await bootStep("初始化：消息通道配置（主人等，与插件装载独立）…");
@@ -1534,26 +1561,37 @@ async function bootstrap(): Promise<void> {
     const next: Record<string, unknown> = {};
     for (const field of p.configSchema) {
       if (Object.prototype.hasOwnProperty.call(body, field.key)) {
-        next[field.key] = body[field.key];
+        if (field.type === "number") {
+          const n = Number(body[field.key]);
+          next[field.key] = Number.isFinite(n) ? n : field.default;
+        } else if (field.type === "boolean") {
+          next[field.key] = body[field.key] === true || body[field.key] === "true";
+        } else {
+          next[field.key] = body[field.key];
+        }
       } else if (field.default !== undefined) {
         next[field.key] = field.default;
       }
     }
     await p.setConfig(next);
     const values = (await p.getConfig?.()) ?? next;
-    res.json({ ok: true, message: "插件配置已保存", id, values });
+    savePluginConfig(ROOT, id, values);
+    res.json({ ok: true, message: "已改好，立即生效", id, values });
   });
 
   app.get("/v1/channels", (_req, res) => {
     res.json({
       items: channels.list().map((c) => {
         const s = getChannelSettings(channelCfg, c.id);
+        const ob = c.id === "onebot11" ? onebot.status() : null;
         return {
           id: c.id,
           label: s.label || c.label || c.id,
           masters: s.masters,
           onlyMasters: s.onlyMasters,
           source: channels.sourceOf(c.id) || "core",
+          connected: ob ? ob.connected : undefined,
+          clients: ob ? ob.clients : undefined,
         };
       }),
     });
@@ -1630,7 +1668,7 @@ async function bootstrap(): Promise<void> {
     );
     res.json({
       ok: true,
-      message: "通道配置已保存（与插件装载独立）",
+      message: "已改好，立即生效",
       id,
       settings: saved,
     });
@@ -1864,7 +1902,7 @@ async function bootstrap(): Promise<void> {
       ? body.bots.map((b) => ({
           selfId: String(b?.selfId || "").trim(),
           label: String(b?.label || "").trim(),
-          apiBase: String(b?.apiBase || "").trim(),
+          apiBase: onebot.napcatApi(String(b?.apiBase || "").trim()),
           accessToken: String(b?.accessToken || "").trim(),
         }))
       : prev.bots;
@@ -1886,7 +1924,7 @@ async function bootstrap(): Promise<void> {
     log.info(`OneBot 11 配置已保存  enabled=${next.enabled}  bots=${next.bots.length}`);
     res.json({
       ok: true,
-      message: "已保存。反向 WS 路径变更需重启网关后生效；多号可用不同 apiBase 端口。",
+      message: "已改好，立即生效",
       ...onebot.status(),
       config: next,
     });

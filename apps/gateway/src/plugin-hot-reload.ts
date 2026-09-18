@@ -4,6 +4,7 @@ import { loadPluginsFromDir } from "@fengyun/nexus-plugin-loader";
 import type { PluginHost } from "@fengyun/nexus-plugin-sdk";
 import { nowIso } from "@fengyun/nexus-shared";
 import { makePluginCtx } from "./plugin-ctx.js";
+import { applyStoredPluginConfigs } from "./plugin-config-store.js";
 
 export type PluginReloadDeps = {
   pluginsDir: string;
@@ -25,6 +26,8 @@ export type PluginReloadDeps = {
   };
   /** 插件热更后：重新扫描 adapter/ 并挂到 ChannelRegistry */
   remountChannels?: () => Promise<void>;
+  /** 热更后把已保存的插件配置再套回去，避免次数回到初始值 */
+  root?: string;
 };
 
 /**
@@ -65,6 +68,11 @@ export async function reloadPlugins(deps: PluginReloadDeps): Promise<{
         enabled,
         loadedAt: nowIso(),
       });
+    }
+
+    if (deps.root) {
+      const applied = await applyStoredPluginConfigs(deps.root, host.values());
+      if (applied) log.info(`插件配置已套用 ${applied} 项`);
     }
 
     await host.emitReady((id) => makePluginCtx(id, (m) => log.info(`[${id}] ${m}`)));

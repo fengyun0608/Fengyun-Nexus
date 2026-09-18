@@ -202,9 +202,17 @@ export function buildStatusLines(s: StatusShotInput): string[] {
       : "AI 未配置密钥",
   );
   lines.push(`插件 ${s.pluginsEnabled}/${s.pluginsTotal}`);
-  lines.push(`通道 ${s.channels.map((c) => c.label).join("、") || "无"}`);
+  lines.push(
+    `通道 ${
+      s.channels
+        .map((c) =>
+          c.id === "onebot11" ? `${c.label}${s.onebot.connected ? "已连接" : "未连接"}` : c.label,
+        )
+        .join("、") || "无"
+    }`,
+  );
   lines.push(`数据库 ${s.db.driver} · 消息 ${s.db.messages}`);
-  lines.push(`机器人 ${s.bots.map((b) => `${b.label}${b.connected ? "在线" : "离线"}`).join("、") || "无"}`);
+  lines.push(`机器人 ${s.bots.map((b) => `${b.label || "未备注"}${b.connected ? "已连接" : "未连接"}`).join("、") || "无"}`);
   lines.push(`AI 回复群 ${fmtGroups(s.replyGroupIds, "不限")}`);
   return lines;
 }
@@ -241,12 +249,15 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
     })
     .join("");
   const channelRows = (s.channels || [])
-    .map((c) => `<li><b>${escapeShotHtml(c.label)}</b><span>${escapeShotHtml(c.id)}</span></li>`)
+    .map((c) => {
+      const st = c.id === "onebot11" ? (s.onebot.connected ? "已连接" : "未连接") : c.id;
+      return `<li><b>${escapeShotHtml(c.label)}</b><span>${escapeShotHtml(st)}</span></li>`;
+    })
     .join("");
   const botRows = (s.bots || [])
     .map(
       (b) =>
-        `<li><b>${escapeShotHtml(b.label || b.selfId || "号")}</b><span>${b.connected ? "在线" : "离线"} · ${escapeShotHtml(b.apiBase || "默认端口")}</span></li>`,
+        `<li><b>${escapeShotHtml(b.label || b.selfId || "号")}</b><span>${b.connected ? "已连接" : "未连接"}</span></li>`,
     )
     .join("");
 

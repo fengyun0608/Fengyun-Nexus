@@ -10,11 +10,13 @@ import {
   NSpace,
   NSpin,
   NSwitch,
+  NInputNumber,
   NThing,
   useMessage,
 } from "naive-ui";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
+import BotAccountCards, { type BotDraft } from "@/components/BotAccountCards.vue";
 
 type Settings = {
   label?: string;
@@ -48,6 +50,7 @@ type OneBotInfo = {
   clients?: number;
   selfId?: string;
   message?: string;
+  reverseWsUrl?: string;
   bots?: Array<{ selfId: string; label: string; connected: boolean; apiBase: string }>;
   config?: {
     enabled?: boolean;
@@ -87,8 +90,8 @@ const onebot = ref<OneBotInfo | null>(null);
 const obEnabled = ref(false);
 const obToken = ref("");
 const obWs = ref("");
-const obHttp = ref("");
-const obBotsText = ref("");
+const obHttp = ref("/onebot/v11");
+const obBotCards = ref<BotDraft[]>([]);
 
 const showCfg = ref(false);
 const cfgId = ref("");
@@ -97,6 +100,7 @@ const cfgSupported = ref(false);
 const cfgMsg = ref("");
 const cfgSchema = ref<Array<{ key: string; label: string; type?: string; description?: string }>>([]);
 const cfgValues = ref<Record<string, unknown>>({});
+const cfgSaved = ref("");
 
 const showSource = ref(false);
 const activeDir = ref("");
@@ -148,14 +152,12 @@ async function loadOnebot() {
   obWs.value = onebot.value.config?.reverseWsPath || "/onebot/v11/ws";
   obHttp.value = onebot.value.config?.httpPath || "/onebot/v11";
   const bots = onebot.value.config?.bots || [];
-  obBotsText.value = bots
-    .map((b) => {
-      const sid = b.selfId || "";
-      const label = b.label || "";
-      const api = b.apiBase || "";
-      return [sid, label, api].join(" | ");
-    })
-    .join("\n");
+  obBotCards.value = bots.map((b) => ({
+    selfId: b.selfId || "",
+    label: b.label || "",
+    apiBase: b.apiBase || "",
+    accessToken: b.accessToken || "",
+  }));
 }
 
 async function load() {
@@ -188,7 +190,7 @@ async function saveSettings() {
         note: note.value,
       }),
     });
-    message.success("通道配置已保存");
+    message.success("已改好，立即生效");
     showSettings.value = false;
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
@@ -213,6 +215,7 @@ async function togglePlugin(p: PluginItem, enabled: boolean) {
 async function openConfig(p: PluginItem) {
   cfgId.value = p.id;
   cfgTitle.value = p.name || p.id;
+  cfgSaved.value = "";
   showCfg.value = true;
   try {
     const res = await api<{
@@ -233,13 +236,17 @@ async function openConfig(p: PluginItem) {
 
 async function saveConfig() {
   try {
-    await api(`/v1/plugins/${encodeURIComponent(cfgId.value)}/config`, {
-      method: "PUT",
-      token: auth.token,
-      body: JSON.stringify({ values: cfgValues.value }),
-    });
-    message.success("配置已保存");
-    showCfg.value = false;
+    const res = await api<{ message?: string; values?: Record<string, unknown> }>(
+      `/v1/plugins/${encodeURIComponent(cfgId.value)}/config`,
+      {
+        method: "PUT",
+        token: auth.token,
+        body: JSON.stringify({ values: cfgValues.value }),
+      },
+    );
+    if (res.values) cfgValues.value = { ...res.values };
+    cfgSaved.value = res.message || "已改好，立即生效";
+    message.success(cfgSaved.value);
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   }
@@ -316,19 +323,12 @@ async function saveFile() {
 async function saveOnebot() {
   saving.value = true;
   try {
-    const bots = obBotsText.value
-      .split(/\n+/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const parts = line.split("|").map((s) => s.trim());
-        return {
-          selfId: parts[0] || "",
-          label: parts[1] || "",
-          apiBase: parts[2] || "",
-          accessToken: parts[3] || "",
-        };
-      });
+    const bots = obBotCards.value.map((b) => ({
+      selfId: b.selfId.trim(),
+      label: b.label.trim(),
+      apiBase: b.apiBase.trim(),
+      accessToken: b.accessToken.trim(),
+    }));
     onebot.value = await api<OneBotInfo>("/v1/channels/onebot11/config", {
       method: "POST",
       token: auth.token,
@@ -458,6 +458,7 @@ onMounted(() => void load());
     >
       <p v-if="!cfgSupported" class="muted">{{ cfgMsg || "该插件暂未支持配置" }}</p>
       <template v-else>
+        <p v-if="cfgSaved" class="ok-line">{{ cfgSaved }}</p>
         <label
           v-for="f in cfgSchema"
           :key="f.key"
@@ -470,6 +471,11 @@ onMounted(() => void load());
             v-if="f.type === 'boolean'"
             :value="Boolean(cfgValues[f.key])"
             @update:value="(v) => (cfgValues[f.key] = v)"
+          />
+          <n-input-number
+            v-else-if="f.type === 'number'"
+            :value="Number(cfgValues[f.key] ?? 0)"
+            @update:value="(v) => (cfgValues[f.key] = v ?? 0)"
           />
           <n-input
             v-else-if="f.type === 'textarea'"
@@ -522,7 +528,7 @@ onMounted(() => void load());
       v-model:show="showOnebot"
       preset="card"
       title="OneBot 连接"
-      :style="{ width: 'min(480px, 94vw)' }"
+      :style="{ width: 'min(640px, 94vw)' }"
     >
       <p class="hint">
         {{ onebot?.connected ? "已连接" : "未连接" }}
@@ -533,15 +539,12 @@ onMounted(() => void load());
       <label class="field">Access Token <n-input v-model:value="obToken" type="password" show-password-on="click" /></label>
       <label class="field">反向 WS 路径 <n-input v-model:value="obWs" /></label>
       <label class="field">HTTP 路径 <n-input v-model:value="obHttp" /></label>
-      <label class="field">
-        多号（每行：QQ | 备注 | apiBase端口）
-        <n-input
-          v-model:value="obBotsText"
-          type="textarea"
-          :rows="3"
-          placeholder="123456 | 主号 | http://127.0.0.1:3000"
-        />
-      </label>
+      <BotAccountCards
+        v-model="obBotCards"
+        :live="onebot?.bots || []"
+        :reverse-ws-url="onebot?.reverseWsUrl || ''"
+        :gateway-port="8787"
+      />
       <template #footer>
         <n-space justify="end">
           <n-button @click="loadOnebot">刷新</n-button>

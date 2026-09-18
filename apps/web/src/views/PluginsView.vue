@@ -9,6 +9,7 @@ import {
   NSpace,
   NSpin,
   NSwitch,
+  NInputNumber,
   NTag,
   NThing,
   useMessage,
@@ -73,6 +74,7 @@ const cfgSupported = ref(false);
 const cfgMsg = ref("");
 const cfgSchema = ref<Array<{ key: string; label: string; type?: string; description?: string }>>([]);
 const cfgValues = ref<Record<string, unknown>>({});
+const cfgSaved = ref("");
 
 const showCreate = ref(false);
 const creating = ref(false);
@@ -187,6 +189,7 @@ async function toggle(p: PluginItem, enabled: boolean) {
 async function openConfig(p: PluginItem) {
   cfgId.value = p.id;
   cfgTitle.value = p.name || p.id;
+  cfgSaved.value = "";
   showCfg.value = true;
   try {
     const res = await api<{
@@ -207,13 +210,17 @@ async function openConfig(p: PluginItem) {
 
 async function saveConfig() {
   try {
-    await api(`/v1/plugins/${encodeURIComponent(cfgId.value)}/config`, {
-      method: "PUT",
-      token: auth.token,
-      body: JSON.stringify({ values: cfgValues.value }),
-    });
-    message.success("配置已保存");
-    showCfg.value = false;
+    const res = await api<{ message?: string; values?: Record<string, unknown> }>(
+      `/v1/plugins/${encodeURIComponent(cfgId.value)}/config`,
+      {
+        method: "PUT",
+        token: auth.token,
+        body: JSON.stringify({ values: cfgValues.value }),
+      },
+    );
+    if (res.values) cfgValues.value = { ...res.values };
+    cfgSaved.value = res.message || "已改好，立即生效";
+    message.success(cfgSaved.value);
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   }
@@ -576,6 +583,7 @@ onMounted(() => void refresh());
     >
       <p v-if="!cfgSupported" class="muted">{{ cfgMsg || "该插件暂未支持配置" }}</p>
       <template v-else>
+        <p v-if="cfgSaved" class="ok-line">{{ cfgSaved }}</p>
         <label
           v-for="f in cfgSchema"
           :key="f.key"
@@ -588,6 +596,11 @@ onMounted(() => void refresh());
             v-if="f.type === 'boolean'"
             :value="Boolean(cfgValues[f.key])"
             @update:value="(v) => (cfgValues[f.key] = v)"
+          />
+          <n-input-number
+            v-else-if="f.type === 'number'"
+            :value="Number(cfgValues[f.key] ?? 0)"
+            @update:value="(v) => (cfgValues[f.key] = v ?? 0)"
           />
           <n-input
             v-else-if="f.type === 'textarea'"

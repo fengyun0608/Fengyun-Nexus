@@ -12,7 +12,7 @@ type PluginItem = {
   kind?: "channel" | "framework";
   adapterScope?: "all" | "channel" | "specified";
 };
-type ChannelItem = { id: string; label?: string };
+type ChannelItem = { id: string; label?: string; connected?: boolean; clients?: number };
 type DbInfo = {
   active?: string;
   info?: { driver?: string; filePath?: string };
@@ -218,7 +218,8 @@ onUnmounted(() => {
               <p v-if="!channels.length" class="muted">没有挂载通道</p>
               <div v-for="c in channels" :key="c.id" class="info-line">
                 <strong>{{ c.label || c.id }}</strong>
-                <span>{{ c.id }}</span>
+                <span v-if="c.id === 'onebot11'">{{ c.connected ? "已连接" : "未连接" }}{{ c.clients ? ` · ${c.clients} 路` : "" }}</span>
+                <span v-else>{{ c.id }}</span>
               </div>
             </section>
             <section class="info-card">
@@ -232,9 +233,9 @@ onUnmounted(() => {
             <section class="info-card">
               <h2>OneBot</h2>
               <p v-if="!(onebotInfo?.bots || []).length" class="muted">还没有机器人号</p>
-              <div v-for="b in onebotInfo?.bots || []" :key="b.selfId + b.apiBase" class="info-line">
-                <strong>{{ b.label || b.selfId }}</strong>
-                <span>{{ b.connected ? "在线" : "离线" }} · {{ b.apiBase || "默认端口" }}</span>
+              <div v-for="b in onebotInfo?.bots || []" :key="b.selfId + b.label" class="info-line">
+                <strong>{{ b.label || b.selfId || "未备注" }}</strong>
+                <span>{{ b.connected ? "已连接" : "未连接" }}</span>
               </div>
             </section>
             <section class="info-card">

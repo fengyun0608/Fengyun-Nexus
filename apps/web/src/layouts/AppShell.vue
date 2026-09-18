@@ -14,6 +14,7 @@ const route = useRoute();
 const router = useRouter();
 const message = useMessage();
 const navOpen = ref(false);
+let navTimer: number | undefined;
 const isMobile = ref(
   typeof window !== "undefined" && window.matchMedia("(max-width: 860px)").matches,
 );
@@ -116,12 +117,12 @@ async function refreshChannelNav() {
     return;
   }
   try {
-    const res = await api<{ items: Array<{ id: string; label: string }> }>("/v1/channels", {
+    const res = await api<{ items: Array<{ id: string; label: string; connected?: boolean }> }>("/v1/channels", {
       token: auth.token,
     });
     channelNav.value = (res.items || []).map((c) => ({
       to: `/channels/${encodeURIComponent(c.id)}`,
-      label: c.label || c.id,
+      label: c.id === "onebot11" ? `${c.label || c.id} · ${c.connected ? "已连接" : "未连接"}` : c.label || c.id,
       names: ["channel-detail"],
     }));
   } catch {
@@ -135,10 +136,12 @@ onMounted(() => {
   mobileMq.addEventListener("change", syncMobileNav);
   void consoleUi.refresh();
   void auth.refreshMe().then(() => refreshChannelNav());
+  navTimer = window.setInterval(() => void refreshChannelNav(), 5000);
 });
 
 onUnmounted(() => {
   mobileMq?.removeEventListener("change", syncMobileNav);
+  if (navTimer) window.clearInterval(navTimer);
   if (typeof document !== "undefined") document.body.style.overflow = "";
 });
 

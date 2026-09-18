@@ -15,6 +15,7 @@ import {
 } from "naive-ui";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
+import BotAccountCards, { type BotDraft } from "@/components/BotAccountCards.vue";
 
 type NapCatInfo = {
   installed?: boolean;
@@ -64,7 +65,7 @@ const enabled = ref(false);
 const accessToken = ref("");
 const reverseWsPath = ref("/onebot/v11/ws");
 const httpPath = ref("/onebot/v11");
-const botsText = ref("");
+const botCards = ref<BotDraft[]>([]);
 let timer: number | undefined;
 
 async function load() {
@@ -77,9 +78,12 @@ async function load() {
     reverseWsPath.value = info.value.config?.reverseWsPath || info.value.reverseWsPath || "/onebot/v11/ws";
     httpPath.value = info.value.config?.httpPath || info.value.httpPath || "/onebot/v11";
     const bots = info.value.config?.bots || [];
-    botsText.value = bots
-      .map((b) => [b.selfId || "", b.label || "", b.apiBase || ""].join(" | "))
-      .join("\n");
+    botCards.value = bots.map((b) => ({
+      selfId: b.selfId || "",
+      label: b.label || "",
+      apiBase: b.apiBase || "",
+      accessToken: b.accessToken || "",
+    }));
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -90,19 +94,12 @@ async function load() {
 async function save() {
   saving.value = true;
   try {
-    const bots = botsText.value
-      .split(/\n+/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const parts = line.split("|").map((s) => s.trim());
-        return {
-          selfId: parts[0] || "",
-          label: parts[1] || "",
-          apiBase: parts[2] || "",
-          accessToken: parts[3] || "",
-        };
-      });
+    const bots = botCards.value.map((b) => ({
+      selfId: b.selfId.trim(),
+      label: b.label.trim(),
+      apiBase: b.apiBase.trim(),
+      accessToken: b.accessToken.trim(),
+    }));
     info.value = await api<OneBotInfo>("/v1/channels/onebot11/config", {
       method: "POST",
       token: auth.token,
@@ -238,10 +235,12 @@ onUnmounted(() => {
           <label class="field">Access Token <n-input v-model:value="accessToken" type="password" show-password-on="click" /></label>
           <label class="field">反向 WS 路径 <n-input v-model:value="reverseWsPath" /></label>
           <label class="field">HTTP 路径 <n-input v-model:value="httpPath" /></label>
-          <label class="field">
-            多号（每行：QQ | 备注 | apiBase）
-            <n-input v-model:value="botsText" type="textarea" :rows="3" placeholder="123456 | 主号 | http://127.0.0.1:3000" />
-          </label>
+          <BotAccountCards
+            v-model="botCards"
+            :live="info?.bots || []"
+            :reverse-ws-url="info?.reverseWsUrl || info?.napcat?.reverseWsUrl || ''"
+            :gateway-port="8787"
+          />
           <n-space>
             <n-button type="primary" :loading="saving" @click="save">保存</n-button>
             <n-button @click="load">刷新</n-button>
