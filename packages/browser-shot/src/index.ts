@@ -6,6 +6,14 @@ import { createRequire } from "node:module";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { escapeShotHtml, nexusShotCss } from "./shot-ui.js";
+
+export {
+  escapeShotHtml,
+  meterBarHtml,
+  nexusShotCss,
+  tileHtml,
+} from "./shot-ui.js";
 
 export type ShotResult =
   | { ok: true; htmlPath: string; pngPath: string }
@@ -76,66 +84,24 @@ async function loadPlaywright(): Promise<{
   return null;
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 /** 内置菜单卡片 HTML（无底部旁文） */
 export function menuHtml(title: string, lines: string[]): string {
   const items = lines
-    .map((l) => `<li><span>${escapeHtml(l)}</span></li>`)
+    .map((l) => `<li><span>${escapeShotHtml(l)}</span></li>`)
     .join("\n");
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${escapeHtml(title)}</title>
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 32px;
-    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: linear-gradient(145deg, #1a1f18 0%, #0f1410 55%, #1c2418 100%);
-    color: #e8e6df;
-  }
-  .card {
-    width: 720px; margin: 0 auto;
-    border: 1px solid rgba(232,165,75,.35);
-    border-radius: 18px;
-    background: rgba(0,0,0,.35);
-    padding: 28px 32px 28px;
-    box-shadow: 0 18px 50px rgba(0,0,0,.45);
-  }
-  .brand {
-    font-size: 13px; letter-spacing: .18em; text-transform: uppercase;
-    color: #8fad7a; margin-bottom: 8px;
-  }
-  h1 {
-    margin: 0 0 18px; font-size: 28px; font-weight: 700;
-    color: #e8a54b;
-  }
-  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-  li {
-    padding: 12px 14px;
-    border-radius: 12px;
-    border: 1px solid rgba(232,165,75,.15);
-    background: rgba(255,255,255,.03);
-    font-size: 16px; line-height: 1.45;
-  }
-  li span { white-space: pre-wrap; }
-</style>
+<title>${escapeShotHtml(title)}</title>
+<style>${nexusShotCss()}</style>
 </head>
 <body>
   <div class="card" id="shot">
     <div class="brand">Fengyun Nexus</div>
-    <h1>${escapeHtml(title)}</h1>
-    <ul>${items}</ul>
+    <div class="head"><h1>${escapeShotHtml(title)}</h1></div>
+    <ul class="menu-list" style="margin-top:18px">${items}</ul>
   </div>
 </body>
 </html>`;
