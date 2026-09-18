@@ -24,6 +24,15 @@ const loadingHistory = ref(true);
 const msgs = ref<Msg[]>([]);
 const box = ref<HTMLElement | null>(null);
 
+function shotSrc(content: string): string {
+  const cq = content.match(/\[CQ:image,file=([^\]]+)\]/);
+  const raw = cq?.[1] || "";
+  if (!raw) return "";
+  const name = decodeURIComponent(raw.split(/[/\\]/).pop() || "");
+  if (!/^[\w.-]+\.png$/i.test(name)) return "";
+  return `/v1/media/shot/${encodeURIComponent(name)}?token=${encodeURIComponent(auth.token)}`;
+}
+
 function pushWelcome() {
   if (!msgs.value.length) {
     msgs.value.push({
@@ -110,7 +119,8 @@ onMounted(() => void loadHistory());
           <strong>{{ m.role === "user" ? "你" : "Nexus" }}</strong>
           <span v-if="m.at" class="at">{{ m.at.replace("T", " ").slice(0, 19) }}</span>
         </div>
-        <pre>{{ m.content }}</pre>
+        <img v-if="shotSrc(m.content)" class="shot" :src="shotSrc(m.content)" alt="菜单图" />
+        <pre v-else>{{ m.content }}</pre>
       </div>
     </div>
     <div class="composer">
@@ -139,7 +149,12 @@ onMounted(() => void loadHistory());
   font-size: 1.75rem;
   color: var(--amber);
 }
-.muted { color: var(--muted); margin: 0 0 12px; }
+.shot {
+  display: block;
+  max-width: min(100%, 520px);
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
 .pad { padding: 12px; }
 .chat-page {
   display: flex;

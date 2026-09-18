@@ -6,19 +6,31 @@ import { useAuthStore } from "@/stores/auth";
 
 type PluginItem = {
   id: string;
+  name?: string;
+  version?: string;
+  enabled?: boolean;
   kind?: "channel" | "framework";
   adapterScope?: "all" | "channel" | "specified";
 };
-type ChannelItem = { id: string };
+type ChannelItem = { id: string; label?: string };
 type DbInfo = {
-  info?: { driver?: string };
+  active?: string;
+  info?: { driver?: string; filePath?: string };
   stats?: { messages?: number; plugins?: number; kv?: number };
 };
 type LlmInfo = {
   activeId?: string;
-  providers?: Array<{ id: string; name: string }>;
+  hasKey?: boolean;
+  model?: string;
+  providers?: Array<{ id: string; name: string; model?: string; hasKey?: boolean }>;
 };
-type OneBotInfo = { connected?: boolean };
+type OneBotInfo = {
+  connected?: boolean;
+  clients?: number;
+  selfId?: string;
+  enabled?: boolean;
+  bots?: Array<{ selfId: string; label: string; connected: boolean; apiBase: string }>;
+};
 type FeedMsg = {
   id: string;
   channel: string;
@@ -48,8 +60,16 @@ const feedPowerOff = ref(false);
 let timer: number | undefined;
 
 const displayEnv = computed(() =>
-  String((meta.value as any)?.env?.id || (health.value as any)?.env || "—"),
+  String((meta.value as any)?.env?.label || (meta.value as any)?.env?.id || (health.value as any)?.env || "—"),
 );
+const version = computed(() => String((meta.value as any)?.version || "—"));
+const featureList = computed(() => {
+  const f = (meta.value as any)?.features;
+  if (!f || typeof f !== "object") return [] as string[];
+  return Object.entries(f as Record<string, unknown>)
+    .filter(([, v]) => v)
+    .map(([k]) => k);
+});
 const channelPluginCount = computed(
   () =>
     plugins.value.filter((p) => {
@@ -73,18 +93,24 @@ const aiName = computed(() => {
 });
 
 const tiles = computed(() => [
-  { label: "健康", value: (health.value as any)?.ok ? "正常" : "异常" },
-  { label: "姿态", value: displayEnv.value },
-  { label: "通道", value: String(channels.value.length) },
-  { label: "插件", value: String(plugins.value.length) },
-  { label: "消息通道插件", value: String(channelPluginCount.value) },
-  { label: "系统插件", value: String(systemPluginCount.value) },
-  { label: "消息", value: String(msgCount.value) },
-  { label: "数据库", value: dbInfo.value?.info?.driver || "—" },
-  { label: "电源", value: feedPowerOff.value ? "已关机" : "运行中" },
-  { label: "OneBot", value: onebotInfo.value?.connected ? "已连接" : "未连接" },
-  { label: "AI 供应商", value: aiName.value },
-  { label: "用户", value: auth.username || "—" },
+  { label: "版本", value: version.value, sub: "package.json" },
+  { label: "健康", value: (health.value as any)?.ok ? "正常" : "异常", sub: String((health.value as any)?.time || "").replace("T", " ").slice(0, 19) },
+  { label: "姿态", value: displayEnv.value, sub: String((meta.value as any)?.env?.id || "") },
+  { label: "电源", value: feedPowerOff.value ? "已关机" : "运行中", sub: feedPowerOff.value ? "软关机中" : "可收消息" },
+  { label: "通道", value: String(channels.value.length), sub: channels.value.map((c) => c.label || c.id).join(" · ") || "无" },
+  { label: "插件", value: String(plugins.value.length), sub: `通道 ${channelPluginCount.value} · 系统 ${systemPluginCount.value}` },
+  { label: "已启用插件", value: String(plugins.value.filter((p) => p.enabled !== false).length), sub: "停用的不响应" },
+  { label: "消息", value: String(msgCount.value), sub: `库记录 ${dbInfo.value?.stats?.messages ?? "—"}` },
+  { label: "数据库", value: dbInfo.value?.info?.driver || dbInfo.value?.active || "—", sub: dbInfo.value?.info?.filePath || "路径未报" },
+  { label: "键值", value: String(dbInfo.value?.stats?.kv ?? "—"), sub: "本地 kv" },
+  { label: "OneBot", value: onebotInfo.value?.connected ? "已连接" : "未连接", sub: `客户端 ${onebotInfo.value?.clients ?? 0} · ${onebotInfo.value?.enabled === false ? "未启用" : "已启用"}` },
+  { label: "机器人", value: onebotInfo.value?.selfId || onebotInfo.value?.bots?.[0]?.selfId || "—", sub: `${onebotInfo.value?.bots?.length || 0} 个号` },
+  { label: "AI", value: aiName.value, sub: llmInfo.value?.hasKey ? "已配密钥" : "无密钥" },
+  { label: "模型", value: llmInfo.value?.model || llmInfo.value?.providers?.find((p) => p.id === llmInfo.value?.activeId)?.model || "—", sub: llmInfo.value?.activeId || "" },
+  { label: "用户", value: auth.username || "—", sub: "当前登录" },
+  { label: "能力", value: String(featureList.value.length), sub: featureList.value.slice(0, 4).join(" · ") || "—" },
+  { label: "最近入站", value: String(feedItems.value.length), sub: "本页已拉到的条数" },
+  { label: "插件记录", value: String(dbInfo.value?.stats?.plugins ?? "—"), sub: "库里登记" },
 ]);
 
 const rawPayload = computed(() => ({
@@ -159,7 +185,7 @@ onUnmounted(() => {
         >
           概览
         </h1>
-        <p class="muted">系统状态一览。点标题或右侧按钮可看原始数据。</p>
+        <p class="muted">运行全貌。点标题可看原始数据。</p>
       </div>
       <n-space>
         <n-button size="small" quaternary :loading="refreshing" @click="loadAll({ soft: true })">
@@ -181,8 +207,44 @@ onUnmounted(() => {
               <div v-for="t in tiles" :key="t.label" class="dash-tile">
                 <span>{{ t.label }}</span>
                 <strong>{{ t.value }}</strong>
+                <em>{{ t.sub }}</em>
               </div>
             </div>
+          </div>
+
+          <div class="info-cols">
+            <section class="info-card">
+              <h2>通道</h2>
+              <p v-if="!channels.length" class="muted">没有挂载通道</p>
+              <div v-for="c in channels" :key="c.id" class="info-line">
+                <strong>{{ c.label || c.id }}</strong>
+                <span>{{ c.id }}</span>
+              </div>
+            </section>
+            <section class="info-card">
+              <h2>插件</h2>
+              <p v-if="!plugins.length" class="muted">没有插件</p>
+              <div v-for="p in plugins" :key="p.id" class="info-line">
+                <strong>{{ p.name || p.id }}</strong>
+                <span>{{ p.enabled === false ? "停用" : "启用" }} · {{ p.version || "—" }} · {{ p.id }}</span>
+              </div>
+            </section>
+            <section class="info-card">
+              <h2>OneBot</h2>
+              <p v-if="!(onebotInfo?.bots || []).length" class="muted">还没有机器人号</p>
+              <div v-for="b in onebotInfo?.bots || []" :key="b.selfId + b.apiBase" class="info-line">
+                <strong>{{ b.label || b.selfId }}</strong>
+                <span>{{ b.connected ? "在线" : "离线" }} · {{ b.apiBase || "默认端口" }}</span>
+              </div>
+            </section>
+            <section class="info-card">
+              <h2>AI 供应商</h2>
+              <p v-if="!(llmInfo?.providers || []).length" class="muted">没有供应商</p>
+              <div v-for="p in llmInfo?.providers || []" :key="p.id" class="info-line">
+                <strong>{{ p.name }}</strong>
+                <span>{{ llmInfo?.activeId === p.id ? "使用中" : "备用" }} · {{ p.model || "—" }} · {{ p.hasKey ? "有密钥" : "无密钥" }}</span>
+              </div>
+            </section>
           </div>
 
           <section class="feed-section">
@@ -236,31 +298,69 @@ onUnmounted(() => {
 }
 .dash-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   gap: 10px;
 }
 .dash-tile {
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 12px 14px 10px;
   background: var(--surface);
   display: grid;
   gap: 4px;
-  transition: border-color 0.2s ease, transform 0.2s ease;
-}
-.dash-tile:hover {
-  border-color: rgba(47, 155, 120, 0.4);
-  transform: translateY(-1px);
+  min-height: 92px;
 }
 .dash-tile span {
   color: var(--muted);
   font-size: 0.78rem;
 }
 .dash-tile strong {
-  font-size: 1.2rem;
+  font-size: 1.15rem;
   font-family: var(--font-display);
   color: var(--amber);
   word-break: break-word;
+  line-height: 1.25;
+}
+.dash-tile em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.info-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.info-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+  padding: 12px 12px 6px;
+  max-height: 360px;
+  overflow: auto;
+}
+.info-card h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: var(--amber);
+  font-family: var(--font-display);
+}
+.info-line {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.info-line strong {
+  font-size: 0.92rem;
+}
+.info-line span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  word-break: break-all;
 }
 .feed-section {
   margin-top: 18px;

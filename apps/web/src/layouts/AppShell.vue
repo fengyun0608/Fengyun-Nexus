@@ -11,9 +11,17 @@ const consoleUi = useConsoleStore();
 const route = useRoute();
 const router = useRouter();
 const message = useMessage();
+const navOpen = ref(false);
 
 const user = ref("fengyun");
 const pass = ref("");
+
+watch(
+  () => route.fullPath,
+  () => {
+    navOpen.value = false;
+  },
+);
 
 type NavItem = { to: string; label: string; names?: string[] };
 type NavGroup = { title: string; items: NavItem[] };
@@ -173,7 +181,20 @@ async function onLogin() {
 
   <div v-else class="shell-wrap" :style="consoleUi.wallpaperStyle">
     <div class="shell-dim" aria-hidden="true" :style="consoleUi.dimStyle" />
-    <div class="shell">
+    <div class="mobile-bar">
+      <button type="button" class="menu-btn" @click="navOpen = !navOpen">
+        {{ navOpen ? "关闭" : "菜单" }}
+      </button>
+      <strong>Fengyun Nexus</strong>
+    </div>
+    <button
+      v-if="navOpen"
+      type="button"
+      class="nav-mask"
+      aria-label="关闭菜单"
+      @click="navOpen = false"
+    />
+    <div class="shell" :class="{ 'nav-open': navOpen }">
       <aside class="sidebar">
         <div class="sidebar-brand">
           <strong>Fengyun Nexus</strong>
@@ -513,14 +534,63 @@ async function onLogin() {
   color: var(--muted);
   margin: 0 0 16px;
 }
+.mobile-bar,
+.nav-mask {
+  display: none;
+}
 @media (max-width: 860px) {
   .shell {
     grid-template-columns: 1fr;
   }
+  .mobile-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.94);
+    border-bottom: 1px solid var(--line);
+  }
+  .mobile-bar strong {
+    color: var(--amber);
+    font-family: var(--font-display);
+  }
+  .menu-btn {
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-weight: 700;
+  }
+  .nav-mask {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    border: 0;
+    background: rgba(20, 40, 32, 0.35);
+  }
   .sidebar {
-    position: relative;
-    max-height: none;
-    min-height: auto;
+    position: fixed;
+    z-index: 40;
+    top: 0;
+    left: 0;
+    width: min(280px, 86vw);
+    height: 100dvh;
+    max-height: 100dvh;
+    min-height: 0;
+    transform: translateX(-105%);
+    transition: transform 0.2s ease;
+    box-shadow: 8px 0 28px rgba(20, 40, 32, 0.12);
+  }
+  .shell.nav-open .sidebar {
+    transform: translateX(0);
+  }
+  .main {
+    padding: 14px 12px 28px;
   }
 }
 </style>

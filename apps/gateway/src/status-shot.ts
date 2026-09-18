@@ -45,6 +45,10 @@ export type StatusShotInput = {
   pluginsEnabled: number;
   pluginsTotal: number;
   replyGroupIds: string[];
+  channels: Array<{ id: string; label: string }>;
+  plugins: Array<{ name: string; version?: string; enabled: boolean }>;
+  db: { driver: string; messages: number; plugins: number; kv: number; path?: string };
+  bots: Array<{ selfId: string; label: string; connected: boolean; apiBase: string }>;
 };
 
 /** server 部署不展示本机 IP，其它姿态可展示 */
@@ -198,6 +202,9 @@ export function buildStatusLines(s: StatusShotInput): string[] {
       : "AI 未配置密钥",
   );
   lines.push(`插件 ${s.pluginsEnabled}/${s.pluginsTotal}`);
+  lines.push(`通道 ${s.channels.map((c) => c.label).join("、") || "无"}`);
+  lines.push(`数据库 ${s.db.driver} · 消息 ${s.db.messages}`);
+  lines.push(`机器人 ${s.bots.map((b) => `${b.label}${b.connected ? "在线" : "离线"}`).join("、") || "无"}`);
   lines.push(`AI 回复群 ${fmtGroups(s.replyGroupIds, "不限")}`);
   return lines;
 }
@@ -226,13 +233,36 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
     ? `${s.ai.activeName || "AI"}${s.ai.model ? ` · ${s.ai.model}` : ""}`
     : "未配置密钥";
 
+  const pluginRows = (s.plugins || [])
+    .map((p) => {
+      const ver = p.version ? ` @${p.version}` : "";
+      const st = p.enabled ? "启用" : "停用";
+      return `<li><b>${escapeShotHtml(p.name)}</b><span>${escapeShotHtml(st + ver)}</span></li>`;
+    })
+    .join("");
+  const channelRows = (s.channels || [])
+    .map((c) => `<li><b>${escapeShotHtml(c.label)}</b><span>${escapeShotHtml(c.id)}</span></li>`)
+    .join("");
+  const botRows = (s.bots || [])
+    .map(
+      (b) =>
+        `<li><b>${escapeShotHtml(b.label || b.selfId || "号")}</b><span>${b.connected ? "在线" : "离线"} · ${escapeShotHtml(b.apiBase || "默认端口")}</span></li>`,
+    )
+    .join("");
+
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>运行状态</title>
-<style>${nexusShotCss()}</style>
+<style>${nexusShotCss()}
+#panel { width: 860px; }
+.dense { display:grid; gap:6px; }
+.dense li { display:flex; justify-content:space-between; gap:12px; padding:8px 12px; }
+.dense span { color: var(--muted); font-size: 12px; text-align: right; }
+.grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+</style>
 </head>
 <body>
   <div id="panel">
@@ -246,12 +276,14 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
     </div>
 
     <div class="card">
-      <div class="sec">主机概况</div>
-      <div class="grid2">
+      <div class="sec">主机与运行</div>
+      <div class="grid3">
         ${tileHtml("系统", os.osMain, os.osSecondary)}
         ${tileHtml("主机", os.host, `已运行 ${os.sysUptime}`)}
-        ${tileHtml("网络", net.main, `${net.sub} · ${qqLine}`)}
-        ${tileHtml("AI / 插件", aiLine, `${s.pluginsEnabled}/${s.pluginsTotal} 已启用`)}
+        ${tileHtml("网络", net.main, `${net.sub}`)}
+        ${tileHtml("电源", statusLabel, s.uptime)}
+        ${tileHtml("数据库", s.db.driver, `消息 ${s.db.messages} · 插件记录 ${s.db.plugins} · kv ${s.db.kv}`)}
+        ${tileHtml("AI", aiLine, `插件 ${s.pluginsEnabled}/${s.pluginsTotal}`)}
       </div>
     </div>
 
@@ -264,8 +296,23 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
       </div>
     </div>
 
+    <div class="card">
+      <div class="sec">通道 ${s.channels.length}</div>
+      <ul class="list dense">${channelRows || "<li>无</li>"}</ul>
+    </div>
+    <div class="card">
+      <div class="sec">插件 ${s.plugins.length}</div>
+      <ul class="list dense">${pluginRows || "<li>无</li>"}</ul>
+    </div>
+    <div class="card">
+      <div class="sec">机器人</div>
+      <ul class="list dense">${botRows || "<li>无</li>"}</ul>
+      <p class="foot" style="margin-top:10px">OneBot ${escapeShotHtml(qqLine)}</p>
+    </div>
+
     <div class="card foot">
       <span>AI 回复群 <b>${escapeShotHtml(fmtGroups(s.replyGroupIds, "不限"))}</b></span>
+      <span>库文件 <b>${escapeShotHtml(s.db.path || "—")}</b></span>
       <span class="stamp">${escapeShotHtml(stamp)}</span>
     </div>
   </div>

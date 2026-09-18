@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
@@ -598,6 +598,28 @@ async function bootstrap(): Promise<void> {
       pluginsEnabled: enabled,
       pluginsTotal: list.length,
       replyGroupIds: ch.replyGroupIds || [],
+      channels: channels.list().map((c) => {
+        const s = getChannelSettings(channelCfg, c.id);
+        return { id: c.id, label: s.label || c.label || c.id };
+      }),
+      plugins: list.map((p) => ({
+        name: p.name || p.id,
+        version: p.version,
+        enabled: p.enabled !== false,
+      })),
+      db: {
+        driver: db.info().driver,
+        messages: db.stats().messages,
+        plugins: db.stats().plugins,
+        kv: db.stats().kv,
+        path: db.info().filePath,
+      },
+      bots: (ob.bots || []).map((b) => ({
+        selfId: b.selfId,
+        label: b.label,
+        connected: b.connected,
+        apiBase: b.apiBase,
+      })),
     };
   }
 
@@ -1043,6 +1065,30 @@ async function bootstrap(): Promise<void> {
   const app = express();
   if (profile.gateway.cors) app.use(cors());
   app.use(express.json({ limit: "2mb" }));
+
+  app.get("/v1/media/shot/:name", (req, res) => {
+    const header = req.headers.authorization ?? "";
+    const token = header.startsWith("Bearer ")
+      ? header.slice(7)
+      : String(req.query.token || "");
+    const rec = token ? tokens.get(hashToken(token)) : undefined;
+    if (!rec || rec.exp < Date.now()) {
+      res.status(401).end();
+      return;
+    }
+    const name = basename(String(req.params.name || ""));
+    if (!/^[\w.-]+\.png$/i.test(name)) {
+      res.status(400).end();
+      return;
+    }
+    const file = join(ROOT, "data", "draw", name);
+    if (!existsSync(file)) {
+      res.status(404).end();
+      return;
+    }
+    res.type("png");
+    res.sendFile(file);
+  });
 
   app.get("/health", (_req, res) => {
     res.json({

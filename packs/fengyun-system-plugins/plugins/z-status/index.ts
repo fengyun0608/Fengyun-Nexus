@@ -9,7 +9,7 @@ export class ZStatusPlugin extends Plugin {
   manifest = {
     id: "z.status",
     name: "状态",
-    version: "0.2.0",
+    version: "0.3.0",
     priority: 12,
     category: "basic" as const,
     kind: "framework" as const,
@@ -34,8 +34,8 @@ export class ZStatusPlugin extends Plugin {
     const shot = await ctx.shot.renderHtml({
       html,
       selector: "#panel",
-      width: 820,
-      height: 1200,
+    width: 900,
+    height: 1680,
     });
     if (!shot.ok) {
       const lines = ctx.runtime.statusLines();

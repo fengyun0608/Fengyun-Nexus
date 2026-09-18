@@ -1,8 +1,8 @@
 {
   "name": "fengyun-nexus",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "private": true,
-  "description": "Fengyun Nexus ÃÂ¢ÃÂÃÂ AI conversation and automation hub",
+  "description": "Fengyun Nexus ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ AI conversation and automation hub",
   "license": "MIT",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
