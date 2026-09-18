@@ -769,31 +769,43 @@ clear_proxy() {
   unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
 }
 
-ensure_clean_slot() {
-  if [ -d "$ROOTFS" ] && ! has_napcat; then
-    echo "清理半截容器…"
-    proot-distro remove napcat >/dev/null 2>&1 || rm -rf "$ROOTFS" || true
-  fi
+force_remove_napcat() {
+  echo "卸掉已有 napcat 容器（若存在）…"
+  proot-distro remove napcat -y >/dev/null 2>&1 || true
+  proot-distro remove napcat >/dev/null 2>&1 || true
+  rm -rf "$ROOTFS" 2>/dev/null || true
+}
+
+pd_install_tarball() {
+  local tar="$1"
+  # 新版 --name；旧版 --override-alias
+  proot-distro install --name napcat "$tar" && return 0
+  proot-distro install --override-alias napcat "$tar" && return 0
+  proot-distro install "$tar" --name napcat && return 0
+  proot-distro install "$tar" --override-alias napcat && return 0
+  return 1
 }
 
 try_install_debian_docker() {
   echo -e "安装 napcat 容器（proot-distro / Docker Hub）…"
-  ensure_clean_slot
   if has_napcat; then
-    echo -e "\${GREEN}已有 napcat 容器，跳过拉取\${NC}"
+    echo -e "\${GREEN}已有可用 napcat 容器，跳过拉取\${NC}"
     return 0
   fi
-  if proot-distro install debian --override-alias napcat; then
+  force_remove_napcat
+  if proot-distro install debian --override-alias napcat \\
+    || proot-distro install --name napcat debian \\
+    || proot-distro install debian --name napcat; then
     return 0
   fi
   return 1
 }
 
-# Docker Hub 不通时：从国内高校 LXC 镜像拉 rootfs.tar.xz 再本地安装
+# Docker Hub 不通时：拉 LXC rootfs 本地安装（复用已下载的包）
 try_install_debian_lxc() {
-  echo -e "改用国内 LXC Debian rootfs（不走 Docker Hub）…"
-  ensure_clean_slot
+  echo -e "改用 LXC Debian rootfs（不走 Docker Hub）…"
   if has_napcat; then
+    echo -e "\${GREEN}已有可用 napcat 容器，跳过拉取\${NC}"
     return 0
   fi
   clear_proxy
@@ -814,8 +826,18 @@ try_install_debian_lxc() {
     "https://mirrors.sjtu.edu.cn/lxc-images/images/debian/bookworm/\${lxc_arch}/default"
     "https://images.linuxcontainers.org/images/debian/bookworm/\${lxc_arch}/default"
   )
-  local base listing build build_enc url
+  local base listing build build_enc url tsize
   for base in "\${mirrors[@]}"; do
+    tsize=\$(stat -c%s "$tarball" 2>/dev/null || stat -f%z "$tarball" 2>/dev/null || echo 0)
+    if [ -f "$tarball" ] && [ "\$tsize" -gt 1000000 ]; then
+      echo "复用已下载的 rootfs（\${tsize} 字节）…"
+      force_remove_napcat
+      if pd_install_tarball "$tarball" && has_napcat; then
+        echo -e "\${GREEN}LXC rootfs 安装成功\${NC}"
+        return 0
+      fi
+      echo "本地包安装失败，继续尝试在线源…"
+    fi
     echo "探测 $base"
     listing=\$(curl -fsSL --connect-timeout 20 --max-time 60 "$base/" 2>/dev/null || true)
     if [ -z "$listing" ]; then
@@ -831,7 +853,6 @@ try_install_debian_lxc() {
     echo "$url"
     if ! curl -fL --connect-timeout 20 --max-time 900 -o "$tarball" "$url"; then
       echo "下载失败，换源…"
-      rm -f "$tarball"
       continue
     fi
     if [ ! -s "$tarball" ]; then
@@ -839,14 +860,13 @@ try_install_debian_lxc() {
       continue
     fi
     echo "本地安装 rootfs…"
-    if proot-distro install --override-alias napcat "$tarball" \\
-      || proot-distro install "$tarball" --override-alias napcat; then
+    force_remove_napcat
+    if pd_install_tarball "$tarball" && has_napcat; then
       echo -e "\${GREEN}LXC rootfs 安装成功\${NC}"
       return 0
     fi
-    echo "proot-distro 未能识别该 rootfs，换源重试…"
-    rm -f "$tarball"
-    ensure_clean_slot
+    echo "本次安装未成功（常见原因：旧容器未卸干净），强制清理后换源…"
+    force_remove_napcat
   done
   return 1
 }
