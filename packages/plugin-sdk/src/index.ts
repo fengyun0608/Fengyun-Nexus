@@ -90,10 +90,11 @@ export class NexusEvent {
     this._replies.push({ type: "text", content });
   }
 
-  /** Reply with a local image file path or URL — for menu screenshots etc. */
-  async replyImage(file: string, caption = ""): Promise<void> {
-    if (caption) this._replies.push({ type: "text", content: caption });
-    this._replies.push({ type: "image", content: caption || "image", file });
+  /**
+   * 只发图，不附带旁文。第二参数仅作内部占位文案，不会再推一条文字消息。
+   */
+  async replyImage(file: string, _label = "image"): Promise<void> {
+    this._replies.push({ type: "image", content: "image", file });
   }
 
   takeReplies(): Array<{ type: "text" | "image"; content: string; file?: string }> {
@@ -131,10 +132,33 @@ export class NexusEvent {
   }
 }
 
+/** 系统内置截图结果（由网关注入 @fengyun/browser-shot） */
+export type PluginShotResult =
+  | { ok: true; htmlPath: string; pngPath: string }
+  | { ok: false; htmlPath: string; message: string; pngPath?: string };
+
+/** 插件调用系统截图：菜单卡片 / 任意 HTML */
+export interface PluginShot {
+  renderMenu(opts: {
+    title: string;
+    lines: string[];
+    outDir?: string;
+  }): Promise<PluginShotResult>;
+  renderHtml(opts: {
+    html: string;
+    outDir?: string;
+    selector?: string;
+    width?: number;
+    height?: number;
+  }): Promise<PluginShotResult>;
+}
+
 export interface PluginContext {
   pluginId: string;
   reply: (content: string, to: NexusMessage) => Promise<void>;
   log: (msg: string) => void;
+  /** 系统截图能力；菜单图 / 网页图走这里，勿在插件里另装浏览器 */
+  shot: PluginShot;
 }
 
 export interface PluginConfigField {

@@ -353,8 +353,12 @@ onMounted(() => void refresh());
           <p>可放在「系统插件包」与「本通道插件」两边同时显示。</p>
           <p>支持模块化目录：`plugin/*.ts`，以及 adapter / workflow / http / events / www。</p>
           <p>
-            <strong>生图（#生图）</strong>：用框架自带浏览器把<strong>菜单/网页</strong>渲出来再截图发群，
-            <strong>不是</strong> AI 文生图。依赖控制台「环境配置」里的浏览器运行时（Playwright Chromium）。
+            <strong>生图（#生图）</strong>：调用系统截图把<strong>菜单/网页</strong>渲出来发群，
+            <strong>不是</strong> AI 文生图。浏览器运行时在控制台「环境配置」安装。
+          </p>
+          <p>
+            插件编写：用 <code>ctx.shot.renderMenu</code> / <code>ctx.shot.renderHtml</code>，
+            再用 <code>e.replyImage(fileUrl)</code> 只发图（不要旁文）。
           </p>
           <p>列表里点「在线编辑」可改本机插件源码，保存后按需热重载。</p>
         </template>
@@ -362,7 +366,7 @@ onMounted(() => void refresh());
           <p>通道插件：`kind=channel`，`adapterScope=channel` 或 `specified`，并用 `channels` 绑定通道。</p>
           <p>指令以 `#` 开头；主人配置在通道层，不在插件列表里。</p>
           <p>`id` 必须英文；`name` 写中文显示名。</p>
-          <p>需要网页截图时，复用系统插件「生图」同一套浏览器截图能力，不要自己再装一套。</p>
+          <p>需要网页截图时，调用 <code>ctx.shot</code>（系统内置），不要自己再装一套浏览器。</p>
         </template>
       </div>
     </n-spin>

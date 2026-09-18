@@ -1,0 +1,9 @@
+{
+  "name": "@fengyun/z-draw",
+  "version": "0.3.0",
+  "private": false,
+  "type": "module",
+  "dependencies": {
+    "@fengyun/nexus-plugin-sdk": "workspace:*"
+  }
+}

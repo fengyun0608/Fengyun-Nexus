@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { loadPluginsFromDir } from "@fengyun/nexus-plugin-loader";
 import type { PluginHost } from "@fengyun/nexus-plugin-sdk";
 import { nowIso } from "@fengyun/nexus-shared";
+import { makePluginCtx } from "./plugin-ctx.js";
 
 export type PluginReloadDeps = {
   pluginsDir: string;
@@ -64,11 +65,7 @@ export async function reloadPlugins(deps: PluginReloadDeps): Promise<{
       });
     }
 
-    await host.emitReady((id) => ({
-      pluginId: id,
-      reply: async () => undefined,
-      log: (m) => log.info(`[${id}] ${m}`),
-    }));
+    await host.emitReady((id) => makePluginCtx(id, (m) => log.info(`[${id}] ${m}`)));
 
     const n = host.list().length;
     log.ok(`插件热更新完成：${n} 个`);

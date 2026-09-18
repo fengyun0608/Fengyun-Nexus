@@ -1,0 +1,7 @@
+{
+  "name": "fengyun-system-plugins",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fengyun Nexus 系统插件包（菜单 / 生图 / 回声）",
+  "license": "MIT"
+}

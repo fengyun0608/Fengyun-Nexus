@@ -1,0 +1,10 @@
+{
+  "id": "z.echo",
+  "name": "回声",
+  "version": "0.1.1",
+  "main": "index.ts",
+  "priority": 1000,
+  "hooks": ["onMessage", "onReady"],
+  "permissions": ["channel.send"],
+  "category": "demo"
+}

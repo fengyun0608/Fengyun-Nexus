@@ -62,6 +62,7 @@ import {
 } from "./plugin-files.js";
 import { pathToFileURL } from "node:url";
 import { renderMenuShot } from "./menu-shot.js";
+import { makePluginCtx } from "./plugin-ctx.js";
 import { splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
@@ -328,11 +329,7 @@ async function bootstrap(): Promise<void> {
       18,
     );
   }
-  await plugins.emitReady((id) => ({
-    pluginId: id,
-    reply: async () => undefined,
-    log: (m) => log.plugin(id, m),
-  }));
+  await plugins.emitReady((id) => makePluginCtx(id, (m) => log.plugin(id, m)));
 
   const pluginHotDeps = {
     pluginsDir: PLUGINS_DIR,
@@ -697,11 +694,7 @@ async function bootstrap(): Promise<void> {
     const pluginMsg = trimmed !== trimmedRaw ? { ...msg, content: trimmed } : msg;
 
     const pluginReplies = await Promise.race([
-      plugins.onMessage(pluginMsg, (id) => ({
-        pluginId: id,
-        reply: async () => undefined,
-        log: (m) => log.plugin(id, m),
-      })),
+      plugins.onMessage(pluginMsg, (id) => makePluginCtx(id, (m) => log.plugin(id, m))),
       new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error("插件处理超时")), 55_000);
       }),

@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@fengyun/browser-shot": "workspace:*",
     "@fengyun/nexus-channel": "workspace:*",
     "@fengyun/nexus-core": "workspace:*",
     "@fengyun/nexus-db": "workspace:*",
