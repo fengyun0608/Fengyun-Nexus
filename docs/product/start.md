@@ -5,48 +5,56 @@
 启动后打开 http://127.0.0.1:8787/  
 对话、通道、插件、配置都在这个控制台里。本机 `*.local.json` 不会进仓库。
 
-## 一键部署
+## 快速开始（推荐）
 
-### Windows
+一条命令：自动检测环境、装 Git / Node 20+ / pnpm、拉齐仓库并启动。  
+**每次从远程拉最新安装逻辑**，不必先 clone 再找本地脚本。
+
+### Linux / macOS / Termux
+
+```bash
+curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.sh | bash
+```
+
+### Windows（PowerShell）
+
+```powershell
+irm https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.ps1 | iex
+```
+
+### 常用开关
+
+| 变量 | 作用 |
+|------|------|
+| `NEXUS_REINSTALL=1` | 重装运行环境，并清空后重装框架目录 |
+| `NEXUS_REINSTALL_ENV=1` | 只重装 Node / pnpm，不动项目目录 |
+| `NEXUS_SKIP_BOOT=1` | 只装不启 |
+| `NEXUS_ENV=desktop\|server\|termux` | 指定姿态（不设则自动检测） |
+| `NEXUS_INSTALL_DIR=…` | 自定义安装目录（默认 `~/Fengyun-Nexus`） |
+
+示例：
+
+```bash
+NEXUS_REINSTALL=1 curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.sh | bash
+NEXUS_SKIP_BOOT=1 curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.sh | bash
+```
+
+```powershell
+$env:NEXUS_REINSTALL="1"; irm https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.ps1 | iex
+```
+
+## 已安装后日常启动
+
+```bash
+cd ~/Fengyun-Nexus && ./boot.sh
+```
+
+Windows：打开目录双击 `start.bat`，或：
 
 ```bat
-git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
-cd Fengyun-Nexus
+cd %USERPROFILE%\Fengyun-Nexus
 start.bat
 ```
-
-### Linux 服务器
-
-```bash
-git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
-bash ~/Fengyun-Nexus/server-install.sh
-```
-
-仓已在：`bash ~/Fengyun-Nexus/server-install.sh`  
-强制重装：`NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/server-install.sh`  
-只装不启：`NEXUS_SKIP_BOOT=1 bash ~/Fengyun-Nexus/server-install.sh`
-
-脚本会自动装 git / Node 20+ / pnpm，拉齐后以 `NEXUS_ENV=server` 启动。
-
-### Linux / macOS（本机已有 Node）
-
-```bash
-git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
-cd Fengyun-Nexus
-chmod +x boot.sh && ./boot.sh
-```
-
-### Termux
-
-```bash
-git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
-bash ~/Fengyun-Nexus/termux-install.sh
-```
-
-仓已在：`bash ~/Fengyun-Nexus/termux-install.sh`  
-强制重装：`NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`
-
-脚本会自动对齐包、装 Node / pnpm，未装则克隆，已装则拉齐后启动。
 
 ## 常用指令
 

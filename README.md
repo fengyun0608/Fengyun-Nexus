@@ -73,10 +73,13 @@ Fengyun-Nexus/
 ├── packages/             # shared / channel / core / db / llm / plugin-* / workflow / mcp-host
 ├── plugins/              # 业务插件（菜单、回声、生图、QQ 打招呼…）
 ├── configs/              # *.default.json；本机覆盖用 *.local.json
-├── scripts/boot.mjs      # 依赖检查 → 构建 → 拉网关（支持同窗重启）
-├── start.bat / boot.sh   # 电脑 / Linux·macOS 入口
-├── server-install.sh     # 服务器一键装+启
-└── termux-install.sh     # 手机 Termux 一键装+启
+├── scripts/
+│   ├── boot.mjs          # 依赖检查 → 构建 → 拉网关（支持同窗重启）
+│   ├── get.sh            # Linux/macOS/Termux 远程一键装（推荐 curl | bash）
+│   └── get.ps1           # Windows 远程一键装（推荐 irm | iex）
+├── start.bat / boot.sh   # 已安装后的日常启动
+├── server-install.sh     # 兼容入口 → scripts/get.sh
+└── termux-install.sh     # 兼容入口 → scripts/get.sh
 ```
 
 ---
@@ -95,41 +98,24 @@ Fengyun-Nexus/
 
 ## 快速开始
 
-### Windows
+推荐远程一条命令（每次拉最新安装逻辑）：
 
-```bat
-git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
-cd Fengyun-Nexus
-start.bat
-```
-
-### Linux 服务器
+**Linux / macOS / Termux**
 
 ```bash
-git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
-bash ~/Fengyun-Nexus/server-install.sh
+curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.sh | bash
 ```
 
-仓已在：`bash ~/Fengyun-Nexus/server-install.sh`  
-强制重装：`NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/server-install.sh`
+**Windows（PowerShell）**
 
-### Linux / macOS（本机已有 Node）
-
-```bash
-git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
-cd Fengyun-Nexus
-chmod +x boot.sh && ./boot.sh
+```powershell
+irm https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.ps1 | iex
 ```
 
-### Termux
+强制重装环境+目录：`NEXUS_REINSTALL=1` 加在命令前。  
+更多开关见 [上手](docs/product/start.md)。
 
-```bash
-git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
-bash ~/Fengyun-Nexus/termux-install.sh
-```
-
-仓已在：`bash ~/Fengyun-Nexus/termux-install.sh`  
-强制重装：`NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`
+已安装后日常启动：`~/Fengyun-Nexus` 下 `./boot.sh` 或双击 `start.bat`。
 
 控制台：<http://127.0.0.1:8787/>  
 初始账号：`console` / `console`（登录后请改掉）

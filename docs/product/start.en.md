@@ -5,44 +5,40 @@
 Open http://127.0.0.1:8787/ after boot.  
 Local `*.local.json` files stay on your machine.
 
-## One-shot install
+## Quick start (recommended)
 
-### Windows
+One command: detect OS, install Git / Node 20+ / pnpm, sync the repo, then boot.  
+The installer is always fetched from `main` — no stale local install script.
 
-```bat
-git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
-cd Fengyun-Nexus
-start.bat
-```
-
-### Linux server
+### Linux / macOS / Termux
 
 ```bash
-git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
-bash ~/Fengyun-Nexus/server-install.sh
+curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.sh | bash
 ```
 
-Already cloned: `bash ~/Fengyun-Nexus/server-install.sh`  
-Force reinstall: `NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/server-install.sh`  
-Install only: `NEXUS_SKIP_BOOT=1 bash ~/Fengyun-Nexus/server-install.sh`
+### Windows (PowerShell)
 
-### Linux / macOS (Node already installed)
+```powershell
+irm https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.ps1 | iex
+```
+
+### Flags
+
+| Variable | Meaning |
+|----------|---------|
+| `NEXUS_REINSTALL=1` | Reinstall runtime and wipe/reclone the install dir |
+| `NEXUS_REINSTALL_ENV=1` | Reinstall Node / pnpm only |
+| `NEXUS_SKIP_BOOT=1` | Install only, do not start |
+| `NEXUS_ENV=desktop\|server\|termux` | Force posture (auto-detect if unset) |
+| `NEXUS_INSTALL_DIR=…` | Custom install path (default `~/Fengyun-Nexus`) |
+
+## Already installed
 
 ```bash
-git clone https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
-cd Fengyun-Nexus
-chmod +x boot.sh && ./boot.sh
+cd ~/Fengyun-Nexus && ./boot.sh
 ```
 
-### Termux
-
-```bash
-git clone --depth 1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git ~/Fengyun-Nexus
-bash ~/Fengyun-Nexus/termux-install.sh
-```
-
-Already cloned: `bash ~/Fengyun-Nexus/termux-install.sh`  
-Force reinstall: `NEXUS_REINSTALL=1 bash ~/Fengyun-Nexus/termux-install.sh`
+Windows: double-click `start.bat` in the install folder.
 
 ## Commands
 
