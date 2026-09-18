@@ -224,7 +224,7 @@ export class OneBot11Bridge {
   }
 
   /**
-   * 合并转发（师父手感）：多段节点，显示为「匿名用户」。
+   * 合并转发：多段节点，显示为「匿名用户」。
    * NapCat / go-cqhttp：send_group_forward_msg / send_private_forward_msg
    */
   async sendForward(

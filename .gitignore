@@ -33,3 +33,6 @@ tmp-*.mjs
 
 # 对内笔记 — 只留本机，勿推远程
 docs/internal/
+
+# 旧 React 控制台备份（已迁 Vue3）
+apps/web/_legacy-react/

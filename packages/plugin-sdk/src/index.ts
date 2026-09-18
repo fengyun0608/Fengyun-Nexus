@@ -59,7 +59,7 @@ export interface PluginRule {
   describe?: string;
 }
 
-/** Yunzai-like event object `e` — reply / identity / raw. */
+/** 事件对象 `e` — reply / identity / raw. */
 export class NexusEvent {
   readonly id: string;
   readonly channel: string;

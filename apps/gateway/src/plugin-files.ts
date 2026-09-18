@@ -49,20 +49,38 @@ export function listPluginDirs(root: string): Array<{
   id: string;
   dir: string;
   hasIndex: boolean;
+  /** 是否走 plugin/*.ts 模块化加载 */
+  modular: boolean;
+  /** 已有的分目录 */
+  layout: string[];
 }> {
   const base = pluginsRoot(root);
   if (!existsSync(base)) return [];
+  const layoutNames = [
+    "adapter",
+    "plugin",
+    "workflow",
+    "http",
+    "events",
+    "commonconfig",
+    "www",
+  ];
   return readdirSync(base, { withFileTypes: true })
     .filter((d) => d.isDirectory() && !d.name.startsWith(".") && d.name !== "templates")
     .map((d) => {
       const dir = d.name;
-      const indexTs = join(base, dir, "index.ts");
-      const indexJs = join(base, dir, "index.js");
-      return {
-        id: dir,
-        dir,
-        hasIndex: existsSync(indexTs) || existsSync(indexJs),
-      };
+      const abs = join(base, dir);
+      const indexTs = join(abs, "index.ts");
+      const indexJs = join(abs, "index.js");
+      const hasIndex = existsSync(indexTs) || existsSync(indexJs);
+      const pluginDir = join(abs, "plugin");
+      const modular =
+        !hasIndex && existsSync(pluginDir) && statSync(pluginDir).isDirectory();
+      const layout = layoutNames.filter((n) => {
+        const p = join(abs, n);
+        return existsSync(p) && statSync(p).isDirectory();
+      });
+      return { id: dir, dir, hasIndex, modular, layout };
     });
 }
 
@@ -136,11 +154,11 @@ export function scaffoldPluginGuide(root: string): {
     steps: [
       `在 ${pluginsDir} 下新建目录，例如 my-plugin`,
       existsSync(templateDir)
-        ? `可复制模板：${templateDir}`
-        : "目录内放 index.ts，导出 Plugin 实例",
+        ? `可复制 templates/ts-plugin，或 templates/modular-plugin（分目录写法）`
+        : "目录内放 index.ts，或 plugin/*.ts",
       "manifest.id 用英文；manifest.name 写中文显示名",
-      "保存后框架会热重载插件；也可发 POST /v1/plugins/reload",
-      "群里用 #帮助 / #菜单 验证指令是否挂上",
+      "分目录可选：adapter / plugin / workflow / http / events / www",
+      "保存后热重载；群里用 #帮助 验证",
     ],
   };
 }

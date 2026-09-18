@@ -1,0 +1,12 @@
+{
+  "id": "z.demo.modular",
+  "name": "模块化示例",
+  "version": "0.1.0",
+  "priority": 1100,
+  "hooks": ["onMessage", "onReady"],
+  "permissions": ["channel.send"],
+  "category": "demo",
+  "kind": "framework",
+  "adapterScope": "all",
+  "note": "故意不设 main/index：由 plugin/*.ts 加载"
+}

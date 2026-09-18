@@ -2,7 +2,7 @@
 
 本地可控的 AI 对话与自动化枢纽：控制台、消息通道、插件、工作流、多模型配置，一套跑通。
 
-灵感自 Yunzai 系与 [XRK-Yunzai](https://gitcode.com/xrkseek/XRK-Yunzai)：事件进网关、插件按规则处理、通道可插拔。
+事件进网关、插件按规则处理、通道可插拔。
 
 <p align="center">
   <img alt="license" src="https://img.shields.io/badge/License-MIT-c4842f?style=flat-square" />

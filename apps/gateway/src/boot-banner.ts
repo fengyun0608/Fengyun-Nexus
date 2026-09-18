@@ -14,7 +14,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Yunzai-style flash: many short lines, then continue. */
+/** 启动闪屏：多行短提示后继续。 */
 export async function bootStep(msg: string, ms = 28): Promise<void> {
   log.info(msg);
   if (process.env.NEXUS_BOOT_FAST === "1") return;
