@@ -403,16 +403,28 @@ async function bootstrap(): Promise<void> {
   const gatewayPortEarly = () => Number(process.env.PORT ?? profile.gateway.port);
   onebot.setGatewayPort(gatewayPortEarly());
   {
-    const cleaned = (onebot.getConfig().bots || []).map((b) => ({
-      ...b,
-      apiBase: onebot.napcatApi(b.apiBase),
-    }));
+    const gw = gatewayPortEarly();
+    const cleaned = (onebot.getConfig().bots || []).map((b) => {
+      let fromApi = 0;
+      try {
+        const u = new URL(String(b.apiBase || ""));
+        fromApi = Number(u.port || 0);
+      } catch {
+        fromApi = 0;
+      }
+      const listenPort =
+        Math.floor(Number(b.listenPort) || 0) || (fromApi > 0 && fromApi !== gw ? fromApi : 0);
+      const apiBase = fromApi === listenPort || fromApi === gw ? "" : onebot.napcatApi(b.apiBase);
+      return { ...b, listenPort, apiBase };
+    });
     const prev = onebot.getConfig().bots || [];
     if (JSON.stringify(cleaned) !== JSON.stringify(prev)) {
       const next = { ...onebot.getConfig(), bots: cleaned };
       persistOneBotConfig(next);
       onebot.updateConfig(next);
-      log.info("机器人接口写成了网关端口，已改成留空，走反向连接");
+      log.info("已按填写的端口打开反向入口，QQ 号等连上后再写入");
+    } else {
+      onebot.syncListenPorts();
     }
   }
   channels.register(onebot.channel);
@@ -439,24 +451,31 @@ async function bootstrap(): Promise<void> {
     persistOneBotConfig(next);
     onebot.updateConfig(next);
   });
-  onebot.setSelfIdHandler((sid) => {
+  onebot.setSelfIdHandler((sid, listenPort) => {
     const cfg = onebot.getConfig();
+    const bots = (cfg.bots || []).map((b) => ({ ...b }));
+    if (bots.some((b) => String(b.selfId) === sid)) return;
+    const byPort = listenPort ? bots.findIndex((b) => Number(b.listenPort) === listenPort) : -1;
+    const empty = bots.findIndex((b) => !String(b.selfId || "").trim());
+    const idx = byPort >= 0 ? byPort : empty;
+    if (idx < 0) {
+      log.info(`QQ ${sid} 已连上。先添加备注，QQ 号会写到那一张卡上`);
+      return;
+    }
+    const label = bots[idx]?.label || "未备注";
+    const port = Math.floor(Number(bots[idx]?.listenPort) || listenPort || gatewayPortEarly());
     const url = buildReverseWsUrl({
-      port: gatewayPortEarly(),
+      port,
       path: cfg.reverseWsPath || "/onebot/v11/ws",
       token: cfg.accessToken,
     });
     const file = wireNapCatForAccount(ROOT, sid, url, cfg.accessToken || "");
-    if (file) log.ok(`NapCat 已按 QQ ${sid} 写好反向 WS → ${file}`);
-    // 同步本机 OneBot 配置里的 selfId
-    const bots = [...(cfg.bots || [])];
-    if (!bots.some((b) => String(b.selfId) === sid)) {
-      if (bots[0] && !bots[0].selfId) bots[0] = { ...bots[0], selfId: sid };
-      else bots.push({ selfId: sid, label: "新号", apiBase: "", accessToken: "" });
-      const next = { ...cfg, enabled: true, bots };
-      persistOneBotConfig(next);
-      onebot.updateConfig(next);
-    }
+    if (file) log.ok(`已把 ${label} 的反向地址写成 ${url}`);
+    bots[idx] = { ...bots[idx], selfId: sid };
+    const next = { ...cfg, enabled: true, bots };
+    persistOneBotConfig(next);
+    onebot.updateConfig(next);
+    log.ok(`已写入 ${label} 的 QQ ${sid}`);
   });
 
   await bootStep("初始化：AI 供应商（LLM）…");
@@ -1902,6 +1921,7 @@ async function bootstrap(): Promise<void> {
       ? body.bots.map((b) => ({
           selfId: String(b?.selfId || "").trim(),
           label: String(b?.label || "").trim(),
+          listenPort: Math.floor(Number(b?.listenPort) || 0),
           apiBase: onebot.napcatApi(String(b?.apiBase || "").trim()),
           accessToken: String(b?.accessToken || "").trim(),
         }))

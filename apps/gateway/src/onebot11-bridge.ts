@@ -1,4 +1,4 @@
-import type { Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
@@ -39,7 +39,9 @@ export type OneBotBotConfig = {
   /** 机器人 QQ；空则连上后再认 */
   selfId?: string;
   label?: string;
-  /** NapCat / go-cqhttp HTTP API，如 http://127.0.0.1:3000 — 多号可各写一个端口 */
+  /** 这个号反向连到咱们网关的端口。例如后台填 3000，就在 3000 上接它 */
+  listenPort?: number;
+  /** 仅在反向连不上时才用的 NapCat HTTP。不要填咱们自己的端口 */
   apiBase?: string;
   accessToken?: string;
 };
@@ -69,6 +71,7 @@ export type OneBotStatus = {
     label: string;
     connected: boolean;
     apiBase: string;
+    listenPort: number;
   }>;
 };
 
@@ -99,7 +102,7 @@ type Pending = {
   action: string;
 };
 
-type SockMeta = { selfId: string };
+type SockMeta = { selfId: string; listenPort: number };
 
 /**
  * OneBot 11 bridge for NapCat / go-cqhttp.
@@ -119,7 +122,8 @@ export class OneBot11Bridge {
   private pending = new Map<string, Pending>();
   private onInbound?: InboundHandler;
   private onNotice?: NoticeHandler;
-  private onSelfId?: (selfId: string) => void;
+  private onSelfId?: (selfId: string, listenPort?: number) => void;
+  private extra = new Map<number, { server: Server; wss: WebSocketServer }>();
 
   constructor(private cfg: OneBotConfig) {}
 
@@ -131,7 +135,7 @@ export class OneBot11Bridge {
     this.onNotice = fn;
   }
 
-  setSelfIdHandler(fn: (selfId: string) => void): void {
+  setSelfIdHandler(fn: (selfId: string, listenPort?: number) => void): void {
     this.onSelfId = fn;
   }
 
@@ -153,14 +157,27 @@ export class OneBot11Bridge {
     return s;
   }
 
-  private noteSelfId(sid: string): void {
-    if (!sid || sid === this.selfId) return;
+  private noteSelfId(sid: string, listenPort = 0): void {
+    if (!sid) return;
     this.selfId = sid;
     try {
-      this.onSelfId?.(sid);
+      this.onSelfId?.(sid, listenPort);
     } catch {
       /* ignore */
     }
+  }
+
+  private bindIdentity(ws: WebSocket, sid: string): void {
+    const prev = this.sockMeta.get(ws) || { selfId: "", listenPort: 0 };
+    const listenPort = prev.listenPort;
+    if (prev.selfId === sid) return;
+    this.sockMeta.set(ws, { selfId: sid, listenPort });
+    const label =
+      (this.cfg.bots || []).find((b) => Number(b.listenPort) === listenPort && listenPort)?.label ||
+      (this.cfg.bots || []).find((b) => String(b.selfId || "") === sid)?.label ||
+      "新号";
+    log.ok(`消息通道已连接  ${label}  QQ=${sid}${listenPort ? `  端口=${listenPort}` : ""}`);
+    this.noteSelfId(sid, listenPort);
   }
 
   updateConfig(next: Partial<OneBotConfig>): void {
@@ -169,6 +186,7 @@ export class OneBot11Bridge {
       ...next,
       bots: Array.isArray(next.bots) ? next.bots : this.cfg.bots,
     };
+    this.syncListenPorts();
   }
 
   getConfig(): OneBotConfig {
@@ -190,25 +208,28 @@ export class OneBot11Bridge {
   }
 
   status(): OneBotStatus {
-    const connectedIds = new Set(this.listConnectedSelfIds());
     const bots = (this.cfg.bots || []).map((b) => {
       const sid = String(b.selfId || "").trim();
+      const listenPort = Math.floor(Number(b.listenPort) || 0);
       return {
         selfId: sid,
-        label: b.label || (sid ? `QQ ${sid}` : "未命名"),
-        connected: Boolean(sid) && connectedIds.has(sid),
+        label: b.label || (sid ? `QQ ${sid}` : "未备注"),
+        connected: this.botOnline(sid, listenPort),
         apiBase: this.napcatApi(b.apiBase),
+        listenPort,
       };
     });
-    for (const sid of connectedIds) {
-      if (!bots.some((b) => b.selfId === sid)) {
-        bots.push({
-          selfId: sid,
-          label: `QQ ${sid}`,
-          connected: true,
-          apiBase: "",
-        });
-      }
+    for (const ws of this.sockets) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const sid = this.sockMeta.get(ws)?.selfId || "";
+      if (!sid || bots.some((b) => b.selfId === sid)) continue;
+      bots.push({
+        selfId: sid,
+        label: `QQ ${sid}`,
+        connected: true,
+        apiBase: "",
+        listenPort: this.sockMeta.get(ws)?.listenPort || 0,
+      });
     }
     return {
       enabled: this.cfg.enabled,
@@ -222,6 +243,98 @@ export class OneBot11Bridge {
       lastEventAt: this.lastEventAt,
       bots,
     };
+  }
+
+  /** 这个号的反向端口上有连接，或 QQ 已经对上，都算已连接。 */
+  private botOnline(selfId: string, listenPort: number): boolean {
+    for (const ws of this.sockets) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const meta = this.sockMeta.get(ws);
+      if (!meta) continue;
+      if (selfId && meta.selfId === selfId) return true;
+      if (listenPort > 0 && meta.listenPort === listenPort) return true;
+    }
+    return false;
+  }
+
+  private wireSocket(ws: WebSocket, listenPort: number): void {
+    this.sockets.add(ws);
+    this.sockMeta.set(ws, { selfId: "", listenPort });
+    const label = (this.cfg.bots || []).find((b) => Number(b.listenPort) === listenPort && listenPort)?.label;
+    log.ok(
+      `OneBot 11 已连接  ${label || "通道"}  端口=${listenPort || this.gatewayPort}  clients=${this.sockets.size}`,
+    );
+    try {
+      ws.send(JSON.stringify({ action: "get_login_info", params: {}, echo: `nx_login_${++this.echoSeq}` }));
+    } catch {
+      /* 连上再问 QQ */
+    }
+    ws.on("message", (data) => {
+      void this.onSocketMessage(ws, data.toString());
+    });
+    ws.on("close", () => {
+      this.sockets.delete(ws);
+      log.warn(`OneBot 11 断开  ${label || "通道"}  clients=${this.sockets.size}`);
+    });
+    ws.on("error", () => {
+      this.sockets.delete(ws);
+    });
+  }
+
+  /** 按各号填写的端口另开反向入口。3000 这类是咱们听的，不是 NapCat 自己的口。 */
+  syncListenPorts(): void {
+    const path = this.cfg.reverseWsPath || "/onebot/v11/ws";
+    const ports = new Set<number>();
+    for (const b of this.cfg.bots || []) {
+      const p = Math.floor(Number(b.listenPort) || 0);
+      if (p > 0 && p < 65536 && p !== this.gatewayPort) ports.add(p);
+    }
+    for (const [port, rec] of this.extra) {
+      if (ports.has(port)) continue;
+      try {
+        rec.wss.close();
+        rec.server.close();
+      } catch {
+        /* ignore */
+      }
+      this.extra.delete(port);
+    }
+    for (const port of ports) {
+      if (this.extra.has(port)) continue;
+      const server = createServer();
+      const wss = new WebSocketServer({ noServer: true });
+      server.on("upgrade", (req, socket, head) => {
+        let pathname = "/";
+        try {
+          pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+        } catch {
+          socket.destroy();
+          return;
+        }
+        if (pathname !== path && pathname !== `${path}/`) {
+          socket.destroy();
+          return;
+        }
+        const url = new URL(req.url ?? "/", "http://localhost");
+        if (!this.authOk(req.headers.authorization, url.searchParams.get("access_token"))) {
+          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          this.wireSocket(ws, port);
+        });
+      });
+      server.on("error", (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.warn(`反向端口 ${port} 没打开：${msg}。这个号会一直显示未连接`);
+        this.extra.delete(port);
+      });
+      server.listen(port, "0.0.0.0", () => {
+        log.ok(`反向端口已打开 ${port}  ws://0.0.0.0:${port}${path}`);
+      });
+      this.extra.set(port, { server, wss });
+    }
   }
 
   attach(server: Server): void {
@@ -239,25 +352,10 @@ export class OneBot11Bridge {
         return;
       }
       this.wss!.handleUpgrade(req, socket, head, (ws) => {
-        this.wss!.emit("connection", ws, req);
+        this.wireSocket(ws, this.gatewayPort);
       });
     });
-
-    this.wss.on("connection", (ws) => {
-      this.sockets.add(ws);
-      this.sockMeta.set(ws, { selfId: "" });
-      log.ok(`OneBot 11 已连接  clients=${this.sockets.size}`);
-      ws.on("message", (data) => {
-        void this.onSocketMessage(ws, data.toString());
-      });
-      ws.on("close", () => {
-        this.sockets.delete(ws);
-        log.warn(`OneBot 11 断开  clients=${this.sockets.size}`);
-      });
-      ws.on("error", () => {
-        this.sockets.delete(ws);
-      });
-    });
+    this.syncListenPorts();
     log.info(`OneBot 11 反向 WS 就绪  path=${this.cfg.reverseWsPath}`);
   }
 
@@ -305,30 +403,21 @@ export class OneBot11Bridge {
           message,
         });
       }
+      const payload = data.data;
+      if (payload && typeof payload === "object" && "user_id" in payload) {
+        const uid = (payload as { user_id?: unknown }).user_id;
+        if (uid != null && String(uid)) this.bindIdentity(ws, String(uid));
+      }
       return;
     }
 
     if (data.post_type === "meta_event") {
-      if (data.meta_event_type === "lifecycle" && data.self_id != null) {
-        const sid = String(data.self_id);
-        this.noteSelfId(sid);
-        this.sockMeta.set(ws, { selfId: sid });
-      }
+      if (data.self_id != null) this.bindIdentity(ws, String(data.self_id));
       return;
     }
 
     if (data.self_id != null) {
-      const sid = String(data.self_id);
-      const prev = this.sockMeta.get(ws)?.selfId || "";
-      this.noteSelfId(sid);
-      const meta = this.sockMeta.get(ws);
-      if (meta) meta.selfId = sid;
-      else this.sockMeta.set(ws, { selfId: sid });
-      if (prev !== sid) {
-        const label =
-          (this.cfg.bots || []).find((b) => String(b.selfId || "").trim() === sid)?.label || "新号";
-        log.ok(`消息通道已连接  ${label || "新号"}  QQ=${sid}`);
-      }
+      this.bindIdentity(ws, String(data.self_id));
     }
 
     if (data.post_type === "message_sent") return;

@@ -42,13 +42,13 @@ type OneBotInfo = {
   message?: string;
   reverseWsUrl?: string;
   napcat?: NapCatInfo;
-  bots?: Array<{ selfId: string; label: string; connected: boolean; apiBase: string }>;
+  bots?: Array<{ selfId: string; label: string; connected: boolean; apiBase: string; listenPort?: number }>;
   config?: {
     enabled?: boolean;
     accessToken?: string;
     reverseWsPath?: string;
     httpPath?: string;
-    bots?: Array<{ selfId?: string; label?: string; apiBase?: string; accessToken?: string }>;
+    bots?: Array<{ selfId?: string; label?: string; apiBase?: string; accessToken?: string; listenPort?: number }>;
   };
 };
 
@@ -83,6 +83,7 @@ async function load() {
       label: b.label || "",
       apiBase: b.apiBase || "",
       accessToken: b.accessToken || "",
+      listenPort: Number(b.listenPort) || 0,
     }));
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
@@ -99,6 +100,7 @@ async function save() {
       label: b.label.trim(),
       apiBase: b.apiBase.trim(),
       accessToken: b.accessToken.trim(),
+      listenPort: Number(b.listenPort) || 0,
     }));
     info.value = await api<OneBotInfo>("/v1/channels/onebot11/config", {
       method: "POST",
