@@ -26,6 +26,8 @@ export type UpdateApplyResult = {
   overwritten?: boolean;
   reportText?: string;
   forwardNodes?: string[];
+  /** 给人看的变更条目（提交说明 / 目录），供转发与重启回执复用 */
+  changeItems?: string[];
 };
 
 function readLocalVersion(root: string): string {
@@ -77,7 +79,58 @@ function short(sha: string): string {
   return sha.slice(0, 7);
 }
 
-/** 更新回执：只报加减，不列提交/文件名 */
+/** 拉取区间内的提交说明（倒序最新在前） */
+export function collectCommitSubjects(
+  root: string,
+  before: string,
+  after: string,
+  limit = 15,
+): string[] {
+  try {
+    const raw = git(root, [
+      "log",
+      "--pretty=format:%s",
+      "--no-merges",
+      `${before}..${after}`,
+    ]);
+    return raw
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+/** 按顶层目录汇总改了哪些块 */
+export function summarizeChangedAreas(
+  root: string,
+  before: string,
+  after: string,
+  limit = 8,
+): string {
+  try {
+    const names = git(root, ["diff", "--name-only", before, after])
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!names.length) return "";
+    const counts = new Map<string, number>();
+    for (const f of names) {
+      const top = f.split(/[/\\]/)[0] || f;
+      counts.set(top, (counts.get(top) || 0) + 1);
+    }
+    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const shown = ranked.slice(0, limit).map(([k, n]) => `${k}×${n}`);
+    const more = ranked.length > limit ? ` 等 ${ranked.length} 块` : "";
+    return `涉及 ${shown.join("、")}${more}`;
+  } catch {
+    return "";
+  }
+}
+
+/** 更新回执：版本 + 提交说明 + 范围统计，再提示重启 */
 export function buildUpdateReport(opts: {
   version: string;
   updated: boolean;
@@ -85,26 +138,51 @@ export function buildUpdateReport(opts: {
   after: string;
   shortStat: string;
   overwritten: boolean;
-}): { reportText: string; forwardNodes: string[]; message: string } {
-  const { version, updated, before, after, shortStat, overwritten } = opts;
-  const head = updated
-    ? `已更新到 ${version}\n${short(before)} → ${short(after)}`
-    : `已是最新 ${version}\n${short(after)}`;
+  subjects?: string[];
+  areas?: string;
+}): { reportText: string; forwardNodes: string[]; message: string; changeItems: string[] } {
+  const { version, updated, before, after, shortStat, overwritten, subjects = [], areas } =
+    opts;
+  const changeItems = [...subjects];
 
-  const statLine = updated
-    ? shortStat || "有改动，统计拿不到"
-    : "没有新东西";
+  if (!updated) {
+    const nodes = [`框架已是最新 ${version}`, `当前提交 ${short(after)}`];
+    return {
+      reportText: nodes.join("\n\n"),
+      forwardNodes: nodes,
+      message: `已是最新 ${version}`,
+      changeItems: [],
+    };
+  }
 
-  const forwardNodes = [head, statLine];
-  if (overwritten) forwardNodes.push("本地被远程盖掉了");
-  if (updated) forwardNodes.push("正在重启");
+  const head = [
+    `框架已更新到 ${version}`,
+    `${short(before)} → ${short(after)}`,
+  ].join("\n");
+
+  const forwardNodes: string[] = [head];
+
+  if (subjects.length) {
+    const body = subjects.map((s, i) => `${i + 1}. ${s}`).join("\n");
+    forwardNodes.push(`本次提交说明\n${body}`);
+  } else {
+    forwardNodes.push("本次提交说明\n（拿不到提交标题，仍有代码变更）");
+  }
+
+  const statBits = [shortStat || "有改动，统计拿不到", areas].filter(Boolean);
+  forwardNodes.push(`改动统计\n${statBits.join("\n")}`);
+
+  if (overwritten) forwardNodes.push("说明\n本地与远程不一致，已按远程对齐");
+  forwardNodes.push("下一步\n即将重启以加载新版本，请稍候");
 
   const reportText = forwardNodes.join("\n\n");
-  const message = updated
-    ? `已更新到 ${version}，正在重启`
-    : `已是最新 ${version}`;
+  const tip =
+    subjects[0] ||
+    shortStat ||
+    "有代码变更";
+  const message = `框架已更新到 ${version}（${short(before)}→${short(after)}）\n要点：${tip}\n即将重启`;
 
-  return { reportText, forwardNodes, message };
+  return { reportText, forwardNodes, message, changeItems };
 }
 
 /** git shortstat →「3 个文件  +12  −4」 */
@@ -232,12 +310,16 @@ export function applyRemoteUpdate(root: string): UpdateApplyResult {
     const updated = before !== after;
 
     let shortStat = "";
+    let subjects: string[] = [];
+    let areas = "";
     if (updated) {
       try {
         shortStat = formatShortStat(git(root, ["diff", "--shortstat", before, after]));
       } catch {
         shortStat = "";
       }
+      subjects = collectCommitSubjects(root, before, after);
+      areas = summarizeChangedAreas(root, before, after);
     }
 
     const built = buildUpdateReport({
@@ -247,6 +329,8 @@ export function applyRemoteUpdate(root: string): UpdateApplyResult {
       after,
       shortStat,
       overwritten,
+      subjects,
+      areas,
     });
 
     return {
@@ -260,6 +344,7 @@ export function applyRemoteUpdate(root: string): UpdateApplyResult {
       message: built.message,
       reportText: built.reportText,
       forwardNodes: built.forwardNodes,
+      changeItems: built.changeItems,
     };
   } catch (e) {
     return {

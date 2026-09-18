@@ -14,6 +14,8 @@ export type FullUpdateResult = UpdateApplyResult & {
   frameworkUpdated?: boolean;
   pluginsUpdated?: boolean;
   pluginDirs?: string[];
+  /** 给人看的更新摘要（重启成功回执复用） */
+  updateSummary?: string[];
 };
 
 /** 拆成多条转发节点，群里展开能看到一段段说明 */
@@ -35,31 +37,32 @@ export function applyFullUpdate(
       ...fw,
       frameworkUpdated: false,
       pluginsUpdated: false,
+      updateSummary: [],
     };
   }
 
   const nodes: string[] = [];
   const pluginDirs: string[] = [];
+  const updateSummary: string[] = [];
   let pluginsUpdated = false;
   let pluginError = "";
 
   // —— 框架 ——
   if (fw.updated) {
-    pushNodes(
-      nodes,
-      `框架已更新到 ${fw.version || "?"}`,
-      `${fw.beforeCommit || "?"} → ${fw.afterCommit || "?"}`,
-    );
-    const statLine = (fw.forwardNodes || []).find(
-      (n) => n.includes("个文件") || n.includes("有改动") || n.includes("没改"),
-    );
-    pushNodes(nodes, statLine || "有改动，统计拿不到");
-    if (fw.overwritten) pushNodes(nodes, "本地被远程盖掉了");
+    pushNodes(nodes, ...(fw.forwardNodes || []).filter((n) => !/^下一步/.test(n)));
+    for (const item of fw.changeItems || []) {
+      updateSummary.push(`框架：${item}`);
+    }
+    if (!(fw.changeItems || []).length) {
+      updateSummary.push(
+        `框架 ${fw.version || "?"}（${fw.beforeCommit || "?"}→${fw.afterCommit || "?"}）`,
+      );
+    }
   } else {
     pushNodes(
       nodes,
       `框架已是最新 ${fw.version || "?"}`,
-      fw.afterCommit ? `当前 ${fw.afterCommit}` : undefined,
+      fw.afterCommit ? `当前提交 ${fw.afterCommit}` : undefined,
     );
   }
 
@@ -99,17 +102,23 @@ export function applyFullUpdate(
             const labels = need
               .filter((i) => changed.includes(i.dir))
               .map((i) => {
-                const ver =
-                  i.remoteVersion && i.remoteVersion !== i.localVersion
-                    ? ` ${i.localVersion || "?"}→${i.remoteVersion}`
-                    : i.remoteVersion
-                      ? ` ${i.remoteVersion}`
-                      : "";
-                return `${i.name || i.id || i.dir}${ver}`;
+                const name = i.name || i.id || i.dir;
+                if (i.remoteVersion && i.localVersion && i.remoteVersion !== i.localVersion) {
+                  return `${name} ${i.localVersion}→${i.remoteVersion}`;
+                }
+                if (i.status === "remote-only") {
+                  return `${name}（新装 ${i.remoteVersion || "?"}）`;
+                }
+                return `${name}${i.remoteVersion ? ` ${i.remoteVersion}` : ""}`;
               });
-            pushNodes(nodes, "系统插件已更新", labels.join("\n"));
+            pushNodes(
+              nodes,
+              `系统插件已更新（${labels.length} 个）`,
+              labels.map((l, i) => `${i + 1}. ${l}`).join("\n"),
+            );
+            for (const l of labels) updateSummary.push(`插件：${l}`);
           } else {
-            pushNodes(nodes, "系统插件已是最新");
+            pushNodes(nodes, "系统插件已是最新（远端有提示但指纹未变，跳过）");
           }
         }
         if (applied.failed.length) {
@@ -121,7 +130,7 @@ export function applyFullUpdate(
         pushNodes(
           nodes,
           "系统插件已是最新",
-          names.length ? names.join("、") : undefined,
+          names.length ? `已核对：${names.join("、")}` : undefined,
         );
       }
     } catch (e) {
@@ -129,25 +138,44 @@ export function applyFullUpdate(
       pushNodes(nodes, "系统插件更新失败", pluginError);
     }
   } else if (fw.updated) {
-    pushNodes(nodes, "系统插件随框架目录对齐");
+    pushNodes(nodes, "系统插件\n未配置专仓地址，本次只更新了框架");
   }
 
   const anyUpdated = Boolean(fw.updated) || pluginsUpdated;
   if (anyUpdated) {
-    pushNodes(nodes, "正在重启");
+    pushNodes(
+      nodes,
+      [
+        "下一步",
+        "即将重启以加载新版本",
+        "重启成功后会再发一份加载报告",
+      ].join("\n"),
+    );
   } else {
-    pushNodes(nodes, "无需重启");
+    pushNodes(nodes, "结果\n全部已是最新，无需重启");
   }
 
   const reportText = nodes.join("\n\n");
   const bits: string[] = [];
-  if (fw.updated) bits.push("框架");
-  if (pluginsUpdated) bits.push(`插件（${pluginDirs.join("、") || "已拉"}）`);
-  const message = anyUpdated
-    ? `已更新：${bits.join(" + ")}，正在重启`
-    : pluginError
-      ? `框架已是最新；插件异常：${pluginError}`
-      : `已是最新 ${fw.version || ""}，无需重启`;
+  if (fw.updated) bits.push(`框架 ${fw.version || ""}`);
+  if (pluginsUpdated) bits.push(`插件 ${pluginDirs.length} 个`);
+  let message: string;
+  if (anyUpdated) {
+    const highlights = updateSummary.slice(0, 5);
+    const more =
+      updateSummary.length > 5 ? `\n…另有 ${updateSummary.length - 5} 条` : "";
+    message = [
+      `更新完成：${bits.join(" + ")}`,
+      highlights.length ? `变更要点：\n${highlights.map((h) => `· ${h}`).join("\n")}${more}` : "",
+      "即将重启以加载新版本，请稍候",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  } else if (pluginError) {
+    message = `框架已是最新；插件异常：\n${pluginError}`;
+  } else {
+    message = `已是最新 ${fw.version || ""}，无需重启`;
+  }
 
   return {
     ok: Boolean(fw.ok) && !(pluginError && !anyUpdated),
@@ -161,9 +189,11 @@ export function applyFullUpdate(
     overwritten: fw.overwritten,
     beforeCommit: fw.beforeCommit,
     afterCommit: fw.afterCommit,
+    changeItems: updateSummary,
     frameworkUpdated: Boolean(fw.updated),
     pluginsUpdated,
     pluginDirs,
+    updateSummary,
     error: pluginError || fw.error,
   };
 }

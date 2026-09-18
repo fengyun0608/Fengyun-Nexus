@@ -625,6 +625,7 @@ async function bootstrap(): Promise<void> {
                 groupId: gid,
                 requestedAt: nowIso(),
                 previousUptime: uptime,
+                updateSummary: upd.updateSummary || upd.changeItems || [],
               });
             }
             if (msg.channel === "onebot11") {
@@ -730,7 +731,7 @@ async function bootstrap(): Promise<void> {
             return last ? [`${last}\n重启失败：${r.message}`] : [`重启失败：${r.message}`];
           }
           log.ok(`更新完成，同窗口重启（退出码 ${r.exitCode}）`);
-          setTimeout(() => process.exit(r.exitCode), 1500);
+          setTimeout(() => process.exit(r.exitCode), 2800);
           return out;
         }
 
@@ -1976,6 +1977,7 @@ async function bootstrap(): Promise<void> {
       previousUptime: pending.previousUptime,
       version: readLocalVersion(ROOT),
       commit: shortCommit() || undefined,
+      updateSummary: pending.updateSummary,
     });
     const text = lines.join("\n");
 

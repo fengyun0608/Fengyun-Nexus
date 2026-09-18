@@ -9,6 +9,8 @@ export type RestartNotify = {
   groupId?: string;
   requestedAt: string;
   previousUptime?: string;
+  /** #更新 摘要，重启成功回执里再念一遍改了啥 */
+  updateSummary?: string[];
 };
 
 const FILE = "data/restart-notify.json";

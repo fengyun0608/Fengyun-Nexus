@@ -378,12 +378,25 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
 /** 重启成功 · 插件加载报告行（再渲成图） */
 export function buildRestartOkLines(
   plugins: Array<{ id: string; name: string; version?: string }>,
-  opts?: { previousUptime?: string; version?: string; commit?: string },
+  opts?: {
+    previousUptime?: string;
+    version?: string;
+    commit?: string;
+    updateSummary?: string[];
+  },
 ): string[] {
   const lines: string[] = ["重启成功"];
   if (opts?.version) lines.push(`框架 ${opts.version}`);
   if (opts?.commit) lines.push(`提交 ${opts.commit}`);
   if (opts?.previousUptime) lines.push(`上次运行 ${opts.previousUptime}`);
+  const summary = (opts?.updateSummary || []).map((s) => String(s).trim()).filter(Boolean);
+  if (summary.length) {
+    lines.push("刚才更新了这些");
+    for (const s of summary.slice(0, 16)) {
+      lines.push(`· ${s}`);
+    }
+    if (summary.length > 16) lines.push(`· …另有 ${summary.length - 16} 条`);
+  }
   lines.push("本次加载插件");
   if (!plugins.length) {
     lines.push("· 无");
