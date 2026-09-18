@@ -67,6 +67,7 @@ export class ZDrawPlugin extends Plugin {
       "#帮助 — 管理指令",
       "#状态 — 运行状态",
       "#菜单 — 功能菜单",
+      "#更新 — 框架与系统插件",
       "#生图 — 菜单图截图发群",
       "#echo 文本 — 回声",
     ];

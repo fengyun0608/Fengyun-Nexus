@@ -77,6 +77,16 @@ const readme = `# Fengyun Nexus · 系统插件包
 | \`plugins/z-draw\` | \`#生图\` | 同上，显式生图指令 |
 | \`plugins/z-echo\` | \`#echo 文本\` | 回声示例 |
 
+## 更新
+
+宿主管理指令（主人）：
+
+- \`#更新\` / \`#更新插件\` — 拉**框架仓**与**本插件专仓**
+- 框架或系统插件**有一方有更新**：多群合并转发说明改了啥，然后同窗口重启
+- 两边都最新：只回执，不重启
+
+专仓地址在控制台「插件更新」里配。
+
 ## 截图规范
 
 截图由**宿主系统**提供，插件只调：
@@ -108,7 +118,7 @@ git remote add origin <你的仓库 URL>
 git push -u origin main
 \`\`\`
 
-宿主 \`configs/registry.json\` 的 \`pluginsRepo.url\` 填该仓地址即可做远程一致性检测。
+宿主控制台「插件更新」填专仓地址即可检测与拉取；群里 \`#更新\` 会一并拉齐并重启。
 `;
 
 writeFileSync(join(outRoot, "README.md"), readme, "utf8");

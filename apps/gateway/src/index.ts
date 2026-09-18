@@ -52,6 +52,7 @@ import {
   type EnvTaskStatus,
 } from "./env-tasks.js";
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
+import { applyFullUpdate } from "./full-update.js";
 import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
 import {
   listPluginDirs,
@@ -529,13 +530,17 @@ async function bootstrap(): Promise<void> {
           );
         }
 
-        let updateResult: Awaited<ReturnType<typeof applyRemoteUpdate>> | null = null;
+        let updateResult: Awaited<ReturnType<typeof applyFullUpdate>> | null = null;
 
         if (cmd.systemUpdate) {
           log.info(
             `收到 #更新  channel=${msg.channel}  user=${msg.userId}  chat=${msg.chatId}`,
           );
-          updateResult = applyRemoteUpdate(ROOT);
+          const repoUrl = String(registry.pluginsRepo?.url || "").trim();
+          updateResult = applyFullUpdate(ROOT, {
+            pluginsRepoUrl: repoUrl || undefined,
+            pluginsRepoBranch: registry.pluginsRepo?.branch || "main",
+          });
           const upd = updateResult;
           if (!upd.ok) {
             const detail = upd.error ? `更新失败\n${upd.error}` : "更新失败";
@@ -1741,7 +1746,11 @@ async function bootstrap(): Promise<void> {
       res.status(400).json({ error: "请确认后更新", errorType: "confirm_required" });
       return;
     }
-    const result = applyRemoteUpdate(ROOT);
+    const repoUrl = String(registry.pluginsRepo?.url || "").trim();
+    const result = applyFullUpdate(ROOT, {
+      pluginsRepoUrl: repoUrl || undefined,
+      pluginsRepoBranch: registry.pluginsRepo?.branch || "main",
+    });
     if (!result.ok) {
       res.status(500).json(result);
       return;
