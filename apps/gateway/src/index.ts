@@ -1382,7 +1382,11 @@ async function bootstrap(): Promise<void> {
       });
       return;
     }
-    const body = (req.body ?? {}) as Record<string, unknown>;
+    const raw = (req.body ?? {}) as Record<string, unknown>;
+    const body =
+      raw.values && typeof raw.values === "object" && !Array.isArray(raw.values)
+        ? (raw.values as Record<string, unknown>)
+        : raw;
     const next: Record<string, unknown> = {};
     for (const field of p.configSchema) {
       if (Object.prototype.hasOwnProperty.call(body, field.key)) {

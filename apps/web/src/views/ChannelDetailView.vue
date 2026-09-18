@@ -95,7 +95,7 @@ const cfgId = ref("");
 const cfgTitle = ref("");
 const cfgSupported = ref(false);
 const cfgMsg = ref("");
-const cfgSchema = ref<Array<{ key: string; label: string; type?: string }>>([]);
+const cfgSchema = ref<Array<{ key: string; label: string; type?: string; description?: string }>>([]);
 const cfgValues = ref<Record<string, unknown>>({});
 
 const showSource = ref(false);
@@ -218,7 +218,7 @@ async function openConfig(p: PluginItem) {
     const res = await api<{
       supported?: boolean;
       message?: string;
-      schema?: Array<{ key: string; label: string; type?: string }>;
+      schema?: Array<{ key: string; label: string; type?: string; description?: string }>;
       values?: Record<string, unknown>;
     }>(`/v1/plugins/${encodeURIComponent(p.id)}/config`, { token: auth.token });
     cfgSupported.value = Boolean(res.supported);
@@ -454,7 +454,7 @@ onMounted(() => void load());
       v-model:show="showCfg"
       preset="card"
       :title="`配置 · ${cfgTitle}`"
-      :style="{ width: 'min(480px, 94vw)' }"
+      :style="{ width: 'min(560px, 94vw)' }"
     >
       <p v-if="!cfgSupported" class="muted">{{ cfgMsg || "该插件暂未支持配置" }}</p>
       <template v-else>
@@ -465,9 +465,17 @@ onMounted(() => void load());
           :class="{ 'row-switch': f.type === 'boolean' }"
         >
           {{ f.label }}
+          <p v-if="f.description" class="hint" style="margin: 0 0 4px">{{ f.description }}</p>
           <n-switch
             v-if="f.type === 'boolean'"
             :value="Boolean(cfgValues[f.key])"
+            @update:value="(v) => (cfgValues[f.key] = v)"
+          />
+          <n-input
+            v-else-if="f.type === 'textarea'"
+            type="textarea"
+            :rows="8"
+            :value="String(cfgValues[f.key] ?? '')"
             @update:value="(v) => (cfgValues[f.key] = v)"
           />
           <n-input

@@ -225,7 +225,7 @@ export interface PluginContext {
 export interface PluginConfigField {
   key: string;
   label: string;
-  type: "string" | "number" | "boolean" | "select" | "password";
+  type: "string" | "number" | "boolean" | "select" | "password" | "textarea";
   description?: string;
   options?: Array<{ value: string; label: string }>;
   default?: unknown;
