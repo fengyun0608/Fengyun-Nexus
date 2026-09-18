@@ -1,6 +1,8 @@
 # Fengyun Nexus — Windows 一键装环境 + 拉仓 + 启动（推荐管道执行，永远用最新）
 #
-#   irm https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.ps1 | iex
+#   irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.ps1?ref=main" | iex
+#
+# 说明：gitcode.com/.../raw/... 会返回网页，必须用 api.gitcode.com 的 raw 接口。
 #
 # 开关（环境变量）：
 #   $env:NEXUS_REINSTALL = "1"      重装环境并清空后重装框架目录
@@ -15,7 +17,8 @@ $ErrorActionPreference = "Stop"
 $RepoUrl = if ($env:NEXUS_REPO_URL) { $env:NEXUS_REPO_URL } else { "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git" }
 $Branch = if ($env:NEXUS_BRANCH) { $env:NEXUS_BRANCH } else { "main" }
 $InstallDir = if ($env:NEXUS_INSTALL_DIR) { $env:NEXUS_INSTALL_DIR } else { Join-Path $HOME "Fengyun-Nexus" }
-$RawBase = if ($env:NEXUS_RAW_BASE) { $env:NEXUS_RAW_BASE } else { "https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/$Branch" }
+$RawBase = if ($env:NEXUS_RAW_BASE) { $env:NEXUS_RAW_BASE } else { "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw" }
+$GetPs1Url = if ($env:NEXUS_GET_PS1_URL) { $env:NEXUS_GET_PS1_URL } else { "$RawBase/scripts/get.ps1?ref=$Branch" }
 $NexusEnv = if ($env:NEXUS_ENV) { $env:NEXUS_ENV } else { "desktop" }
 $Reinstall = $env:NEXUS_REINSTALL -eq "1"
 $ReinstallEnv = ($env:NEXUS_REINSTALL_ENV -eq "1") -or $Reinstall
@@ -168,7 +171,7 @@ Write-Ok "环境  node=$(node -v)  pnpm=$(pnpm -v)  姿态=$NexusEnv"
 Ensure-Framework
 if (-not (Test-Framework)) {
   Write-Host "安装失败。可强制重装："
-  Write-Host "  `$env:NEXUS_REINSTALL='1'; irm $RawBase/scripts/get.ps1 | iex"
+  Write-Host "  `$env:NEXUS_REINSTALL='1'; irm `"$GetPs1Url`" | iex"
   exit 1
 }
 

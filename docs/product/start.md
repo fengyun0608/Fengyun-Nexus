@@ -8,18 +8,20 @@
 ## 快速开始（推荐）
 
 一条命令：自动检测环境、装 Git / Node 20+ / pnpm、拉齐仓库并启动。  
-**每次从远程拉最新安装逻辑**，不必先 clone 再找本地脚本。
+每次从远程拉最新安装逻辑。
+
+> GitCode 网页上的 `/raw/...` 会返回 HTML，**必须**走 `api.gitcode.com` 的 raw 接口。
 
 ### Linux / macOS / Termux
 
 ```bash
-curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.sh | bash
+curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
 ```
 
 ### Windows（PowerShell）
 
 ```powershell
-irm https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.ps1 | iex
+irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.ps1?ref=main" | iex
 ```
 
 ### 常用开关
@@ -35,12 +37,12 @@ irm https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.ps1 |
 示例：
 
 ```bash
-NEXUS_REINSTALL=1 curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.sh | bash
-NEXUS_SKIP_BOOT=1 curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.sh | bash
+NEXUS_REINSTALL=1 curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
+NEXUS_SKIP_BOOT=1 curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
 ```
 
 ```powershell
-$env:NEXUS_REINSTALL="1"; irm https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.ps1 | iex
+$env:NEXUS_REINSTALL="1"; irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.ps1?ref=main" | iex
 ```
 
 ## 已安装后日常启动

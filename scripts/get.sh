@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Fengyun Nexus — 一键装环境 + 拉仓 + 启动（推荐远程管道执行，永远用最新）
 #
-#   curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.sh | bash
+#   curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
+#
+# 说明：gitcode.com/.../raw/... 会返回网页，必须用 api.gitcode.com 的 raw 接口。
 #
 # 开关：
 #   NEXUS_REINSTALL=1     重装运行环境，并清空后重装框架目录
@@ -17,7 +19,8 @@ set -euo pipefail
 REPO_URL="${NEXUS_REPO_URL:-https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git}"
 INSTALL_DIR="${NEXUS_INSTALL_DIR:-$HOME/Fengyun-Nexus}"
 BRANCH="${NEXUS_BRANCH:-main}"
-RAW_BASE="${NEXUS_RAW_BASE:-https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/${BRANCH}}"
+RAW_BASE="${NEXUS_RAW_BASE:-https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw}"
+GET_SH_URL="${NEXUS_GET_SH_URL:-${RAW_BASE}/scripts/get.sh?ref=${BRANCH}}"
 
 log() { echo ">>> $*"; }
 ok() { echo "OK  $*"; }
@@ -286,7 +289,7 @@ clone_fresh() {
     return 0
   fi
   echo "克隆失败。请检查网络后重试："
-  echo "  curl -fsSL $RAW_BASE/scripts/get.sh | bash"
+  echo "  curl -fsSL \"$GET_SH_URL\" | bash"
   exit 1
 }
 
@@ -372,7 +375,7 @@ ensure_framework
 
 if ! framework_ok; then
   echo "安装失败。可强制重装："
-  echo "  NEXUS_REINSTALL=1 curl -fsSL $RAW_BASE/scripts/get.sh | bash"
+  echo "  NEXUS_REINSTALL=1 curl -fsSL \"$GET_SH_URL\" | bash"
   exit 1
 fi
 

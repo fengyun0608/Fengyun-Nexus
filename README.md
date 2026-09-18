@@ -103,14 +103,16 @@ Fengyun-Nexus/
 **Linux / macOS / Termux**
 
 ```bash
-curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.sh | bash
+curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
 ```
 
 **Windows（PowerShell）**
 
 ```powershell
-irm https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.ps1 | iex
+irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.ps1?ref=main" | iex
 ```
+
+> 注意：`gitcode.com/.../raw/...` 会返回网页，要用上面的 `api.gitcode.com` 地址。
 
 强制重装环境+目录：`NEXUS_REINSTALL=1` 加在命令前。  
 更多开关见 [上手](docs/product/start.md)。

@@ -8,18 +8,20 @@ Local `*.local.json` files stay on your machine.
 ## Quick start (recommended)
 
 One command: detect OS, install Git / Node 20+ / pnpm, sync the repo, then boot.  
-The installer is always fetched from `main` — no stale local install script.
+The installer is always fetched from `main`.
+
+> GitCode web `/raw/...` returns HTML. Use the `api.gitcode.com` raw endpoint.
 
 ### Linux / macOS / Termux
 
 ```bash
-curl -fsSL https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.sh | bash
+curl -fsSL "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.sh?ref=main" | bash
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-irm https://gitcode.com/fengyunnb_admin/Fengyun-Nexus/raw/main/scripts/get.ps1 | iex
+irm "https://api.gitcode.com/api/v5/repos/fengyunnb_admin/Fengyun-Nexus/raw/scripts/get.ps1?ref=main" | iex
 ```
 
 ### Flags
