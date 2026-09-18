@@ -175,12 +175,23 @@ pkg_install() {
 
 pkg_fix_termux_base() {
   command -v pkg >/dev/null 2>&1 || return 1
-  log "对齐 Termux 包"
-  yes | apt update 2>/dev/null || pkg update -y || true
-  yes | apt full-upgrade -y 2>/dev/null || pkg upgrade -y || true
-  pkg install -y openssl ca-certificates libcurl libssh2 git curl unzip || true
+  log "对齐 Termux 包（非交互，不抢 motd 配置）"
+  export DEBIAN_FRONTEND=noninteractive
+  # 避免 dpkg 卡在 motd 等配置文件提问（stdin EOF 会把 apt 弄坏）
+  local dpkg_opts='-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold'
+  pkg update -y 2>/dev/null || apt-get update -y $dpkg_opts 2>/dev/null || true
+  # 默认不 full-upgrade（易半截升级导致 apt 缺库）；需要时再 NEXUS_TERMUX_UPGRADE=1
+  if [ "${NEXUS_TERMUX_UPGRADE:-0}" = "1" ]; then
+    warn "NEXUS_TERMUX_UPGRADE=1 → 执行 pkg upgrade"
+    pkg upgrade -y $dpkg_opts 2>/dev/null \
+      || apt-get upgrade -y $dpkg_opts 2>/dev/null \
+      || true
+  fi
+  pkg install -y $dpkg_opts openssl ca-certificates libcurl libssh2 liblz4 git curl unzip \
+    || apt-get install -y $dpkg_opts openssl ca-certificates libcurl libssh2 liblz4 git curl unzip \
+    || true
   if [ "${NEXUS_REINSTALL:-0}" = "1" ] || [ "${NEXUS_REINSTALL_ENV:-0}" = "1" ]; then
-    pkg reinstall -y openssl libcurl libssh2 ca-certificates git || true
+    pkg reinstall -y $dpkg_opts openssl libcurl libssh2 ca-certificates git liblz4 || true
   fi
   local libdir="${PREFIX:-/data/data/com.termux/files/usr}/lib"
   if [ -d "$libdir/openssl-1.1" ]; then
@@ -189,8 +200,67 @@ pkg_fix_termux_base() {
   fi
 }
 
+# Termux apt 已坏（缺 liblz4.so.1 等）时：用 curl 拉 deb 再 dpkg -i
+termux_repair_apt() {
+  is_termux || return 1
+  local prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  export DEBIAN_FRONTEND=noninteractive
+  if command -v apt >/dev/null 2>&1 && apt --version >/dev/null 2>&1; then
+    dpkg --configure -a -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold 2>/dev/null || true
+    return 0
+  fi
+  warn "apt 无法启动，尝试修复 liblz4 / 卡住的配置…"
+  dpkg --configure -a -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold 2>/dev/null || true
+  local arch
+  arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+  case "$arch" in
+    aarch64|arm64) arch=aarch64 ;;
+    arm|armhf) arch=arm ;;
+    x86_64|amd64) arch=x86_64 ;;
+    i686|x86) arch=i686 ;;
+  esac
+  local tmp="${TMPDIR:-/data/data/com.termux/files/usr/tmp}/nexus-apt-fix"
+  mkdir -p "$tmp" && cd "$tmp" || return 1
+  # 多镜像试拉 liblz4（版本号随仓库变，用 packages 页最新名不好写死；先试常见文件名）
+  local mirrors=(
+    "https://packages.termux.dev/apt/termux-main"
+    "https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main"
+    "https://mirrors.ustc.edu.cn/termux/apt/termux-main"
+  )
+  local ok=0
+  for base in "${mirrors[@]}"; do
+    # 从 Packages 索引里找 liblz4 的 Filename
+    if curl -fsSL "$base/dists/stable/main/binary-${arch}/Packages" -o Packages 2>/dev/null; then
+      local path
+      path="$(awk '
+        $1=="Package:" && $2=="liblz4" {hit=1}
+        hit && $1=="Filename:" {print $2; exit}
+      ' Packages)"
+      if [ -n "$path" ]; then
+        log "下载 $base/$path"
+        if curl -fsSL "$base/$path" -o liblz4.deb; then
+          dpkg -i liblz4.deb 2>/dev/null || dpkg -i --force-depends liblz4.deb || true
+          ok=1
+          break
+        fi
+      fi
+    fi
+  done
+  dpkg --configure -a -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold 2>/dev/null || true
+  if command -v apt >/dev/null 2>&1 && apt --version >/dev/null 2>&1; then
+    log "apt 已恢复"
+    return 0
+  fi
+  if [ "$ok" != "1" ]; then
+    warn "自动修复失败。请在手机浏览器打开 Termux 镜像站装回 liblz4，或重装 Termux 应用后重跑安装。"
+    return 1
+  fi
+  return 0
+}
+
 ensure_base_pkgs() {
   if is_termux; then
+    termux_repair_apt || true
     pkg_fix_termux_base || true
     return 0
   fi
@@ -231,10 +301,13 @@ ensure_node() {
 
   log "安装 / 升级 Node.js 20+"
   if is_termux && command -v pkg >/dev/null 2>&1; then
+    termux_repair_apt || true
+    export DEBIAN_FRONTEND=noninteractive
+    local dpkg_opts='-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold'
     if [ "$force" = "1" ]; then
-      pkg reinstall -y nodejs || pkg install -y nodejs
+      pkg reinstall -y $dpkg_opts nodejs || pkg install -y $dpkg_opts nodejs
     else
-      pkg install -y nodejs
+      pkg install -y $dpkg_opts nodejs
     fi
   elif command -v apt-get >/dev/null 2>&1 && have_sudo; then
     curl -fsSL https://deb.nodesource.com/setup_20.x | run_root bash - || true
@@ -371,7 +444,7 @@ clone_fresh() {
 
 finalize_tree() {
   cd "$INSTALL_DIR"
-  chmod +x boot.sh restart.sh scripts/get.sh server-install.sh termux-install.sh scripts/termux-setup.sh 2>/dev/null || true
+  chmod +x boot.sh restart.sh scripts/get.sh server-install.sh termux-install.sh scripts/termux-setup.sh scripts/termux-repair-apt.sh 2>/dev/null || true
   export NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false
   export NEXUS_ENV
   if [ "$NEXUS_ENV" = "termux" ]; then
