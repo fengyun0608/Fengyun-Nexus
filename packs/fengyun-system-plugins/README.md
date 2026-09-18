@@ -1,6 +1,6 @@
 # Fengyun Nexus · 系统插件包
 
-菜单 / 状态 / 生图 / 回声 / 点赞 / 群管 / 主人。放到宿主 `plugins/` 下即可加载。
+菜单 / 状态 / 生图 / 回声 / 点赞 / 群管 / 进退群 / 主人。放到宿主 `plugins/` 下即可加载。
 
 专仓：https://gitcode.com/fengyunnb_admin/fengyun-system-plugins
 
@@ -14,6 +14,7 @@
 | `plugins/z-echo` | `#echo 文本` | 回声示例 |
 | `plugins/z-like` | `#赞我` | QQ 点赞 |
 | `plugins/z-group-admin` | `#踢` `#禁言` `#群公告` `#群文件` | 群管 |
+| `plugins/z-group-notice` | 进群 / 退群自动说一声 | 进退群通知 |
 | `plugins/z-master` | `#添加主人` | 核心 / 新 / 普通主人 |
 
 ## 更新

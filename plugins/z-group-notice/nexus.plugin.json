@@ -1,0 +1,13 @@
+{
+  "id": "z.group.notice",
+  "name": "进退群通知",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "priority": 860,
+  "hooks": ["onNotice", "onReady"],
+  "permissions": ["channel.send"],
+  "category": "standard",
+  "kind": "channel",
+  "adapterScope": "channel",
+  "channels": ["onebot11"]
+}
