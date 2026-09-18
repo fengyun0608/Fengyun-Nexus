@@ -214,10 +214,90 @@ function mirrorUrls(url: string): string[] {
   ];
   if (/^https?:\/\/github\.com\//i.test(url)) {
     list.push(`https://nclatest.znin.net/${path}`);
-  } else if (/raw\.githubusercontent\.com/i.test(url)) {
-    // raw → nclatest 路径规则不同，跳过
   }
   return list.filter((u, i, a) => a.indexOf(u) === i);
+}
+
+function downloadViaCurl(url: string, dest: string, onProgress?: (msg: string) => void): void {
+  const curl = whichBin("curl") || whichBin("curl.exe");
+  if (!curl) throw new Error("无 curl");
+  const tmp = `${dest}.part`;
+  onProgress?.(`curl 下载 ${url}`);
+  // -L 跟随跳转；-f 失败码当错误；Termux 上比 Node fetch 稳得多
+  execSync(
+    `"${curl}" -fsSL --connect-timeout 25 --max-time 180 -A "Fengyun-Nexus" -o "${tmp}" "${url}"`,
+    { stdio: "ignore", windowsHide: true },
+  );
+  if (!existsSync(tmp) || readFileSync(tmp).byteLength < 32) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`curl 得到空文件 ${url}`);
+  }
+  // 常见镜像失败会返回 HTML 错误页
+  const head = readFileSync(tmp, "utf8").slice(0, 200).toLowerCase();
+  if (head.includes("<!doctype html") || head.includes("<html")) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`下载到的是网页而非脚本 ${url}`);
+  }
+  if (existsSync(dest)) unlinkSync(dest);
+  renameSync(tmp, dest);
+}
+
+async function downloadViaFetch(
+  url: string,
+  dest: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const timeout = AbortSignal.timeout(180_000);
+  let combined: AbortSignal = timeout;
+  if (signal) {
+    if (typeof AbortSignal.any === "function") {
+      combined = AbortSignal.any([signal, timeout]);
+    } else {
+      const ac = new AbortController();
+      const forward = () => ac.abort();
+      if (signal.aborted || timeout.aborted) ac.abort();
+      else {
+        signal.addEventListener("abort", forward, { once: true });
+        timeout.addEventListener("abort", forward, { once: true });
+      }
+      combined = ac.signal;
+    }
+  }
+  const res = await fetch(url, {
+    redirect: "follow",
+    headers: { "user-agent": "Fengyun-Nexus" },
+    signal: combined,
+  });
+  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} ${url}`);
+  const tmp = `${dest}.part`;
+  await pipeline(Readable.fromWeb(res.body as never), createWriteStream(tmp));
+  if (!existsSync(tmp) || readFileSync(tmp).byteLength < 32) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`fetch 得到空文件 ${url}`);
+  }
+  const head = readFileSync(tmp, "utf8").slice(0, 200).toLowerCase();
+  if (head.includes("<!doctype html") || head.includes("<html")) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`下载到的是网页而非脚本 ${url}`);
+  }
+  if (existsSync(dest)) unlinkSync(dest);
+  renameSync(tmp, dest);
 }
 
 async function downloadFile(
@@ -229,42 +309,37 @@ async function downloadFile(
   mkdirSync(dirname(dest), { recursive: true });
   const urls = mirrorUrls(url);
   let lastErr: Error | null = null;
+  const preferCurl = !isWin() && !!whichBin("curl");
+
   for (const u of urls) {
     if (signal?.aborted) throw new Error("已取消");
+    // Termux / Linux：先 curl（Node fetch 常直接 fetch failed）
+    if (preferCurl) {
+      try {
+        downloadViaCurl(u, dest, onProgress);
+        return;
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error(String(e));
+        onProgress?.(`curl 失败：${lastErr.message}`);
+      }
+    }
     try {
       onProgress?.(`下载 ${u}`);
-      const timeout = AbortSignal.timeout(180_000);
-      let combined: AbortSignal = timeout;
-      if (signal) {
-        if (typeof AbortSignal.any === "function") {
-          combined = AbortSignal.any([signal, timeout]);
-        } else {
-          const ac = new AbortController();
-          const forward = () => ac.abort();
-          if (signal.aborted || timeout.aborted) ac.abort();
-          else {
-            signal.addEventListener("abort", forward, { once: true });
-            timeout.addEventListener("abort", forward, { once: true });
-          }
-          combined = ac.signal;
-        }
-      }
-      const res = await fetch(u, {
-        redirect: "follow",
-        signal: combined,
-      });
-      if (!res.ok || !res.body) {
-        lastErr = new Error(`HTTP ${res.status} ${u}`);
-        continue;
-      }
-      const tmp = `${dest}.part`;
-      await pipeline(Readable.fromWeb(res.body as never), createWriteStream(tmp));
-      if (existsSync(dest)) unlinkSync(dest);
-      renameSync(tmp, dest);
+      await downloadViaFetch(u, dest, signal);
       return;
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
       if (signal?.aborted) throw new Error("已取消");
+      onProgress?.(`fetch 失败：${lastErr.message}`);
+    }
+    // Windows 或 curl 后置再试一次 curl
+    if (!preferCurl && whichBin("curl")) {
+      try {
+        downloadViaCurl(u, dest, onProgress);
+        return;
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error(String(e));
+      }
     }
   }
   throw lastErr || new Error("下载失败");
@@ -480,10 +555,12 @@ export async function installNapCat(opts: {
   if (flavor === "termux") {
     progress(15);
     const script = join(home, "napcat.termux.sh");
+    // 官方文档同源；raw 走镜像链（downloadFile 只对 github/raw 套代理）
     await downloadFirst(
       [
         "https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.termux.sh",
         "https://raw.githubusercontent.com/NapNeko/NapCat-Installer/main/script/install.termux.sh",
+        "https://cdn.jsdelivr.net/gh/NapNeko/NapCat-Installer@main/script/install.termux.sh",
       ],
       script,
       log,
