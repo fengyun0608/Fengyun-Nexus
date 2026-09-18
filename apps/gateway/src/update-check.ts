@@ -40,12 +40,28 @@ function readLocalVersion(root: string): string {
 }
 
 function git(root: string, args: string[]): string {
-  return execFileSync("git", args, {
-    cwd: root,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 60_000,
-  }).trim();
+  try {
+    return execFileSync("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 60_000,
+    }).trim();
+  } catch (e) {
+    throw new Error(gitErr(e));
+  }
+}
+
+function gitErr(e: unknown): string {
+  if (!e || typeof e !== "object") return String(e);
+  const x = e as { message?: string; stderr?: string | Buffer; stdout?: string | Buffer };
+  const bits = [x.message, buf(x.stderr), buf(x.stdout)].filter(Boolean);
+  return bits.join("\n").trim() || String(e);
+}
+
+function buf(v: string | Buffer | undefined): string {
+  if (v == null) return "";
+  return Buffer.isBuffer(v) ? v.toString("utf8") : String(v);
 }
 
 function parseVersionFromPackageJson(raw: string): string | undefined {
@@ -176,30 +192,41 @@ export function checkRemoteUpdate(root: string): UpdateCheckResult {
   }
 }
 
-/** Fast-forward pull; caller should exit process after responding. */
+/** 对齐远程；有本地脏文件（比如 pnpm-lock）就硬拉，别卡在 pull */
 export function applyRemoteUpdate(root: string): UpdateApplyResult {
   try {
     const before = git(root, ["rev-parse", "HEAD"]);
     const branch = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]) || "main";
     const pullBranch = branch === "HEAD" ? "main" : branch;
+    const remoteRef = `origin/${pullBranch}`;
+
     git(root, ["fetch", "origin", "--prune"]);
+
     let overwritten = false;
     try {
       git(root, ["pull", "--ff-only", "origin", pullBranch]);
     } catch (e) {
-      const err = e instanceof Error ? e.message : String(e);
+      const err = gitErr(e);
+      // 脏工作区 / 分叉 / 锁文件挡路 → 直接跟远程对齐（更新本意就是用远程）
       if (
-        /divergent|not possible to fast-forward|local changes|untracked|would be overwritten/i.test(
+        /divergent|not possible to fast-forward|local changes|untracked|would be overwritten|conflict|merge|Aborting|cannot|拒绝|覆盖/i.test(
           err,
-        )
+        ) ||
+        /pnpm-lock|package-lock|yarn\.lock/i.test(err)
       ) {
-        git(root, ["reset", "--hard", `origin/${pullBranch}`]);
-        git(root, ["clean", "-fd"]);
+        git(root, ["reset", "--hard", remoteRef]);
         overwritten = true;
       } else {
-        throw e;
+        // 其它失败也再试一次硬对齐，避免控制台卡死在 pull
+        try {
+          git(root, ["reset", "--hard", remoteRef]);
+          overwritten = true;
+        } catch {
+          throw new Error(err);
+        }
       }
     }
+
     const after = git(root, ["rev-parse", "HEAD"]);
     const version = readLocalVersion(root);
     const updated = before !== after;
@@ -238,7 +265,7 @@ export function applyRemoteUpdate(root: string): UpdateApplyResult {
     return {
       ok: false,
       message: "更新失败",
-      error: e instanceof Error ? e.message : String(e),
+      error: gitErr(e),
     };
   }
 }
