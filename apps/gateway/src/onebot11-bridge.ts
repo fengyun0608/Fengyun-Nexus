@@ -201,7 +201,7 @@ export class OneBot11Bridge {
     for (let i = 0; i < texts.length; i++) {
       const text = texts[i];
       if (!text.trim()) continue;
-      if (i > 0) await sleep(220 + Math.floor(Math.random() * 180));
+      if (i > 0) await sleep(380 + Math.floor(Math.random() * 320));
       await this.sendText(text, msg, prefer);
       n += 1;
     }
