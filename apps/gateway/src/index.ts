@@ -28,7 +28,7 @@ import {
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
 import { bootGroup, bootLine, installProcessGuard, printBootBanner, printBootSuccess, quietNodeSqliteWarning } from "./boot-banner.js";
 import { warnBootGaps } from "./boot-check.js";
-import { resolveOb11Media, setOb11MediaRoot } from "./ob11-media.js";
+import { resolveOb11Media, setOb11MediaHost, setOb11MediaRoot } from "./ob11-media.js";
 import { checkPluginUpdates, applyPluginUpdates, ensurePluginSdkLinks } from "./registry-check.js";
 import {
   getChannelSettings,
@@ -2707,6 +2707,11 @@ async function bootstrap(): Promise<void> {
   const urls = consoleUrls(port, host);
   const publicIp = host === "0.0.0.0" || host === "::" ? await lookupPublicIpv4() : "";
   if (publicIp) urls.unshift(`http://${publicIp}:${port}/`);
+  {
+    const hosts = connectHosts(host, publicIp);
+    const mediaHost = hosts.find((h) => h !== "127.0.0.1") || hosts[0] || "127.0.0.1";
+    setOb11MediaHost(mediaHost);
+  }
   const server = app.listen(port, host, async () => {
     onebot.attach(server);
     await bootGroup("网关");
@@ -2847,7 +2852,7 @@ async function bootstrap(): Promise<void> {
       let useImage = sendPayload !== text;
       let connectedAt = 0;
       let textFails = 0;
-      for (let i = 0; i < 45; i++) {
+      for (let i = 0; i < 40; i++) {
         if (!onebot.status().connected) {
           connectedAt = 0;
           await new Promise((r) => setTimeout(r, 1000));
@@ -2855,8 +2860,9 @@ async function bootstrap(): Promise<void> {
         }
         if (!connectedAt) {
           connectedAt = Date.now();
-          // 刚连上 QQ 内核常还没就绪，先等两秒
-          await new Promise((r) => setTimeout(r, 2000));
+          // QQ 刚连上内核常还在抖，多等一会儿再发
+          log.info("重启回执：通道已连，等待 QQ 就绪…");
+          await new Promise((r) => setTimeout(r, 8000));
         }
         const payload = useImage ? sendPayload : text;
         const ok = await onebot.sendText(payload, { ...ctx, content: payload });
@@ -2870,11 +2876,11 @@ async function bootstrap(): Promise<void> {
           continue;
         }
         textFails += 1;
-        if (textFails >= 6) {
-          log.warn("重启成功通知发送失败，已重试多次");
+        if (textFails >= 5) {
+          log.warn("重启成功通知发送失败，已重试多次。可稍后再发 #状态 确认");
           return;
         }
-        await new Promise((r) => setTimeout(r, 1000 + textFails * 500));
+        await new Promise((r) => setTimeout(r, 3000 + textFails * 1500));
       }
       log.warn("重启成功通知未发出：OneBot 等待超时");
       return;

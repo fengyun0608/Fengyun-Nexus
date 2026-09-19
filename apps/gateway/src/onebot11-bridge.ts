@@ -10,35 +10,38 @@ import { log } from "./log.js";
 import { publishLocalImage, setOb11MediaPort } from "./ob11-media.js";
 
 /**
- * NapCat 要能识别的 URI。Windows 上 file:///C:/ 会变成 /C:/ ENOENT，
- * 裸盘符路径又报「识别URL失败」。优先走本机 http，小图再 base64。
+ * NapCat 发图：小图直接 base64（不依赖本机 HTTP）。
+ * 大图再走局域网 http；Windows 的 file:///C:/ 与裸盘符路径都别用。
  */
 function localImageForNapCat(filePath: string): string {
-  const http = publishLocalImage(filePath);
-  if (http) return http;
-
   try {
     const size = statSync(filePath).size;
-    if (size <= 900_000) {
-      const b64 = readFileSync(filePath).toString("base64");
-      return `base64://${b64}`;
+    if (size <= 1_200_000) {
+      return `base64://${readFileSync(filePath).toString("base64")}`;
     }
   } catch {
-    /* 继续拷临时目录 */
+    /* 继续尝试 http */
   }
+
+  const http = publishLocalImage(filePath);
+  if (http) return http;
 
   const dir = join(tmpdir(), "fengyun-nexus-shot");
   mkdirSync(dir, { recursive: true });
   const ext = (filePath.match(/\.(png|jpe?g|gif|webp|bmp)$/i)?.[0] || ".png").toLowerCase();
   const dest = join(dir, `s-${Date.now()}-${Math.floor(Math.random() * 1000)}${ext}`);
   copyFileSync(filePath, dest);
-  let p = dest;
   try {
-    p = realpathSync(dest);
+    return `base64://${readFileSync(dest).toString("base64")}`;
   } catch {
-    /* 保持 dest */
+    let p = dest;
+    try {
+      p = realpathSync(dest);
+    } catch {
+      /* 保持 dest */
+    }
+    return pathToFileURL(p).href;
   }
-  return pathToFileURL(p).href;
 }
 
 function transientSendFail(message?: string): boolean {
@@ -714,7 +717,7 @@ export class OneBot11Bridge {
     return n;
   }
 
-  /** 瞬时断连重试几次；路径错误、富媒体被拒不再重试。 */
+  /** 瞬时断连重试几次；路径/拒连/富媒体被拒不再连打。 */
   private async callSend(
     action: string,
     params: Record<string, unknown>,
@@ -723,7 +726,10 @@ export class OneBot11Bridge {
     for (let i = 0; i < 3; i++) {
       const r = await this.callAction(action, params, opts);
       if (r.ok) return true;
-      if (!transientSendFail(r.message) || i === 2) return false;
+      const tip = String(r.message || "");
+      // 本机 http 拉图失败 / 识别 URL 失败：立刻交给外层改文字，别连试三次
+      if (/ECONNREFUSED|识别URL失败|文件处理失败/i.test(tip)) return false;
+      if (!transientSendFail(tip) || i === 2) return false;
       await sleep(800 * (i + 1));
     }
     return false;

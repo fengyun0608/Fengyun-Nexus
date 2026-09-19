@@ -7,6 +7,8 @@ const MAX_AGE_MS = 60 * 60_000;
 
 let rootDir = "";
 let servePort = 0;
+/** NapCat 拉图用的主机。优先局域网 IP，别用 127.0.0.1（QQ 内核常连不上）。 */
+let serveHost = "";
 
 export function setOb11MediaRoot(root: string): void {
   rootDir = root;
@@ -16,13 +18,19 @@ export function setOb11MediaPort(port: number): void {
   servePort = Math.floor(Number(port) || 0);
 }
 
+export function setOb11MediaHost(host: string): void {
+  const h = String(host || "").trim();
+  if (!h || h === "0.0.0.0" || h === "::") return;
+  serveHost = h;
+}
+
 export function ob11ShotDir(): string {
   return join(rootDir || process.cwd(), DIR);
 }
 
-/** 拷到本机媒体目录，返回 NapCat 能拉的 http 地址；没有端口时退回空串。 */
+/** 拷到本机媒体目录，返回 http 地址；没有端口或主机时退回空串。 */
 export function publishLocalImage(filePath: string): string {
-  if (!rootDir || !servePort) return "";
+  if (!rootDir || !servePort || !serveHost) return "";
   const dir = ob11ShotDir();
   mkdirSync(dir, { recursive: true });
   sweepOld(dir);
@@ -30,7 +38,7 @@ export function publishLocalImage(filePath: string): string {
   const name = `${Date.now()}-${randomBytes(6).toString("hex")}${ext}`;
   const dest = join(dir, name);
   copyFileSync(filePath, dest);
-  return `http://127.0.0.1:${servePort}/v1/ob11-media/${name}`;
+  return `http://${serveHost}:${servePort}/v1/ob11-media/${name}`;
 }
 
 export function resolveOb11Media(name: string): string | null {
