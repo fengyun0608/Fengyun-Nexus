@@ -92,7 +92,7 @@ import {
   toWorkflowDef,
 } from "./workflow-files.js";
 import { pathToFileURL } from "node:url";
-import { renderHtmlShot, renderMenuShot } from "./menu-shot.js";
+import { renderHtmlShot } from "./menu-shot.js";
 import { makePluginCtx, setPluginRuntime, setPluginChannelBag, setPluginOneBot } from "./plugin-ctx.js";
 import { splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
@@ -838,15 +838,6 @@ async function bootstrap(): Promise<void> {
       return [];
     }
 
-    // QQ 群白名单（replyGroupIds）：只限制「非 # 的普通聊天 / AI」，不挡框架与插件指令
-    if (
-      !isHash &&
-      msg.meta?.messageType === "group" &&
-      !isGroupReplyAllowed(chSettings, msg.meta?.groupId as string | undefined)
-    ) {
-      return [];
-    }
-
     // Framework admin # only — plugin # goes to PluginHost by priority
     if (isHash && isAdminHash(hashCmd)) {
       const cmd = parseHashCommand(trimmed, {
@@ -859,22 +850,6 @@ async function bootstrap(): Promise<void> {
         if (typeof cmd.powerOff === "boolean") powerOff = cmd.powerOff;
 
         let replies = [...cmd.replies];
-
-        // #帮助：和生图一样渲成图片再发
-        if ((hashCmd === "#帮助" || hashCmd === "#help") && replies.length) {
-          try {
-            const shot = await renderMenuShot({
-              title: "管理指令",
-              lines: replies[0].split(/\n/).filter(Boolean),
-            });
-            if (shot.ok) {
-              const fileUrl = pathToFileURL(shot.pngPath).href;
-              replies = [`[CQ:image,file=${fileUrl}]`];
-            }
-          } catch (e) {
-            log.warn(`帮助图渲染失败：${e instanceof Error ? e.message : String(e)}`);
-          }
-        }
 
         if (cmd.systemRestart) {
           const uptime = formatUptime(Date.now() - startedAt);
@@ -1038,14 +1013,10 @@ async function bootstrap(): Promise<void> {
       }
     }
 
-    if (!isHash && chSettings.onlyMasters && chSettings.masters.length && !isMaster) {
-      return [];
-    }
-
     // 框架 / 插件 # 指令：任何群都可响应（不吃 AI 回复群白名单）
     // 软关机：仍允许只读诊断 #状态；其它插件 # 指令挡住
     if (powerOff && isHash && !isAdminHash(hashCmd)) {
-      const allowDiag = /^#状态$/i.test(String(hashCmd || "").trim());
+      const allowDiag = /^#(状态|菜单|帮助|help)$/i.test(String(hashCmd || "").trim());
       if (!allowDiag) return [];
     }
 
@@ -1133,6 +1104,18 @@ async function bootstrap(): Promise<void> {
         });
       }
       return texts;
+    }
+
+    if (
+      !isHash &&
+      msg.meta?.messageType === "group" &&
+      !isGroupReplyAllowed(chSettings, msg.meta?.groupId as string | undefined)
+    ) {
+      return [];
+    }
+
+    if (!isHash && chSettings.onlyMasters && chSettings.masters.length && !isMaster) {
+      return [];
     }
 
     if (!llm.snapshot().hasKey) {

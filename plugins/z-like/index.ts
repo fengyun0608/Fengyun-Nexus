@@ -156,14 +156,14 @@ export class ZLikePlugin extends Plugin {
   manifest = {
     id: "z.like",
     name: "点赞",
-    version: "0.3.0",
+    version: "0.3.1",
     priority: 900,
     category: "basic" as const,
     kind: "channel" as const,
     adapterScope: "channel" as const,
     channels: ["onebot11"],
     permissions: ["channel.send" as const, "onebot.api" as const],
-    description: "给自己点赞：#赞我；主人与普通人词库分开，一行一句随机",
+    description: "给自己点赞。#赞我，或触发词不用 #。只有这个插件认关键词",
   };
 
   rule = [

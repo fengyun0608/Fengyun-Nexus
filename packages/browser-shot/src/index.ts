@@ -19,9 +19,12 @@ export type ShotResult =
   | { ok: true; htmlPath: string; pngPath: string }
   | { ok: false; htmlPath: string; message: string; pngPath?: string };
 
+export type ShotMenuSection = { title: string; lines: string[] };
+
 export type ShotMenuOpts = {
   title: string;
-  lines: string[];
+  lines?: string[];
+  sections?: ShotMenuSection[];
   outDir?: string;
 };
 
@@ -84,11 +87,37 @@ async function loadPlaywright(): Promise<{
   return null;
 }
 
-/** 内置菜单卡片 HTML（无底部旁文） */
-export function menuHtml(title: string, lines: string[]): string {
-  const items = lines
+function menuBody(title: string, lines: string[], sections?: ShotMenuSection[]): string {
+  if (sections?.length) {
+    return sections
+      .map((s) => {
+        const items = s.lines
+          .map((l) => `<li><span>${escapeShotHtml(l)}</span></li>`)
+          .join("\n");
+        return `<div class="sec">${escapeShotHtml(s.title)}</div><ul class="menu-list">${items}</ul>`;
+      })
+      .join("\n");
+  }
+  const items = (lines.length ? lines : ["（空）"])
     .map((l) => `<li><span>${escapeShotHtml(l)}</span></li>`)
     .join("\n");
+  return `<ul class="menu-list" style="margin-top:18px">${items}</ul>`;
+}
+
+function flatMenuLines(lines: string[] | undefined, sections?: ShotMenuSection[]): string[] {
+  if (sections?.length) {
+    const out: string[] = [];
+    for (const s of sections) {
+      out.push(s.title);
+      out.push(...s.lines);
+    }
+    return out.length ? out : ["（空）"];
+  }
+  return lines?.length ? lines : ["（空）"];
+}
+
+/** 内置菜单卡片 HTML（无底部旁文） */
+export function menuHtml(title: string, lines: string[] = [], sections?: ShotMenuSection[]): string {
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -101,7 +130,7 @@ export function menuHtml(title: string, lines: string[]): string {
   <div class="card" id="shot">
     <div class="brand">Fengyun Nexus</div>
     <div class="head"><h1>${escapeShotHtml(title)}</h1></div>
-    <ul class="menu-list" style="margin-top:18px">${items}</ul>
+    ${menuBody(title, lines, sections)}
   </div>
 </body>
 </html>`;
@@ -185,7 +214,7 @@ export async function renderMenuShot(opts: ShotMenuOpts): Promise<ShotResult> {
   const stamp = Date.now();
   const htmlPath = join(outDir, `menu-${stamp}.html`);
   const pngPath = join(outDir, `menu-${stamp}.png`);
-  writeFileSync(htmlPath, menuHtml(opts.title, opts.lines), "utf8");
+  writeFileSync(htmlPath, menuHtml(opts.title, opts.lines || [], opts.sections), "utf8");
   const shot = await captureFile(htmlPath, pngPath, {
     selector: "#shot",
     width: 800,
@@ -194,7 +223,7 @@ export async function renderMenuShot(opts: ShotMenuOpts): Promise<ShotResult> {
   if (shot.ok) return shot;
   console.warn(`[browser-shot] 菜单 PNG 未生成，改出 SVG：${shot.message}`);
   const svgPath = join(outDir, `menu-${stamp}.svg`);
-  writeFileSync(svgPath, menuSvg(opts.title, opts.lines), "utf8");
+  writeFileSync(svgPath, menuSvg(opts.title, flatMenuLines(opts.lines, opts.sections)), "utf8");
   return { ok: true, htmlPath, pngPath: svgPath };
 }
 

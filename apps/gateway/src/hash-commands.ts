@@ -26,8 +26,6 @@ export type HashCommandContext = {
 
 /** Built-in admin set — anything else with # is for plugins. */
 export const ADMIN_HASH = new Set([
-  "#帮助",
-  "#help",
   "#关机",
   "#开机",
   "#重启",
@@ -51,18 +49,6 @@ export function resolveAdminHash(rawToken: string): string | null {
   }
   return best;
 }
-
-const HELP = [
-  "管理指令",
-  "#帮助 — 查看指令",
-  "#状态 — 运行状态面板",
-  "#关机 — 暂停应答",
-  "#开机 — 恢复应答",
-  "#重启 — 重启",
-  "#更新 — 更新框架与系统插件并重启",
-  "#更新插件 — 同上",
-  "#菜单 — 功能菜单",
-].join("\n");
 
 export function parseHashCommand(
   raw: string,
@@ -90,8 +76,6 @@ export function parseHashCommand(
   if (
     ctx.powerOff &&
     cmd !== "#开机" &&
-    cmd !== "#帮助" &&
-    cmd !== "#help" &&
     cmd !== "#重启" &&
     cmd !== "#更新" &&
     cmd !== "#更新插件" &&
@@ -104,9 +88,6 @@ export function parseHashCommand(
   }
 
   switch (cmd) {
-    case "#帮助":
-    case "#help":
-      return { handled: true, replies: [HELP] };
     case "#关机":
       return {
         handled: true,

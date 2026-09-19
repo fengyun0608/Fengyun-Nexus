@@ -64,12 +64,17 @@ export class ZDrawPlugin extends Plugin {
     const arg = (m?.[1] ?? "").trim();
 
     const lines = [
-      "#帮助 — 管理指令",
+      "电源",
+      "#关机 — 暂停应答",
+      "#开机 — 恢复应答",
+      "#重启 — 重启",
+      "更新",
+      "#更新 — 更新框架与系统插件",
+      "状态",
       "#状态 — 运行状态",
+      "菜单",
       "#菜单 — 功能菜单",
-      "#更新 — 框架与系统插件",
-      "#生图 — 菜单图截图发群",
-      "#echo 文本 — 回声",
+      "#帮助 — 功能菜单",
     ];
 
     const shot = await ctx.shot.renderMenu({

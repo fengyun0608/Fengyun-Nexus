@@ -1,12 +1,31 @@
 import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
-/** Built-in menu — `#菜单`. Low priority number = runs first. */
+/** 框架菜单。插件自己的菜单由插件自己画，这里不收录。 */
+const SECTIONS = [
+  {
+    title: "电源",
+    lines: ["#关机 — 暂停应答", "#开机 — 恢复应答", "#重启 — 重启"],
+  },
+  {
+    title: "更新",
+    lines: ["#更新 — 更新框架与系统插件"],
+  },
+  {
+    title: "状态",
+    lines: ["#状态 — 运行状态"],
+  },
+  {
+    title: "菜单",
+    lines: ["#菜单 — 功能菜单", "#帮助 — 功能菜单"],
+  },
+];
+
 export class ZMenuPlugin extends Plugin {
   manifest = {
     id: "z.menu",
     name: "菜单",
-    version: "0.1.2",
+    version: "0.2.0",
     priority: 10,
     category: "basic" as const,
     kind: "framework" as const,
@@ -15,11 +34,9 @@ export class ZMenuPlugin extends Plugin {
   };
 
   rule = [
-    {
-      reg: "^#菜单$",
-      fnc: "menu",
-      describe: "显示功能菜单",
-    },
+    { reg: "^#菜单$", fnc: "menu", describe: "功能菜单" },
+    { reg: "^#帮助$", fnc: "menu", describe: "功能菜单" },
+    { reg: "^#help$", fnc: "menu", describe: "功能菜单" },
   ];
 
   async onReady(ctx: PluginContext) {
@@ -27,19 +44,12 @@ export class ZMenuPlugin extends Plugin {
   }
 
   async menu(e: NexusEvent, ctx: PluginContext) {
-    const lines = [
-      "#帮助 — 管理指令",
-      "#状态 — 运行状态",
-      "#菜单 — 功能菜单",
-      "#更新 — 框架与系统插件",
-      "#生图 — 菜单图截图发群",
-      "#echo 文本 — 回声",
-    ];
     const shot = await ctx.shot.renderMenu({
       title: "功能菜单",
-      lines,
+      sections: SECTIONS,
     });
     if (!shot.ok) {
+      const lines = SECTIONS.flatMap((s) => [s.title, ...s.lines]);
       await e.reply(["Fengyun Nexus", ...lines, shot.message].join("\n"));
       return;
     }

@@ -91,11 +91,11 @@ const readme = `# Fengyun Nexus · 系统插件包
 
 | 目录 | 指令 | 说明 |
 |------|------|------|
-| \`plugins/z-menu\` | \`#菜单\` | 菜单图（系统截图） |
+| \`plugins/z-menu\` | \`#菜单\` \`#帮助\` | 分类菜单，两个词同一张图 |
 | \`plugins/z-status\` | \`#状态\` | 账号头像、群好友、消息、在线时长 |
 | \`plugins/z-draw\` | \`#生图\` | 菜单图截图发群 |
 | \`plugins/z-echo\` | \`#echo 文本\` | 回声示例 |
-| \`plugins/z-like\` | \`#赞我\` | QQ 点赞 |
+| \`plugins/z-like\` | \`#赞我\` | 点赞；触发词不用 # |
 | \`plugins/z-group-admin\` | \`#踢\` \`#禁言\` \`#群公告\` \`#群文件\` | 群管 |
 | \`plugins/z-group-notice\` | 进群 / 退群自动说一声 | 进退群通知 |
 | \`plugins/z-master\` | \`#添加主人\` | 核心 / 新 / 普通主人 |

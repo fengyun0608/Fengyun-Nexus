@@ -156,7 +156,8 @@ export type PluginShotResult =
 export interface PluginShot {
   renderMenu(opts: {
     title: string;
-    lines: string[];
+    lines?: string[];
+    sections?: Array<{ title: string; lines: string[] }>;
     outDir?: string;
   }): Promise<PluginShotResult>;
   renderHtml(opts: {
