@@ -120,7 +120,12 @@ import {
   webSnapshot,
   webType,
 } from "./web-control.js";
-import { isJunkAiText, splitAiSegments } from "./ai-segments.js";
+import {
+  extractLeakedToolCalls,
+  isJunkAiText,
+  splitAiSegments,
+  stripLeakedToolMarkup,
+} from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
   buildRestartingMessage,
@@ -447,6 +452,7 @@ function frameworkSystemPrompt(opts?: {
       "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。不要只用 web_read 只读摘要。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。",
       "对用户只说人话正文。发现应用没开可以说正在帮你启动，做完再说一声好了。不要把思考过程、工具名、JSON、逐步内心独白甩出去，也不要每做一小步就刷很多条。",
+      "工具必须走正式 function call。禁止把 tool_calls、DSML、invoke、XML 写进回复正文。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
       "专有工具优先；没有就读技能；再不行就系统命令试。别空口说不会。",
     );
@@ -1703,7 +1709,33 @@ async function bootstrap(): Promise<void> {
       })
     ).trim();
 
-    const parts = assistant ? splitAiSegments(assistant) : [];
+    let spoken = assistant;
+    if (capabilityMode) {
+      const leaked = extractLeakedToolCalls(spoken);
+      if (leaked.length) {
+        log.warn(`模型把工具写进正文，改为正式执行：${leaked.map((c) => c.name).join("、")}`);
+        const notes: string[] = [];
+        for (const call of leaked) {
+          try {
+            const result = await runAgentTool(call.name, call.args, toolBag);
+            const msg =
+              result && typeof result === "object" && "message" in result
+                ? String((result as { message?: unknown }).message || "")
+                : "";
+            if (msg) notes.push(msg);
+            log.info(`补执行 ${call.name}：${msg || "完成"}`);
+          } catch (e) {
+            const tip = e instanceof Error ? e.message : String(e);
+            notes.push(tip);
+            log.warn(`补执行失败 ${call.name}：${tip}`);
+          }
+        }
+        spoken = stripLeakedToolMarkup(spoken);
+        if (!spoken && notes.length) spoken = notes[notes.length - 1] || "";
+      }
+    }
+
+    const parts = spoken ? splitAiSegments(spoken) : [];
     const extra = capSink.map((x) => x.trim()).filter(Boolean);
     const all = [...parts, ...extra];
     if (!all.length) return [];
