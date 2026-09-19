@@ -8,7 +8,7 @@ import type { WorkflowRunner } from "@fengyun/nexus-workflow";
 import type { PluginHost } from "@fengyun/nexus-plugin-sdk";
 import type { ChannelSettings } from "./channel-settings.js";
 import { isChannelMaster, masterLevelOf } from "./channel-settings.js";
-import { listOpenDesktopApps } from "./desktop-inspect.js";
+import { launchDesktopApp, listOpenDesktopApps } from "./desktop-inspect.js";
 
 export type AgentToolBag = {
   mcp: McpHost;
@@ -73,6 +73,12 @@ export function buildAgentToolDefs(mcp: McpHost): LlmToolDef[] {
       ["name"],
     ),
     tool(
+      "nexus_launch_app",
+      "在本机启动一个已安装的软件（主人或控制台）。有人说打开、启动某个软件时必须用这个，不要说没有启动工具。只传软件名，不要传命令。",
+      { name: { type: "string", description: "软件名，例如 ToDesk、微信" } },
+      ["name"],
+    ),
+    tool(
       "nexus_open_apps",
       "查看本机当前打开的带窗口软件/应用（主人或控制台）。回答「开了什么软件」时用这个。",
       {
@@ -133,6 +139,7 @@ export async function runAgentTool(
     name === "nexus_run_workflow" ||
     name === "nexus_call_mcp" ||
     name === "nexus_open_apps" ||
+    name === "nexus_launch_app" ||
     name === "nexus_list_caps" ||
     name === "nexus_call_cap" ||
     name === "nexus_plugin_switch" ||
@@ -149,6 +156,11 @@ export async function runAgentTool(
   }
   if (name === "nexus_open_apps") {
     return listOpenDesktopApps({ limit: Number(args.limit) || 20 });
+  }
+  if (name === "nexus_launch_app") {
+    const appName = String(args.name || "").trim();
+    if (!appName) return { error: "缺少软件名" };
+    return launchDesktopApp(appName);
   }
   if (name === "nexus_list_plugins") {
     return {

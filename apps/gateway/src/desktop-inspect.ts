@@ -121,3 +121,174 @@ export async function listOpenDesktopApps(
     };
   }
 }
+
+function safeAppName(raw: string): string | null {
+  const name = String(raw || "").trim();
+  if (!/^[\p{L}\p{N} ._+-]{1,40}$/u.test(name)) return null;
+  return name;
+}
+
+function psEncoded(script: string): string {
+  return Buffer.from(script, "utf16le").toString("base64");
+}
+
+const LAUNCH_PS = `
+$ErrorActionPreference = 'Continue'
+$q = ([string]$env:NEXUS_LAUNCH_NAME).Trim()
+$dry = [string]$env:NEXUS_LAUNCH_DRY -eq '1'
+$result = @{ ok = $false; message = '缺少软件名'; name = ''; path = '' }
+if ($q) {
+  function Test-Hit([string]$base) {
+    if (-not $base) { return 9 }
+    if ($base.Equals($q, [StringComparison]::OrdinalIgnoreCase)) { return 0 }
+    if ($base.StartsWith($q, [StringComparison]::OrdinalIgnoreCase)) { return 1 }
+    if ($base.IndexOf($q, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return 2 }
+    return 9
+  }
+  $cands = New-Object System.Collections.Generic.List[object]
+  function Add-Hit($score, $path, $name, $kind) {
+    if ($score -ge 9 -or -not $path) { return }
+    $cands.Add([pscustomobject]@{ Score = [int]$score; Path = [string]$path; Name = [string]$name; Kind = [string]$kind })
+  }
+  function Walk([string]$root, [int]$depth) {
+    if ($depth -lt 0 -or -not $root) { return }
+    if (-not (Test-Path -LiteralPath $root)) { return }
+    $items = @(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue)
+    foreach ($item in $items) {
+      if ($null -eq $item) { continue }
+      if ($item.PSIsContainer) { Walk $item.FullName ($depth - 1); continue }
+      $ext = ([string]$item.Extension).ToLowerInvariant()
+      if ($ext -ne '.lnk' -and $ext -ne '.exe') { continue }
+      Add-Hit (Test-Hit ([string]$item.BaseName)) $item.FullName $item.BaseName 'file'
+    }
+  }
+  $startMenu = Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs'
+  $userMenu = Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs'
+  Walk $startMenu 6
+  Walk $userMenu 6
+  Walk (Join-Path $env:USERPROFILE 'Desktop') 2
+  Walk (Join-Path $env:PUBLIC 'Desktop') 2
+  $exact = @($cands | Where-Object { $_.Score -eq 0 })
+  if ($exact.Count -eq 0) {
+    Walk $env:ProgramFiles 3
+    $pf86 = (Get-ChildItem Env: -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'ProgramFiles(x86)' } | Select-Object -First 1).Value
+    if ($pf86) { Walk ([string]$pf86) 3 }
+    Walk (Join-Path $env:LOCALAPPDATA 'Programs') 3
+    $uninst = @(
+      'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+      'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+      'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
+    )
+    foreach ($row in @(Get-ItemProperty -Path $uninst -ErrorAction SilentlyContinue)) {
+      if ($null -eq $row) { continue }
+      $dn = [string]$row.DisplayName
+      $score = Test-Hit $dn
+      if ($score -ge 9) { continue }
+      $icon = [string]$row.DisplayIcon
+      if ($icon -match '^"([^"]+)"') { $icon = $Matches[1] }
+      $icon = (($icon -split ',')[0]).Trim().Trim('"')
+      if ($icon -and (Test-Path -LiteralPath $icon)) { Add-Hit $score $icon $dn 'file' }
+    }
+  }
+  try {
+    foreach ($app in @(Get-StartApps -ErrorAction SilentlyContinue)) {
+      Add-Hit (Test-Hit ([string]$app.Name)) ([string]$app.AppID) ([string]$app.Name) 'startapp'
+    }
+  } catch {}
+  $best = $null
+  if ($cands.Count -gt 0) {
+    $best = $cands | Sort-Object Score, Name | Select-Object -First 1
+  }
+  if (-not $best) {
+    $result.message = "没找到：$q"
+  } elseif ($dry) {
+    $result.ok = $true
+    $result.name = [string]$best.Name
+    $result.path = [string]$best.Path
+    $result.message = "找到了 " + $best.Name
+  } else {
+    try {
+      if ($best.Kind -eq 'startapp') {
+        $arg = 'shell:AppsFolder\\' + [string]$best.Path
+        Start-Process -FilePath (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList $arg
+      } else {
+        Start-Process -FilePath ([string]$best.Path)
+      }
+      $result.ok = $true
+      $result.name = [string]$best.Name
+      $result.path = [string]$best.Path
+      $result.message = "已启动 " + $best.Name
+    } catch {
+      $result.name = [string]$best.Name
+      $result.path = [string]$best.Path
+      $result.message = "找到了但没打开"
+    }
+  }
+}
+$json = $result | ConvertTo-Json -Compress
+[Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([string]$json))
+`.trim();
+
+function decodeLaunch(stdout: string): { ok: boolean; message: string; name?: string; path?: string } | null {
+  const b64 = String(stdout || "")
+    .trim()
+    .split(/\s+/)
+    .pop();
+  if (!b64) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(b64, "base64").toString("utf8")) as {
+      ok?: boolean;
+      message?: string;
+      name?: string;
+      path?: string;
+    };
+    return {
+      ok: Boolean(parsed.ok),
+      message: String(parsed.message || "已尝试启动"),
+      name: parsed.name || undefined,
+      path: parsed.path || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 按软件名启动已安装应用。只接受名字，不接受命令行。 */
+export async function launchDesktopApp(
+  rawName: string,
+  opts?: { dry?: boolean },
+): Promise<{ ok: boolean; message: string; name?: string; path?: string }> {
+  const name = safeAppName(rawName);
+  if (!name) return { ok: false, message: "软件名不合法，只写应用名，例如 ToDesk" };
+  if (process.platform !== "win32") {
+    return { ok: false, message: "当前只在 Windows 上打开本机软件" };
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-EncodedCommand", psEncoded(LAUNCH_PS)],
+      {
+        timeout: 40_000,
+        windowsHide: true,
+        encoding: "utf8",
+        maxBuffer: 2 * 1024 * 1024,
+        env: {
+          ...process.env,
+          NEXUS_LAUNCH_NAME: name,
+          NEXUS_LAUNCH_DRY: opts?.dry ? "1" : "",
+        },
+      },
+    );
+    return decodeLaunch(stdout) ?? { ok: false, message: "启动没有返回结果" };
+  } catch (e) {
+    const err = e as { stderr?: string; stdout?: string; message?: string };
+    const parsed = decodeLaunch(String(err.stdout || ""));
+    if (parsed) return parsed;
+    const stderr = String(err.stderr || "")
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .pop();
+    return { ok: false, message: stderr ? `启动失败：${stderr.slice(0, 160)}` : "启动失败" };
+  }
+}
