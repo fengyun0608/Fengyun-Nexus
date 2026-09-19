@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { launchDesktopApp } from "./desktop-inspect.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -171,6 +172,37 @@ export function uiaKeys(
   if (opts.control_type) argv.push("--control_type", opts.control_type);
   if (opts.keys) argv.push("--keys", opts.keys);
   return runUiaCli(repoRoot, argv);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** 听歌：窗口在就后台搜播；不在就先打开再搜。回复用短句，不让用户自己搜。 */
+export async function playMusic(
+  repoRoot: string,
+  app: string,
+  query: string,
+): Promise<Record<string, unknown>> {
+  const name = String(app || "汽水音乐").trim() || "汽水音乐";
+  const song = String(query || "").trim();
+  if (!song) return { ok: false, message: "缺少歌名" };
+  const search = () => runUiaCli(repoRoot, ["music_search", "--title", name, "--query", song]);
+  let hit = await search();
+  let launched = false;
+  if (!hit.ok) {
+    const launch = await launchDesktopApp(name);
+    launched = Boolean(launch.ok);
+    if (!launch.ok) {
+      return { ok: false, message: launch.message || `没找到 ${name}`, launched: false };
+    }
+    await sleep(2800);
+    hit = await search();
+  }
+  const message = hit.ok
+    ? `主人，${name}已经打开，正在放《${song}》。`
+    : `主人，${name}已经打开。`;
+  return { ok: Boolean(hit.ok) || launched, message, app: name, query: song, launched, detail: hit };
 }
 
 void whichPython;

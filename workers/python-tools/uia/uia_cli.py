@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Fengyun Nexus 桌面 UIA 工人：列窗口、扫控件树、点击、填字、模拟按键。
+"""Fengyun Nexus 桌面 UIA 工人：列窗口、扫控件树、点击、填字、模拟按键、听歌搜播。
 
 依赖：pip install pywinauto
-仅 Windows。输出一律 JSON 到 stdout。
+仅 Windows。输出一律 JSON 到 stdout（UTF-8）。
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+import time
 
 
 def out(obj: dict) -> None:
-    print(json.dumps(obj, ensure_ascii=False))
+    raw = json.dumps(obj, ensure_ascii=False)
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    sys.stdout.buffer.write((raw + "\n").encode("utf-8", errors="replace"))
+    sys.stdout.buffer.flush()
 
 
 def fail(msg: str, **extra) -> int:
@@ -37,6 +44,120 @@ def load_uia():
         ) from e
     return Desktop, send_keys
 
+
+def set_clipboard(text: str) -> None:
+    import ctypes
+
+    CF_UNICODETEXT = 13
+    GMEM_MOVEABLE = 0x0002
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    if not user32.OpenClipboard(None):
+        raise RuntimeError("剪贴板打不开")
+    try:
+        user32.EmptyClipboard()
+        data = text.encode("utf-16-le") + b"\x00\x00"
+        h = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+        if not h:
+            raise RuntimeError("剪贴板分配失败")
+        p = kernel32.GlobalLock(h)
+        ctypes.memmove(p, data, len(data))
+        kernel32.GlobalUnlock(h)
+        if not user32.SetClipboardData(CF_UNICODETEXT, h):
+            raise RuntimeError("写入剪贴板失败")
+    finally:
+        user32.CloseClipboard()
+
+
+def find_window(Desktop, title: str, handle: int = 0):
+    desk = Desktop(backend="uia")
+    if handle:
+        for w in desk.windows():
+            try:
+                if int(getattr(w.element_info, "handle", 0) or 0) == handle:
+                    return w
+            except Exception:
+                continue
+        raise RuntimeError(f"找不到句柄 {handle}")
+    title = (title or "").strip()
+    if not title:
+        raise RuntimeError("需要 title 或 handle")
+    for w in desk.windows():
+        try:
+            t = (w.window_text() or "").strip()
+            if t == title:
+                return w
+        except Exception:
+            continue
+    for w in desk.windows():
+        try:
+            t = (w.window_text() or "").strip()
+            if title.lower() in t.lower():
+                return w
+        except Exception:
+            continue
+    raise RuntimeError(f"找不到窗口：{title}")
+
+
+def cmd_music_search(args: argparse.Namespace) -> int:
+    """Electron 音乐客户端（汽水等）几乎没有控件树，靠焦点 + 点搜索区 + 打字。"""
+    err = ensure_win()
+    if err is not None:
+        return err
+    Desktop, send_keys = load_uia()
+    title = (args.title or "汽水音乐").strip()
+    query = (args.query or "").strip()
+    if not query:
+        return fail("缺少歌名 query")
+    try:
+        win = find_window(Desktop, title, int(args.handle or 0))
+    except Exception as e:
+        return fail(str(e), need_launch=True, app=title)
+
+    try:
+        win.set_focus()
+        time.sleep(0.35)
+        rect = win.rectangle()
+        # 顶部搜索条大致位置
+        cx = int(rect.left + (rect.right - rect.left) * 0.42)
+        cy = int(rect.top + max(48, (rect.bottom - rect.top) * 0.08))
+        try:
+            win.click_input(coords=(cx - rect.left, cy - rect.top))
+        except Exception:
+            # 坐标失败就 Ctrl+F / Ctrl+K
+            send_keys("^f")
+            time.sleep(0.2)
+            send_keys("^k")
+        time.sleep(0.25)
+        send_keys("^a{BACKSPACE}")
+        time.sleep(0.1)
+        pasted = False
+        try:
+            set_clipboard(query)
+            send_keys("^v")
+            pasted = True
+        except Exception:
+            pasted = False
+        if not pasted:
+            send_keys(query, with_spaces=True)
+        time.sleep(0.45)
+        send_keys("{ENTER}")
+        time.sleep(0.9)
+        send_keys("{DOWN}")
+        time.sleep(0.15)
+        send_keys("{ENTER}")
+        out(
+            {
+                "ok": True,
+                "message": f"主人，{title}已经打开，正在放《{query}》。",
+                "app": title,
+                "query": query,
+                "method": "clipboard" if pasted else "keys",
+            }
+        )
+        return 0
+    except Exception as e:
+        return fail(str(e), app=title, query=query)
 
 def cmd_windows(_args: argparse.Namespace) -> int:
     err = ensure_win()
@@ -67,37 +188,6 @@ def cmd_windows(_args: argparse.Namespace) -> int:
             continue
     out({"ok": True, "count": len(items), "windows": items[:80]})
     return 0
-
-
-def find_window(Desktop, title: str, handle: int = 0):
-    desk = Desktop(backend="uia")
-    if handle:
-        for w in desk.windows():
-            try:
-                if int(getattr(w.element_info, "handle", 0) or 0) == handle:
-                    return w
-            except Exception:
-                continue
-        raise RuntimeError(f"找不到句柄 {handle}")
-    title = (title or "").strip()
-    if not title:
-        raise RuntimeError("需要 title 或 handle")
-    # 精确 → 包含
-    for w in desk.windows():
-        try:
-            t = (w.window_text() or "").strip()
-            if t == title:
-                return w
-        except Exception:
-            continue
-    for w in desk.windows():
-        try:
-            t = (w.window_text() or "").strip()
-            if title.lower() in t.lower():
-                return w
-        except Exception:
-            continue
-    raise RuntimeError(f"找不到窗口：{title}")
 
 
 def walk(ctrl, depth: int, max_depth: int, acc: list, limit: int) -> None:
@@ -304,6 +394,11 @@ def main() -> int:
     k.add_argument("--control_type", default="")
     k.add_argument("--keys", default="")
 
+    m = sub.add_parser("music_search")
+    m.add_argument("--title", default="汽水音乐")
+    m.add_argument("--handle", type=int, default=0)
+    m.add_argument("--query", default="")
+
     args = p.parse_args()
     try:
         if args.cmd == "windows":
@@ -318,6 +413,8 @@ def main() -> int:
             return cmd_set_text(args)
         if args.cmd == "keys":
             return cmd_keys(args)
+        if args.cmd == "music_search":
+            return cmd_music_search(args)
         return fail(f"未知命令：{args.cmd}")
     except RuntimeError as e:
         return fail(str(e))

@@ -1,12 +1,13 @@
 ---
 name: 打开软件
-description: 主人要听歌或打开本机软件时，用 nexus_launch_app，不要先截图或扫窗口。
+description: 听某首歌用 nexus_music_play；只打开软件才用 nexus_launch_app。
 ---
 
-听歌、打开软件：
+听歌：
 
-1. 只调用 `nexus_launch_app`，`name` 写软件名，例如「汽水音乐」「网易云音乐」「ToDesk」
-2. 不要先 `nexus_screen`，不要先 `nexus_uia_tree`，不要先读无关技能
-3. 应用没开就直接启动；启动后用人话说一句，例如「已打开汽水音乐」
-4. 若还要点搜索框听某首歌，再 `nexus_uia_tree` / `nexus_uia_set_text` / `nexus_uia_keys`，先把窗口打开再说
-5. 工具必须走正式 function call，禁止把 DSML / invoke 写进正文
+1. 只调用 `nexus_music_play`。`app` 写软件名，`query` 写歌名。例：汽水音乐听水手 → app=汽水音乐，query=水手
+2. 工具会自己打开窗口，并在后台点搜索、粘贴歌名、回车
+3. 把返回的 `message` 原样说给用户，一句就够
+4. 不要截图，不要扫控件树，不要读别的技能，不要说「界面不稳请你自己搜」
+
+只打开软件、不指定歌曲：`nexus_launch_app`，只传软件名。

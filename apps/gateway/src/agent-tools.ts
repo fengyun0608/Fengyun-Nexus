@@ -25,6 +25,7 @@ import { runHostShell } from "./host-shell.js";
 import { captureDesktop } from "./screen-capture.js";
 import { findAgentSkill, loadAgentSkills } from "./agent-skills.js";
 import {
+  playMusic,
   uiaClick,
   uiaFocus,
   uiaKeys,
@@ -79,6 +80,7 @@ const MASTER_TOOLS = new Set([
   "nexus_call_mcp",
   "nexus_open_apps",
   "nexus_launch_app",
+  "nexus_music_play",
   "nexus_host_uptime",
   "nexus_host_info",
   "nexus_logs",
@@ -225,9 +227,18 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     ),
     tool(
       "nexus_launch_app",
-      "在本机启动已安装软件。听歌、打开汽水音乐/网易云/QQ音乐/Spotify、打开 ToDesk 等都用这个。只传软件名，例如「汽水音乐」。不要先截图，不要先扫窗口。",
-      { name: { type: "string", description: "软件名，如 汽水音乐" } },
+      "只打开本机软件，不搜歌。听某首歌不要用这个，用 nexus_music_play。",
+      { name: { type: "string", description: "软件名，如 ToDesk" } },
       ["name"],
+    ),
+    tool(
+      "nexus_music_play",
+      "听歌专用。打开汽水音乐等客户端并在后台搜歌播放。主人说「汽水音乐我要听水手」就只调这个，app=汽水音乐，query=水手。返回的 message 原样说给用户，一句就够。不要再截图、扫窗口、读技能，也不要让用户自己去搜。",
+      {
+        app: { type: "string", description: "软件名，默认汽水音乐" },
+        query: { type: "string", description: "歌名，如 水手" },
+      },
+      ["query"],
     ),
     tool("nexus_open_apps", "查看本机当前打开的带窗口软件", {
       limit: { type: "number", description: "最多条数" },
@@ -483,6 +494,12 @@ export async function runAgentTool(
     const appName = String(args.name || "").trim();
     if (!appName) return { error: "缺少软件名" };
     return launchDesktopApp(appName);
+  }
+  if (name === "nexus_music_play") {
+    const query = String(args.query || args.song || args.name || "").trim();
+    const app = String(args.app || "汽水音乐").trim() || "汽水音乐";
+    if (!query) return { error: "缺少歌名" };
+    return playMusic(bag.repoRoot, app, query);
   }
   if (name === "nexus_host_uptime") return hostUptime();
   if (name === "nexus_host_info") return hostInfo();

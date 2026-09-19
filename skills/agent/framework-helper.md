@@ -16,7 +16,8 @@ description: 主人能力模式：查状态、日志、电脑截屏、搜网页�
 - 查日志、看服务器：`nexus_shell`（Windows PowerShell / Linux·服务器 bash 或 sh / macOS / Termux）。日志在 `data/logs/gateway.log`。不是框架 `#` 指令
 - `nexus_logs` 只是内存环快捷方式，查文件仍用 `nexus_shell`
 - `nexus_open_apps` / `nexus_launch_app` / `nexus_host_info` / `nexus_host_uptime`
-- 听歌或打开软件：先读技能 `open-app`，只用 `nexus_launch_app`，不要先截图/扫窗口
+- 听歌：只调 `nexus_music_play`（app + 歌名），把返回的那一句原样说。不要截图、不要扫窗口、不要让用户自己搜
+- 只打开软件：`nexus_launch_app`
 
 截图：
 - 电脑屏幕发群：`nexus_screen`。有人说截图发群必须用这个，不要用 `nexus_shot` 渲状态卡片充数
