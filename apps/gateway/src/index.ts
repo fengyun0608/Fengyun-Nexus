@@ -30,7 +30,8 @@ import { bootGroup, bootLine, installProcessGuard, printBootBanner, printBootSuc
 import { warnBootGaps } from "./boot-check.js";
 import { resolveOb11Media, setOb11MediaHost, setOb11MediaRoot } from "./ob11-media.js";
 import { checkPluginUpdates, applyPluginUpdates, ensurePluginSdkLinks } from "./registry-check.js";
-import { installEcosystemPack, installUploadedZip, loadEcosystemCatalog } from "./ecosystem-catalog.js";
+import { installEcosystemPack, installUploadedZip, listExtraInstalls, loadEcosystemCatalog, removeInstalledPack } from "./ecosystem-catalog.js";
+import { listOpenReviews, listOwnRepos, loginGitAccount, submitEcosystemPr } from "./ecosystem-submit.js";
 import {
   getChannelSettings,
   isChannelMaster,
@@ -2208,6 +2209,7 @@ async function bootstrap(): Promise<void> {
         hub: result.catalog?.hub || null,
         categories: result.catalog?.categories || [],
         items: result.items,
+        localItems: listExtraInstalls(ROOT, result.items.map((i) => i.id)),
         ecosystemRepo: registry.ecosystemRepo || null,
       });
     } catch (e) {
@@ -2272,6 +2274,70 @@ async function bootstrap(): Promise<void> {
       }
     },
   );
+
+  /** 移除本机已下载的生态插件，不删系统插件 */
+  app.post("/v1/registry/ecosystem/remove", authMiddleware, async (req, res) => {
+    try {
+      const id = String(req.body?.id || "").trim();
+      const fallback = Array.isArray(req.body?.dirs) ? req.body.dirs.map((d: unknown) => String(d)) : [];
+      const result = removeInstalledPack(ROOT, id, fallback);
+      let reloadMsg = "";
+      if (result.ok) {
+        const reload = await reloadPlugins(pluginHotDeps);
+        reloadMsg = reload.ok ? `；已热重载 ${reload.loaded} 个插件` : `；热重载失败：${reload.message}`;
+      }
+      res.status(result.ok ? 200 : 400).json({ ...result, message: `${result.message}${reloadMsg}` });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  /** 用投稿人自己的令牌登录，令牌不落盘 */
+  app.post("/v1/registry/ecosystem/account", authMiddleware, async (req, res) => {
+    try {
+      const result = await loginGitAccount(String(req.body?.host || ""), String(req.body?.token || ""));
+      res.status(result.ok ? 200 : 400).json(result);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.post("/v1/registry/ecosystem/repos", authMiddleware, async (req, res) => {
+    try {
+      const result = await listOwnRepos(String(req.body?.host || ""), String(req.body?.token || ""));
+      res.status(result.ok ? 200 : 400).json(result);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  /** 引用自己的公开仓库，向生态仓提 PR，等维护者审核 */
+  app.post("/v1/registry/ecosystem/submit", authMiddleware, async (req, res) => {
+    try {
+      const result = await submitEcosystemPr(String(req.body?.host || ""), String(req.body?.token || ""), {
+        repoUrl: req.body?.repoUrl,
+        branch: req.body?.branch,
+        id: req.body?.id,
+        name: req.body?.name,
+        description: req.body?.description,
+        version: req.body?.version,
+        category: req.body?.category,
+        menus: Array.isArray(req.body?.menus) ? req.body.menus.map((m: unknown) => String(m)) : String(req.body?.menus || "").split(/[,，\s]+/),
+      });
+      res.status(result.ok ? 200 : 400).json(result);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.get("/v1/registry/ecosystem/reviews", authMiddleware, async (_req, res) => {
+    try {
+      const result = await listOpenReviews();
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
 
   app.get("/v1/admin/llm", authMiddleware, (_req, res) => {
     const snap = llm.snapshot();

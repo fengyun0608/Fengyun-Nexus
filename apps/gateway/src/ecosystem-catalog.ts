@@ -32,6 +32,8 @@ export type EcoCatalogEntry = {
   source: EcoSource;
   menus?: string[];
   homepage?: string;
+  /** 生态仓里的热度；本机下载次数会再加在展示值上 */
+  heat?: number;
 };
 
 export type EcoCatalog = {
@@ -52,6 +54,7 @@ export type EcoListItem = EcoCatalogEntry & {
   /** 包在仓内的相对路径；git 根目录则为空 */
   packPath?: string;
   downloadable?: boolean;
+  heat?: number;
 };
 
 type PackPlugin = { rel: string; name: string };
@@ -310,8 +313,9 @@ export function loadEcosystemCatalog(
     }
     const plugs = pluginsInRef(root, remoteRef, packRel);
     const st = statusOf(pluginsRoot, plugs.map((p) => p.name), String(e.version || ""));
-    items.push({ ...base, ...st });
+    items.push({ ...base, ...st, heat: Number(e.heat || 0) });
   }
+  stampHeat(root, items);
   return {
     ok: true,
     catalog,
@@ -357,6 +361,17 @@ export function installEcosystemPack(
   const plugs = pluginsInRef(root, remoteRef, packRel);
   if (!plugs.length) return { ok: false, message: "包内没有 plugins 登记", applied: [] };
   const applied = materialize(root, remoteRef, packRel, plugs);
+  if (applied.length) {
+    rememberInstall(root, {
+      id: entry.id,
+      name: entry.name,
+      version: entry.version,
+      description: entry.description,
+      repoUrl: repoOf(entry, stripGit(url)).repoUrl,
+      dirs: applied,
+    });
+    bumpHeat(root, entry.id);
+  }
   return {
     ok: applied.length > 0,
     message: applied.length
@@ -481,7 +496,10 @@ export function installUploadedZip(
       scan = join(dest, kids[0]!);
     }
     const applied = installFromLocalTree(root, scan);
-    if (applied.length) ensurePluginSdkLinks(root, applied);
+    if (applied.length) {
+      ensurePluginSdkLinks(root, applied);
+      for (const dir of applied) rememberDirInstall(root, dir);
+    }
     return {
       ok: applied.length > 0,
       message: applied.length
@@ -501,3 +519,153 @@ export function installUploadedZip(
     rmSync(dest, { recursive: true, force: true });
   }
 }
+
+type LocalInstall = {
+  dirs: string[];
+  name?: string;
+  version?: string;
+  description?: string;
+  repoUrl?: string;
+};
+
+type LocalStore = {
+  heat?: Record<string, number>;
+  installed?: Record<string, LocalInstall>;
+};
+
+function localStorePath(root: string): string {
+  return join(root, "data", "ecosystem-local.json");
+}
+
+function readLocalStore(root: string): LocalStore {
+  const p = localStorePath(root);
+  if (!existsSync(p)) return {};
+  try {
+    return JSON.parse(readFileSync(p, "utf8")) as LocalStore;
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalStore(root: string, data: LocalStore) {
+  const p = localStorePath(root);
+  mkdirSync(join(root, "data"), { recursive: true });
+  writeFileSync(p, JSON.stringify(data, null, 2));
+}
+
+function stampHeat(root: string, items: EcoListItem[]) {
+  const extra = readLocalStore(root).heat || {};
+  for (const item of items) {
+    item.heat = Number(item.heat || 0) + Number(extra[item.id] || 0);
+  }
+}
+
+function bumpHeat(root: string, id: string) {
+  const data = readLocalStore(root);
+  const heat = { ...(data.heat || {}) };
+  heat[id] = Number(heat[id] || 0) + 1;
+  writeLocalStore(root, { ...data, heat });
+}
+
+function rememberInstall(
+  root: string,
+  row: { id: string; name?: string; version?: string; description?: string; repoUrl?: string; dirs: string[] },
+) {
+  const id = String(row.id || "").trim();
+  if (!id) return;
+  const data = readLocalStore(root);
+  const installed = { ...(data.installed || {}) };
+  installed[id] = {
+    dirs: [...new Set(row.dirs.filter((d) => DIR_OK.test(d)))],
+    name: row.name,
+    version: row.version,
+    description: row.description,
+    repoUrl: row.repoUrl,
+  };
+  writeLocalStore(root, { ...data, installed });
+}
+
+function rememberDirInstall(root: string, dir: string) {
+  const man = join(root, "plugins", dir, "nexus.plugin.json");
+  let id = dir;
+  let name = dir;
+  let version = "";
+  let description = "";
+  try {
+    const j = JSON.parse(readFileSync(man, "utf8")) as {
+      id?: string;
+      name?: string;
+      version?: string;
+      description?: string;
+    };
+    id = String(j.id || dir);
+    name = String(j.name || dir);
+    version = String(j.version || "");
+    description = String(j.description || "");
+  } catch {
+    /* 用目录名 */
+  }
+  rememberInstall(root, { id, name, version, description, dirs: [dir] });
+}
+
+export type ManagedInstall = LocalInstall & {
+  id: string;
+  status: "installed";
+  downloadable: false;
+  heat: number;
+};
+
+/** 本机装过、但不在当前收录列表里的插件（例如本地 zip） */
+export function listExtraInstalls(root: string, knownIds: string[]): ManagedInstall[] {
+  const data = readLocalStore(root);
+  const known = new Set(knownIds);
+  const heat = data.heat || {};
+  const out: ManagedInstall[] = [];
+  for (const [id, row] of Object.entries(data.installed || {})) {
+    if (known.has(id)) continue;
+    const dirs = (row.dirs || []).filter((d) => existsSync(join(root, "plugins", d, "nexus.plugin.json")));
+    if (!dirs.length) continue;
+    out.push({
+      id,
+      ...row,
+      dirs,
+      status: "installed",
+      downloadable: false,
+      heat: Number(heat[id] || 0),
+      description: row.description || "本机上传安装",
+    });
+  }
+  return out;
+}
+
+export function removeInstalledPack(
+  root: string,
+  packId: string,
+  fallbackDirs?: string[],
+): { ok: boolean; message: string; removed: string[] } {
+  const id = packId.trim();
+  if (!id) return { ok: false, message: "请指定要移除的插件", removed: [] };
+  const data = readLocalStore(root);
+  const row = data.installed?.[id];
+  const raw = (row?.dirs?.length ? row.dirs : fallbackDirs || []).map((d) => String(d || "").trim());
+  const dirs = [...new Set(raw)].filter((d) => DIR_OK.test(d) && d !== "templates" && !d.startsWith("z-"));
+  if (!dirs.length) return { ok: false, message: "没有可移除的目录", removed: [] };
+  const removed: string[] = [];
+  for (const dir of dirs) {
+    const dest = join(root, "plugins", dir);
+    if (!inside(join(root, "plugins"), dest)) continue;
+    if (!existsSync(dest)) continue;
+    rmSync(dest, { recursive: true, force: true });
+    removed.push(dir);
+  }
+  if (data.installed) {
+    delete data.installed[id];
+    writeLocalStore(root, data);
+  }
+  return {
+    ok: removed.length > 0,
+    message: removed.length ? `已移除 ${row?.name || id}` : "目录已经不在",
+    removed,
+  };
+}
+
