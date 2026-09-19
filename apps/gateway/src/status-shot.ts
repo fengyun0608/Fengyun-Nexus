@@ -725,12 +725,15 @@ export function buildRestartOkLines(
   plugins: Array<{ id: string; name: string; version?: string }>,
   opts?: {
     previousUptime?: string;
+    /** 这次重启花了多久 */
+    restartTook?: string;
     version?: string;
     commit?: string;
     updateSummary?: string[];
   },
 ): string[] {
   const lines: string[] = ["重启成功"];
+  if (opts?.restartTook) lines.push(`本次重启 ${opts.restartTook}`);
   if (opts?.version) lines.push(`框架 ${opts.version}`);
   if (opts?.previousUptime) lines.push(`上次运行 ${opts.previousUptime}`);
   const summary = (opts?.updateSummary || []).map((s) => String(s).trim()).filter(Boolean);
@@ -759,6 +762,7 @@ export function buildRestartOkPanelHtml(
   plugins: Array<{ id: string; name: string; version?: string }>,
   opts?: {
     previousUptime?: string;
+    restartTook?: string;
     version?: string;
     commit?: string;
     updateSummary?: string[];
@@ -766,6 +770,7 @@ export function buildRestartOkPanelHtml(
 ): string {
   const summary = (opts?.updateSummary || []).map((s) => String(s).trim()).filter(Boolean);
   const chips = [
+    opts?.restartTook ? `本次重启 ${opts.restartTook}` : "",
     opts?.version ? `v${opts.version}` : "",
     opts?.previousUptime ? `上次 ${opts.previousUptime}` : "",
   ]

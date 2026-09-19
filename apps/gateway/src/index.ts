@@ -2790,26 +2790,24 @@ async function bootstrap(): Promise<void> {
     // 先清掉，避免这次发失败后手动再启又补发刷屏
     clearRestartNotify(ROOT);
 
+    const restartTook = formatUptime(ageMs);
     const loaded = plugins
       .listConsole()
       .filter((p) => p.enabled !== false)
       .map((p) => ({ id: p.id, name: p.name, version: p.version }));
-    const lines = buildRestartOkLines(loaded, {
+    const shotOpts = {
       previousUptime: pending.previousUptime,
+      restartTook,
       version: readLocalVersion(ROOT),
       commit: shortCommit() || undefined,
       updateSummary: pending.updateSummary,
-    });
+    };
+    const lines = buildRestartOkLines(loaded, shotOpts);
     const text = lines.join("\n");
 
-    let sendPayload = text;
+    let sendPayload = "";
     try {
-      const html = buildRestartOkPanelHtml(loaded, {
-        previousUptime: pending.previousUptime,
-        version: readLocalVersion(ROOT),
-        commit: shortCommit() || undefined,
-        updateSummary: pending.updateSummary,
-      });
+      const html = buildRestartOkPanelHtml(loaded, shotOpts);
       const shot = await renderHtmlShot({
         html,
         selector: "#panel",
@@ -2821,6 +2819,10 @@ async function bootstrap(): Promise<void> {
       }
     } catch (e) {
       log.warn(`重启报告出图失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (!sendPayload) {
+      log.warn("重启成功图没画出来，不发文字");
+      return;
     }
 
     db.insertMessage({
@@ -2855,39 +2857,23 @@ async function bootstrap(): Promise<void> {
       };
       const botHint = pending.botId || "最近连上的号";
       log.info(`重启回执准备发往 bot=${botHint}${gid ? ` 群 ${gid}` : ""}`);
-      let readyAt = 0;
       for (let i = 0; i < 20; i++) {
         const live = pending.botId
           ? onebot.listConnectedSelfIds().includes(pending.botId)
           : onebot.status().connected;
         if (!live) {
-          readyAt = 0;
-          await new Promise((r) => setTimeout(r, 1000));
+          await new Promise((r) => setTimeout(r, 400));
           continue;
         }
-        if (!readyAt) {
-          readyAt = Date.now();
-          log.info("重启回执：目标号已连，等 QQ 内核 6 秒");
-          await new Promise((r) => setTimeout(r, 6000));
+        const imgOk = await onebot.sendText(sendPayload, { ...ctx, content: sendPayload });
+        if (imgOk) {
+          log.ok(`重启成功图已发回原${mt === "group" ? `群 ${gid}` : "会话"}`);
+          return;
         }
-        const textOk = await onebot.sendText(text, { ...ctx, content: text });
-        if (!textOk) {
-          log.warn("重启文字回执没发出，8 秒后再试一次");
-          await new Promise((r) => setTimeout(r, 8000));
-          const again = await onebot.sendText(text, { ...ctx, content: text });
-          if (!again) {
-            log.warn("重启成功通知发送失败。群里发 #状态 可再看");
-            return;
-          }
-        }
-        if (sendPayload !== text) {
-          const imgOk = await onebot.sendText(sendPayload, { ...ctx, content: sendPayload });
-          if (!imgOk) log.warn("重启文字已发出，图被 QQ 拒绝");
-        }
-        log.ok(`重启成功已发回原${mt === "group" ? `群 ${gid}` : "会话"}`);
+        log.warn("重启成功图没发出，不改发文字");
         return;
       }
-      log.warn("重启成功通知未发出：目标号没连上");
+      log.warn("重启成功图未发出：目标号没连上");
       return;
     }
 
