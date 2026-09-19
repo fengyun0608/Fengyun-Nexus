@@ -1,6 +1,6 @@
 {
   "name": "fengyun-nexus",
-  "version": "0.2.70",
+  "version": "0.2.71",
   "private": true,
   "description": "Fengyun Nexus — AI conversation and automation hub",
   "license": "MIT",
@@ -10,6 +10,7 @@
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
+    "smoke": "node scripts/smoke.mjs",
     "dev": "pnpm --filter @fengyun/nexus-gateway dev",
     "dev:web": "pnpm --filter @fengyun/nexus-web dev",
     "dev:all": "pnpm -r --parallel --filter @fengyun/nexus-gateway --filter @fengyun/nexus-web dev",

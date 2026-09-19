@@ -26,7 +26,8 @@ import {
   type RegistryConfig,
 } from "@fengyun/nexus-shared";
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
-import { bootGroup, bootLine, printBootBanner, printBootSuccess, quietNodeSqliteWarning } from "./boot-banner.js";
+import { bootGroup, bootLine, installProcessGuard, printBootBanner, printBootSuccess, quietNodeSqliteWarning } from "./boot-banner.js";
+import { warnBootGaps } from "./boot-check.js";
 import { checkPluginUpdates, applyPluginUpdates, ensurePluginSdkLinks } from "./registry-check.js";
 import {
   getChannelSettings,
@@ -398,6 +399,7 @@ function frameworkSystemPrompt(): string {
 async function bootstrap(): Promise<void> {
   const startedAt = Date.now();
   quietNodeSqliteWarning();
+  installProcessGuard();
   printBootBanner();
   loadDotEnv();
 
@@ -528,6 +530,9 @@ async function bootstrap(): Promise<void> {
   );
 
   const plugins = new PluginHost();
+  plugins.onError = (id, message) => {
+    log.warn(`插件 ${id} 出错，已跳过：${String(message).slice(0, 180)}`);
+  };
   await bootGroup("插件");
   await bootLine("开始加载插件");
   try {
@@ -2723,6 +2728,12 @@ async function bootstrap(): Promise<void> {
       }
     }
     void printBootSuccess();
+    warnBootGaps({
+      root: ROOT,
+      setupCompleted: Boolean(adminCfg.setupCompleted),
+      onebotEnabled: onebot.getConfig().enabled,
+      onebotConnected: () => onebot.status().connected,
+    });
     void deliverRestartSuccessNotice();
 
     // 后端终端输入（跑代码的那个窗口），不是网页

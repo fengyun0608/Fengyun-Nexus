@@ -5,7 +5,7 @@
 <p align="center">
   <img alt="license" src="https://img.shields.io/badge/License-MIT-c4842f?style=flat-square" />
   <img alt="node" src="https://img.shields.io/badge/Node.js-%E2%89%A520-339933?style=flat-square" />
-  <img alt="version" src="https://img.shields.io/badge/Version-0.2.70-2f9b78?style=flat-square" />
+  <img alt="version" src="https://img.shields.io/badge/Version-0.2.71-2f9b78?style=flat-square" />
   <img alt="platform" src="https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Termux-1a1f18?style=flat-square" />
 </p>
 
@@ -152,6 +152,7 @@ docker compose up -d --build
 
 ```bash
 pnpm boot                 # 启动（正式，无 watch）
+pnpm smoke                # 另开端口，确认能听并且 #帮助 有回
 pnpm nexus setup          # 交互配置
 pnpm nexus env desktop    # 切换姿态
 pnpm nexus status

@@ -301,6 +301,8 @@ export function definePlugin(plugin: NexusPlugin): NexusPlugin {
 export class PluginHost {
   private plugins = new Map<string, NexusPlugin>();
   private disabled = new Set<string>();
+  /** 单个插件抛错时回调，不中断其它插件 */
+  onError?: (id: string, message: string) => void;
 
   register(plugin: NexusPlugin): void {
     this.plugins.set(plugin.manifest.id, plugin);
@@ -380,12 +382,17 @@ export class PluginHost {
   ): Promise<void> {
     for (const p of this.values()) {
       if (!this.isEnabled(p.manifest.id)) continue;
-      const r = await p.onReady?.(makeCtx(p.manifest.id));
-      const lines = Array.isArray(r) ? r : typeof r === "string" && r.trim() ? [r] : [];
-      for (const line of lines) {
-        const t = String(line ?? "");
-        if (!t) continue;
-        await print?.(t);
+      try {
+        const r = await p.onReady?.(makeCtx(p.manifest.id));
+        const lines = Array.isArray(r) ? r : typeof r === "string" && r.trim() ? [r] : [];
+        for (const line of lines) {
+          const t = String(line ?? "");
+          if (!t) continue;
+          await print?.(t);
+        }
+      } catch (err) {
+        this.report(p, err);
+        await print?.(`插件 ${p.manifest.name || p.manifest.id} 就绪时出错`);
       }
     }
   }
@@ -399,8 +406,12 @@ export class PluginHost {
       if (!this.isEnabled(p.manifest.id)) continue;
       if (typeof p.onNotice !== "function") continue;
       const ctx = makeCtx(p.manifest.id);
-      const r = await p.onNotice(ev, ctx);
-      if (Array.isArray(r)) out.push(...r.filter((x) => String(x || "").trim()));
+      try {
+        const r = await p.onNotice(ev, ctx);
+        if (Array.isArray(r)) out.push(...r.filter((x) => String(x || "").trim()));
+      } catch (err) {
+        this.report(p, err);
+      }
     }
     return out;
   }
@@ -411,10 +422,11 @@ export class PluginHost {
     gate?: (id: string) => boolean | Promise<boolean>,
   ): Promise<NexusMessage[]> {
     const out: NexusMessage[] = [];
+    let failedName = "";
+    const isCmd = String(e.raw.content || "").trim().startsWith("#");
     for (const p of this.values()) {
       if (!this.isEnabled(p.manifest.id)) continue;
       if (gate && !(await gate(p.manifest.id))) continue;
-      // Scope filter: all / channel / specified
       const scope =
         p.manifest.adapterScope ??
         (p.manifest.kind === "framework" || !(p.manifest.channels?.length) ? "all" : "specified");
@@ -422,23 +434,43 @@ export class PluginHost {
       if (scope !== "all" && chs.length && !chs.includes(e.channel)) continue;
 
       const ctx = makeCtx(p.manifest.id);
-      if (typeof p.accept === "function") {
-        const hit = await p.accept(e, ctx);
-        if (hit) {
-          out.push(...e.toOutbound(`plugin:${p.manifest.id}`));
-          // First match wins — smaller priority already sorted first
-          return out;
+      try {
+        if (typeof p.accept === "function") {
+          const hit = await p.accept(e, ctx);
+          if (hit) {
+            out.push(...e.toOutbound(`plugin:${p.manifest.id}`));
+            return out;
+          }
         }
-      }
-      if (p.onMessage) {
-        const r = await p.onMessage(e.raw, ctx);
-        if (r) {
-          out.push(r);
-          return out;
+        if (p.onMessage) {
+          const r = await p.onMessage(e.raw, ctx);
+          if (r) {
+            out.push(r);
+            return out;
+          }
         }
+      } catch (err) {
+        this.report(p, err);
+        failedName = p.manifest.name || p.manifest.id;
       }
     }
+    if (!out.length && failedName && isCmd) {
+      out.push({
+        id: newId("msg"),
+        channel: e.channel,
+        chatId: e.chatId,
+        userId: "nexus",
+        type: "text",
+        content: `插件 ${failedName} 出错了`,
+        createdAt: nowIso(),
+      });
+    }
     return out;
+  }
+
+  private report(p: NexusPlugin, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    this.onError?.(p.manifest.id, message);
   }
 
   async onMessage(

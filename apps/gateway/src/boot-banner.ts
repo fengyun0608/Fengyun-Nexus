@@ -40,6 +40,17 @@ export function quietNodeSqliteWarning(): void {
   });
 }
 
+/** 一条消息或插件抛错时，记下来，别把整个网关打退出。 */
+export function installProcessGuard(): void {
+  process.on("unhandledRejection", (reason) => {
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    log.error(`有一处异步出错，网关继续跑：${msg}`);
+  });
+  process.on("uncaughtException", (err) => {
+    log.error(`有一处异常没接住，网关继续跑：${err.message}`);
+  });
+}
+
 /** 旧闪屏步进。新启动不再逐行停顿。 */
 export async function bootStep(msg: string, ms = 0): Promise<void> {
   log.info(msg);

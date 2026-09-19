@@ -244,7 +244,15 @@ async function ensureBuild() {
   const sharedDist = join(root, "packages/shared/dist/index.js");
   const dbDist = join(root, "packages/db/dist/index.js");
   const loaderDist = join(root, "packages/plugin-loader/dist/index.js");
-  if (!existsSync(sharedDist) || !existsSync(dbDist) || !existsSync(loaderDist)) {
+  const sdkSrc = join(root, "packages/plugin-sdk/src/index.ts");
+  const sdkDist = join(root, "packages/plugin-sdk/dist/index.js");
+  let sdkStale = !existsSync(sdkDist);
+  try {
+    if (!sdkStale && existsSync(sdkSrc)) sdkStale = statSync(sdkSrc).mtimeMs > statSync(sdkDist).mtimeMs;
+  } catch {
+    sdkStale = true;
+  }
+  if (!existsSync(sharedDist) || !existsSync(dbDist) || !existsSync(loaderDist) || sdkStale) {
     bootLog("INFO", ANSI.cyan, "building internal packages…");
     await run(["run", "build:packages"]);
     bootLog("OK", ANSI.green, "packages built");
