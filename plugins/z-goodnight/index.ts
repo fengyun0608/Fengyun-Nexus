@@ -65,8 +65,8 @@ export class ZGoodnightPlugin extends Plugin {
   setConfig(next: Record<string, unknown>) {
     this.cfg = {
       enabled: next.enabled !== false,
-      text: String(next.text ?? this.cfg.text || "起来重睡"),
-      group: String(next.group ?? this.cfg.group || "1094247519").trim(),
+      text: String(next.text ?? this.cfg.text) || "起来重睡",
+      group: (String(next.group ?? this.cfg.group) || "1094247519").trim(),
     };
   }
 
