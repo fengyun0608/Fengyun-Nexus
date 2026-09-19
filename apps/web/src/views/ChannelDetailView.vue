@@ -70,8 +70,22 @@ const route = useRoute();
 const router = useRouter();
 const message = useMessage();
 
+type FeedMsg = {
+  id: string;
+  channel: string;
+  chatId: string;
+  userId: string;
+  role: string;
+  content: string;
+  createdAt: string;
+  accountId?: string;
+  raw?: string;
+};
+
 const id = computed(() => String(route.params.id || ""));
 const loading = ref(true);
+const feedItems = ref<FeedMsg[]>([]);
+let feedTimer: number | undefined;
 const saving = ref(false);
 const err = ref("");
 
@@ -177,12 +191,56 @@ async function loadOnebot() {
   }));
 }
 
+function parsedRaw(raw?: string): {
+  rawMessage?: string;
+  senderName?: string;
+  capabilityMode?: boolean;
+} | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as {
+      rawMessage?: string;
+      senderName?: string;
+      capabilityMode?: boolean;
+    };
+  } catch {
+    return null;
+  }
+}
+
+function rawLine(row: FeedMsg): string {
+  return String(parsedRaw(row.raw)?.rawMessage || "");
+}
+
+function prettyRaw(raw?: string): string {
+  const parsed = parsedRaw(raw);
+  if (!parsed) return raw || "";
+  try {
+    return JSON.stringify(JSON.parse(raw || ""), null, 2);
+  } catch {
+    return raw || "";
+  }
+}
+
+function fmtTime(iso: string): string {
+  return String(iso || "").replace("T", " ").slice(0, 19) || "—";
+}
+
+async function loadFeed() {
+  if (!id.value) return;
+  const res = await api<{ items: FeedMsg[] }>(
+    `/v1/messages/recent?limit=80&channel=${encodeURIComponent(id.value)}`,
+    { token: auth.token },
+  );
+  feedItems.value = res.items || [];
+}
+
 async function load() {
   if (!id.value) return;
   loading.value = true;
   err.value = "";
   try {
-    await Promise.all([loadSettings(), loadPlugins(), loadOnebot()]);
+    await Promise.all([loadSettings(), loadPlugins(), loadOnebot(), loadFeed()]);
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -429,9 +487,13 @@ async function saveOnebot() {
 }
 
 watch(id, () => void load(), { immediate: false });
-onMounted(() => void load());
+onMounted(() => {
+  void load();
+  feedTimer = window.setInterval(() => void loadFeed().catch(() => undefined), 5000);
+});
 onUnmounted(() => {
   if (onebotTimer) window.clearInterval(onebotTimer);
+  if (feedTimer) window.clearInterval(feedTimer);
 });
 watch(showPlugins, (open) => {
   if (!open || id.value !== "onebot11") return;
@@ -481,6 +543,31 @@ watch(showOnebot, (open) => {
             <span>{{ onebot?.connected ? "已连接" : "未连接" }}</span>
           </button>
         </div>
+
+        <section class="feed-section">
+          <div class="feed-head">
+            <h2>最近消息</h2>
+            <span class="muted">{{ feedItems.length }} 条 · 约每 5 秒刷新</span>
+          </div>
+          <p v-if="!feedItems.length" class="muted">这个通道还没有消息</p>
+          <div v-for="row in feedItems" :key="row.id" class="feed-row">
+            <span class="muted">{{ fmtTime(row.createdAt) }}</span>
+            <span class="who">{{ row.role }}:{{ parsedRaw(row.raw)?.senderName || row.userId }}</span>
+            <span class="cap">
+              <template v-if="row.role === 'user'">
+                {{ parsedRaw(row.raw)?.capabilityMode ? "能力模式" : "普通对话" }}
+              </template>
+            </span>
+            <span class="content">
+              <span>{{ row.content }}</span>
+              <p v-if="rawLine(row) && rawLine(row) !== row.content" class="raw-line">原文 {{ rawLine(row) }}</p>
+              <details v-if="row.raw" class="msg-src">
+                <summary>消息源码</summary>
+                <pre>{{ prettyRaw(row.raw) }}</pre>
+              </details>
+            </span>
+          </div>
+        </section>
       </template>
     </n-spin>
 
@@ -671,6 +758,64 @@ watch(showOnebot, (open) => {
 @import "@/styles/page.css";
 .layer-grid.tight {
   padding: 8px 0 0;
+}
+.feed-section {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+  padding: 14px 14px 8px;
+}
+.feed-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.feed-head h2 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+.feed-row {
+  display: grid;
+  grid-template-columns: 148px minmax(72px, 140px) 72px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+.who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cap {
+  color: var(--amber);
+  font-size: 0.75rem;
+}
+.content {
+  display: grid;
+  gap: 4px;
+  word-break: break-word;
+}
+.raw-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.msg-src summary {
+  cursor: pointer;
+  color: var(--amber);
+  font-size: 0.75rem;
+}
+.msg-src pre {
+  margin: 6px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.72rem;
 }
 .row-switch {
   display: flex;
