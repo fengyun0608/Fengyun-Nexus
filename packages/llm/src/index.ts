@@ -35,6 +35,8 @@ export type LlmToolHandler = (
 export type LlmStreamOpts = {
   /** 正文与思考的增量都会回调（思考会先标「思考：」）。 */
   onDelta?: (text: string) => void;
+  /** 每回合摘要，给网关打日志。 */
+  onTrace?: (line: string) => void;
   maxRounds?: number;
 };
 
@@ -59,6 +61,38 @@ function speakOutsideTags(text: string): string {
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
     .replace(/<\/?think(?:ing)?>/gi, "")
     .trim();
+}
+
+function clipLine(text: string, n = 180): string {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  return t.length > n ? `${t.slice(0, n)}…` : t;
+}
+
+/** 列目录、读文件算只读。写文件、重载不算。 */
+function isBrowseCall(call: LlmToolCall): boolean {
+  const name = call.function.name;
+  if (
+    name === "nexus_list_skills" ||
+    name === "nexus_list_plugins" ||
+    name === "nexus_list_caps" ||
+    name === "nexus_skill_read" ||
+    name === "nexus_workspace_read" ||
+    name === "nexus_workspace_list"
+  ) {
+    return true;
+  }
+  if (name !== "nexus_shell") return false;
+  let cmd = "";
+  try {
+    cmd = String((JSON.parse(call.function.arguments || "{}") as { command?: string }).command || "");
+  } catch {
+    return false;
+  }
+  if (/Set-Content|Out-File|Add-Content|New-Item|mkdir|WriteAllText|plugin_reload|@'|@"|\bni\b/i.test(cmd)) {
+    return false;
+  }
+  return /Get-Content|Get-ChildItem|Select-Object|Select-String|\bls\b|\bdir\b|\bfind\b|\bcat\b|\btype\b/i.test(cmd);
 }
 
 /** API 的 reasoning 也包进 think 标签，外面只留给人看的正文。 */
@@ -173,40 +207,30 @@ export class LlmRouter {
     if (!tools.length) return this.chat(messages, opts);
 
     const history = messages.map((m) => ({ ...m }));
-    const maxRounds = Math.min(Math.max(opts?.maxRounds ?? 10, 1), 12);
+    const maxRounds = Math.min(Math.max(opts?.maxRounds ?? 20, 1), 28);
     const thoughts: string[] = [];
-    let silentNudges = 0;
-    for (let i = 0; i < maxRounds; i++) {
-      const turn = await this.chatTurn(history, tools);
-      if (turn.reasoning?.trim()) thoughts.push(turn.reasoning.trim());
-      const leaked = turn.tool_calls?.length ? [] : leakedToolCalls(turn.content);
-      const calls = turn.tool_calls?.length ? turn.tool_calls : leaked;
-      if (!calls.length) {
-        const text = composeSpeak(thoughts.join("\n\n"), turn.content);
-        if (speakOutsideTags(text)) {
-          if (opts?.onDelta && text) await emitSoftDeltas(text, opts.onDelta);
-          return text;
-        }
-        if (silentNudges < 1) {
-          silentNudges += 1;
-          history.push({ role: "assistant", content: turn.content || "" });
-          history.push({
-            role: "user",
-            content:
-              "还没完成。插件或文件没写就现在写到 plugins/ 并重载。然后在 <think> 外面用一两句说结果。禁止只有思考。",
-          });
-          continue;
-        }
-        const fallback = `${text}\n\n还没写完，我接着弄。`.trim();
-        if (opts?.onDelta) await emitSoftDeltas(fallback, opts.onDelta);
-        return fallback;
+    let readStreak = 0;
+    let toldToWrite = false;
+    const trace = (line: string) => {
+      try {
+        opts?.onTrace?.(line);
+      } catch {
+        /* 日志失败不影响回话 */
       }
-
+    };
+    const finish = async (text: string): Promise<string> => {
+      const out = text.trim() || "好了。";
+      trace(`AI 终稿  ${clipLine(speakOutsideTags(out) || out, 300) || "空"}`);
+      if (opts?.onDelta) await emitSoftDeltas(out, opts.onDelta);
+      return out;
+    };
+    const runCalls = async (calls: LlmToolCall[], content: string, hideContent: boolean) => {
       history.push({
         role: "assistant",
-        content: leaked.length ? "" : turn.content || "",
+        content: hideContent ? "" : content || "",
         tool_calls: calls,
       });
+      let browse = 0;
       for (const call of calls) {
         let args: Record<string, unknown> = {};
         try {
@@ -226,103 +250,60 @@ export class LlmRouter {
           name: call.function.name,
           content: typeof result === "string" ? result : JSON.stringify(result).slice(0, 6000),
         });
+        if (isBrowseCall(call)) browse += 1;
       }
+      if (browse === calls.length) readStreak += 1;
+      else readStreak = 0;
+      if (readStreak >= 4 && !toldToWrite) {
+        toldToWrite = true;
+        history.push({
+          role: "user",
+          content:
+            "读够了，不要再 Get-Content、列目录、翻网关源码。立刻把插件写到 plugins/ 并调用 nexus_plugin_reload。写完在 <think> 外面说一句结果。",
+        });
+        trace("AI 停读  连续只读已够，下一轮必须写文件");
+      }
+    };
+    const oneTurn = async (round: number): Promise<string | null> => {
+      const turn = await this.chatTurn(history, tools);
+      if (turn.reasoning?.trim()) thoughts.push(turn.reasoning.trim());
+      const leaked = turn.tool_calls?.length ? [] : leakedToolCalls(turn.content);
+      const calls = turn.tool_calls?.length ? turn.tool_calls : leaked;
+      trace(
+        `AI 回合 ${round}  工具 ${calls.map((c) => c.function.name).join("、") || "无"}  正文 ${clipLine(speakOutsideTags(turn.content || "")) || "空"}  思考 ${clipLine(turn.reasoning || "") || "无"}`,
+      );
+      if (!calls.length) {
+        const text = composeSpeak(thoughts.join("\n\n"), turn.content);
+        if (speakOutsideTags(text)) return text;
+        history.push({ role: "assistant", content: turn.content || "" });
+        history.push({
+          role: "user",
+          content:
+            "还没写完。不要停，不要只思考。现在就把文件写到 plugins/ 并重载，然后在 <think> 外面说一句。",
+        });
+        trace("AI 空回话  继续写文件，不结束");
+        return null;
+      }
+      await runCalls(calls, turn.content || "", leaked.length > 0);
+      return null;
+    };
+
+    for (let i = 0; i < maxRounds; i++) {
+      const done = await oneTurn(i + 1);
+      if (done) return finish(done);
     }
     history.push({
       role: "user",
-      content: "工具已经执行完。给人看的话写在 <think> 外面。思考只能写在 <think></think> 里。不要再调用工具，也不要把工具调用写进正文。",
+      content:
+        "轮次用在读上面了。现在只写 plugins/ 并 nexus_plugin_reload，不要再读。写完在 <think> 外面说一句。",
     });
-    let last = opts?.onDelta
-      ? await this.chatTurnStream(history, undefined, opts.onDelta)
-      : await this.chatTurn(history);
-    if (last.reasoning?.trim()) thoughts.push(last.reasoning.trim());
-    // 终稿若还泄出工具调用，再执行一轮并强制要人话
-    const more = leakedToolCalls(last.content);
-    if (more.length) {
-      history.push({
-        role: "assistant",
-        content: "",
-        tool_calls: more,
-      });
-      for (const call of more) {
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
-        } catch {
-          args = {};
-        }
-        let result: unknown;
-        try {
-          result = await onTool(call.function.name, args);
-        } catch (e) {
-          result = { error: e instanceof Error ? e.message : String(e) };
-        }
-        history.push({
-          role: "tool",
-          tool_call_id: call.id,
-          name: call.function.name,
-          content: typeof result === "string" ? result : JSON.stringify(result).slice(0, 6000),
-        });
-      }
-      history.push({
-        role: "user",
-        content: "好了。给人看的话写在标签外。思考只放 <think></think>。禁止再写工具调用。",
-      });
-      last = opts?.onDelta
-        ? await this.chatTurnStream(history, undefined, opts.onDelta)
-        : await this.chatTurn(history);
-      if (last.reasoning?.trim()) thoughts.push(last.reasoning.trim());
+    trace("AI 续写  读文件轮次用尽，接着写文件");
+    for (let w = 0; w < 6; w++) {
+      const done = await oneTurn(maxRounds + w + 1);
+      if (done) return finish(done);
     }
-    // 流式终稿已在 onDelta 里吐过正文；若还有多轮思考，补在返回值里
-    let text = composeSpeak(thoughts.join("\n\n"), last.content);
-    if (!speakOutsideTags(text)) {
-      history.push({
-        role: "user",
-        content:
-          "还没完成。插件或文件没写就现在写到 plugins/ 并重载。然后在 <think> 外面用一两句说结果。禁止只有思考。",
-      });
-      const again = await this.chatTurn(history, tools);
-      if (again.reasoning?.trim()) thoughts.push(again.reasoning.trim());
-      const againCalls = again.tool_calls?.length ? again.tool_calls : leakedToolCalls(again.content);
-      if (againCalls.length) {
-        history.push({
-          role: "assistant",
-          content: again.tool_calls?.length ? again.content || "" : "",
-          tool_calls: againCalls,
-        });
-        for (const call of againCalls) {
-          let args: Record<string, unknown> = {};
-          try {
-            args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
-          } catch {
-            args = {};
-          }
-          let result: unknown;
-          try {
-            result = await onTool(call.function.name, args);
-          } catch (e) {
-            result = { error: e instanceof Error ? e.message : String(e) };
-          }
-          history.push({
-            role: "tool",
-            tool_call_id: call.id,
-            name: call.function.name,
-            content: typeof result === "string" ? result : JSON.stringify(result).slice(0, 6000),
-          });
-        }
-        history.push({
-          role: "user",
-          content: "做完了。在 <think> 外面用一两句说结果。",
-        });
-        const spoken = await this.chatTurn(history);
-        if (spoken.reasoning?.trim()) thoughts.push(spoken.reasoning.trim());
-        text = composeSpeak(thoughts.join("\n\n"), spoken.content || "");
-      } else {
-        text = composeSpeak(thoughts.join("\n\n"), again.content || "");
-      }
-      if (!speakOutsideTags(text)) text = `${text}\n\n还没写完，我接着弄。`.trim();
-    }
-    return text || "好了。";
+    trace("AI 停  写文件轮次也用尽");
+    return finish("还没写完，我接着弄。");
   }
 
   private endpoint(): string {

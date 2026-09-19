@@ -453,7 +453,7 @@ function frameworkSystemPrompt(opts?: {
       "主人说戳我、戳一下：有 nexus_qq_poke 就调；没有就自己查 OneBot 地址（nexus_onebot_get），用 shell 调 send_poke / group_poke，或写插件用 ctx.ob11.call 再重载。不要只文字假装戳。",
       "有人说截图、截屏、截个图、电脑画面发群里：调用 nexus_screen。那是本机真实屏幕，不是状态卡片。不要用 nexus_shot 充数。没有显示器就照工具结果说明截不了。",
       "nexus_shot 只渲菜单或 HTML 图，不能拿来代替电脑截图。",
-      "写代码：短脚本放沙箱；要常驻能力就写到 plugins/ 再 nexus_plugin_reload。说「已创建 / 写好了」之前，必须用 nexus_shell 确认 plugins/目录/index.ts 真的在，并看到热更加载成功。文件不在就不要说写好了。查文件、跑系统命令、动服务器用 nexus_shell，工作目录默认框架根，也可指定绝对路径。",
+      "写代码：短脚本放沙箱；要常驻能力就写到 plugins/ 再 nexus_plugin_reload。看一两个示例就写，不要把网关源码整份读完。说「已创建 / 写好了」之前，必须用 nexus_shell 确认 plugins/目录/index.ts 真的在，并看到热更加载成功。文件不在就不要说写好了。",
       "改通道人设/回复群或 OneBot 开关路径：用 nexus_channel_patch / nexus_onebot_patch。不要改密码。",
       "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp。控件树是空的网页壳，用 nexus_web_attach 挂页面，或 nexus_window_see 认出字在哪再 nexus_click_text。普通窗口用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。不够就自己写脚本。",
       "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。snapshot 里有字和坐标。不要只用 web_read 只读摘要。",
@@ -1726,7 +1726,7 @@ async function bootstrap(): Promise<void> {
       },
     };
 
-    const llmDeadlineMs = capabilityMode ? 300_000 : 90_000;
+    const llmDeadlineMs = capabilityMode ? 600_000 : 90_000;
     const assistant = (
       await Promise.race([
         capabilityMode
@@ -1738,12 +1738,18 @@ async function bootstrap(): Promise<void> {
                   name === "nexus_shell"
                     ? ` ${String((args as { command?: string }).command || "")
                         .replace(/\s+/g, " ")
-                        .slice(0, 100)}`
+                        .slice(0, 160)}`
                     : "";
                 log.info(`工具 ${name}${hint}`);
-                return runAgentTool(name, args, toolBag);
+                const result = await runAgentTool(name, args, toolBag);
+                const raw = typeof result === "string" ? result : JSON.stringify(result ?? "");
+                log.info(`工具回执 ${name}  ${raw.replace(/\s+/g, " ").slice(0, 180) || "空"}`);
+                return result;
               },
-              opts?.onDelta ? { onDelta: opts.onDelta } : undefined,
+              {
+                ...(opts?.onDelta ? { onDelta: opts.onDelta } : {}),
+                onTrace: (line) => log.info(line),
+              },
             )
           : llm.chat(history, opts?.onDelta ? { onDelta: opts.onDelta } : undefined),
         new Promise<string>((_, reject) => {
@@ -1804,6 +1810,12 @@ async function bootstrap(): Promise<void> {
       all.push("还没写完，我接着弄。");
     }
     if (!all.length) return [];
+    log.info(
+      `AI 发出  思考 ${thinkingNodes.length} 段  回话 ${all.length} 条  ${all
+        .join(" / ")
+        .replace(/\s+/g, " ")
+        .slice(0, 220)}`,
+    );
 
     const replyJoined = all.join("\n\n");
     const storeAs =
