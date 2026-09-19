@@ -5,7 +5,7 @@
 <p align="center">
   <img alt="license" src="https://img.shields.io/badge/License-MIT-c4842f?style=flat-square" />
   <img alt="node" src="https://img.shields.io/badge/Node.js-%E2%89%A520-339933?style=flat-square" />
-  <img alt="version" src="https://img.shields.io/badge/Version-0.2.61-2f9b78?style=flat-square" />
+  <img alt="version" src="https://img.shields.io/badge/Version-0.2.62-2f9b78?style=flat-square" />
   <img alt="platform" src="https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Termux-1a1f18?style=flat-square" />
 </p>
 
@@ -33,11 +33,11 @@
 
 Fengyun Nexus 把 **控制台、消息通道、插件、工作流、多模型** 收进同一套网关：通道入站 → `#` 管理指令与插件 → 有密钥再走模型 → 回通道并写本地库。
 
-- **多通道**：Web 控制台 / Webhook / QQ（OneBot 11 · NapCat）
-- **插件与工作流**：目录扫描加载；通道插件与框架插件分开管；支持热重载
-- **Web 与 API**：Vue3 控制台 + REST；默认中文，可切 English
-- **系统插件包**：菜单 / 状态 / 生图 / 回声 / 点赞 / 群管 / 主人等，可走专仓更新
-- **渲染**：浏览器截图发菜单与状态图（控制台「环境配置」装浏览器）
+- **🌐 多通道**：Web 控制台 / Webhook / QQ（OneBot 11 · NapCat）
+- **🔌 插件包**：一组互相照应的插件一起发布；包内可混用简单 / 模块化写法；每个功能插件自带菜单
+- **🌐 Web 与 API**：Vue3 控制台 + REST；默认中文，可切 English
+- **⭐ 系统插件包**：菜单 / 状态 / 生图 / 回声 / 点赞 / 群管 / 主人等，可走专仓更新
+- **🎨 渲染**：浏览器截图发菜单与状态图（控制台「环境配置」装浏览器）
 
 ---
 
@@ -47,7 +47,7 @@ Fengyun Nexus 把 **控制台、消息通道、插件、工作流、多模型** 
 |------|------|
 | 控制台 | 浏览器里对话、看板、改配置；清新浅色主题 |
 | 消息通道 | Web / Webhook / QQ（OneBot 11 · NapCat 一键装） |
-| 插件 | `plugins/` 扫描；模块化目录；`onReady` 可自定义加载文案 |
+| 插件 | **插件包优先**；包内可混用写法；功能插件自带菜单；热重载；`onReady` 可自定义加载文案 |
 | AI | 多供应商（云端 / 本地 / 自定义），控制台实时切换；没配密钥就不乱回 |
 | 工作流 / MCP | 网关上挂工作流与工具调用 |
 | 管理指令 | 一律 `#` 开头：`#帮助` `#状态` `#关机` `#开机` `#重启` `#更新` |
@@ -90,6 +90,7 @@ Fengyun Nexus 把 **控制台、消息通道、插件、工作流、多模型** 
 零配置扩展（放对目录即可）：
 
 - **插件**：`plugins/<名>/` 或模块化 `plugin/` · `adapter/` · `workflow/` …
+- **插件包**：一组插件 + `nexus.pack.json` 说明组合与菜单；专仓整包更新
 - **通道适配**：插件内 `adapter/` 导出 `defineAdapter`，启动与热更自动挂进侧栏
 - **系统插件**：`pnpm pack:system-plugins` 抽到专仓
 
@@ -165,6 +166,7 @@ pnpm nexus status
 | 开始使用 | [docs/product/start.md](docs/product/start.md) |
 | 环境要求 | [docs/product/environment.md](docs/product/environment.md) |
 | 插件生态 | [docs/ecosystem/plugins.md](docs/ecosystem/plugins.md) |
+| 插件包 | [docs/ecosystem/plugin-packs.md](docs/ecosystem/plugin-packs.md) |
 | OneBot 11 | [docs/ecosystem/onebot11.md](docs/ecosystem/onebot11.md) |
 
 ---

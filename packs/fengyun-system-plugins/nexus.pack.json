@@ -1,0 +1,81 @@
+{
+  "id": "fengyun.system",
+  "name": "系统插件包",
+  "version": "0.2.0",
+  "description": "Fengyun Nexus 官方系统插件包。包内插件互相配合：主人管权限，群管认主人，进退群管欢迎，点赞分主客文案。框架菜单只管电源/更新/状态；各功能插件自带菜单。",
+  "kind": "pack",
+  "writingStyles": [
+    "simple-index",
+    "modular-dirs",
+    "mixed"
+  ],
+  "plugins": [
+    {
+      "dir": "plugins/z-menu",
+      "id": "z.menu",
+      "menu": [
+        "#菜单",
+        "#帮助"
+      ]
+    },
+    {
+      "dir": "plugins/z-status",
+      "id": "z.status",
+      "menu": [
+        "#状态"
+      ]
+    },
+    {
+      "dir": "plugins/z-draw",
+      "id": "z.draw",
+      "menu": [
+        "#生图菜单",
+        "#生图"
+      ]
+    },
+    {
+      "dir": "plugins/z-echo",
+      "id": "z.echo",
+      "menu": [
+        "#回声菜单",
+        "#echo"
+      ]
+    },
+    {
+      "dir": "plugins/z-like",
+      "id": "z.like",
+      "menu": [
+        "#点赞菜单",
+        "#赞我"
+      ]
+    },
+    {
+      "dir": "plugins/z-group-admin",
+      "id": "z.group.admin",
+      "menu": [
+        "#群管",
+        "#群管菜单"
+      ]
+    },
+    {
+      "dir": "plugins/z-group-notice",
+      "id": "z.group.notice",
+      "menu": [
+        "#进退群菜单"
+      ]
+    },
+    {
+      "dir": "plugins/z-master",
+      "id": "z.master",
+      "menu": [
+        "#主人菜单"
+      ]
+    }
+  ],
+  "combos": [
+    "主人管理 + 群管：踢禁等指令认通道主人级别",
+    "主人管理 + 点赞：主人与普通人不同回复",
+    "群管 + 进退群：权限与欢迎语分开，可同装",
+    "菜单 + 生图：截图同一套视觉壳"
+  ]
+}

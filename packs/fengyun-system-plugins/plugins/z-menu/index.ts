@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
-/** 框架菜单。插件自己的菜单由插件自己画，这里不收录。 */
+/** 框架菜单。各功能插件另有自己的菜单，这里不收录插件指令。 */
 const SECTIONS = [
   {
     title: "电源",
@@ -9,7 +9,7 @@ const SECTIONS = [
   },
   {
     title: "更新",
-    lines: ["#更新 — 更新框架与系统插件"],
+    lines: ["#更新 — 更新框架与系统插件包"],
   },
   {
     title: "状态",
@@ -17,7 +17,7 @@ const SECTIONS = [
   },
   {
     title: "菜单",
-    lines: ["#菜单 — 功能菜单", "#帮助 — 功能菜单"],
+    lines: ["#菜单 — 框架菜单", "#帮助 — 框架菜单"],
   },
 ];
 
@@ -25,7 +25,7 @@ export class ZMenuPlugin extends Plugin {
   manifest = {
     id: "z.menu",
     name: "菜单",
-    version: "0.2.0",
+    version: "0.2.1",
     priority: 10,
     category: "basic" as const,
     kind: "framework" as const,
@@ -34,16 +34,16 @@ export class ZMenuPlugin extends Plugin {
   };
 
   rule = [
-    { reg: "^#菜单$", fnc: "menu", describe: "功能菜单" },
-    { reg: "^#帮助$", fnc: "menu", describe: "功能菜单" },
-    { reg: "^#help$", fnc: "menu", describe: "功能菜单" },
+    { reg: "^#菜单$", fnc: "menu", describe: "框架菜单" },
+    { reg: "^#帮助$", fnc: "menu", describe: "框架菜单" },
+    { reg: "^#help$", fnc: "menu", describe: "框架菜单" },
   ];
 
   async onReady(_ctx: PluginContext) {}
 
   async menu(e: NexusEvent, ctx: PluginContext) {
     const shot = await ctx.shot.renderMenu({
-      title: "功能菜单",
+      title: "框架菜单",
       sections: SECTIONS,
     });
     if (!shot.ok) {

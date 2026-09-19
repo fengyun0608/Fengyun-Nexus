@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 type LikeCfg = {
@@ -156,17 +157,18 @@ export class ZLikePlugin extends Plugin {
   manifest = {
     id: "z.like",
     name: "点赞",
-    version: "0.3.1",
+    version: "0.3.2",
     priority: 900,
     category: "basic" as const,
     kind: "channel" as const,
     adapterScope: "channel" as const,
     channels: ["onebot11"],
     permissions: ["channel.send" as const, "onebot.api" as const],
-    description: "给自己点赞。#赞我，或触发词不用 #。只有这个插件认关键词",
+    description: "给自己点赞。#赞我或触发词；发 #点赞菜单 看用法",
   };
 
   rule = [
+    { reg: "^#点赞菜单$", fnc: "menu", describe: "点赞菜单" },
     {
       reg: "^#赞我\\s*$",
       fnc: "likeMe",
@@ -304,6 +306,32 @@ export class ZLikePlugin extends Plugin {
   }
 
   async onReady(_ctx: PluginContext) {}
+
+  async menu(e: NexusEvent, ctx: PluginContext) {
+    const sections = [
+      {
+        title: "用法",
+        lines: [
+          "#赞我 — 给自己点赞",
+          "触发词也可，不用写 #，默认：赞我、点个赞、给我点赞",
+        ],
+      },
+      {
+        title: "组合",
+        lines: [
+          "主人与普通人可用不同回复文案",
+          "可与主人管理同装，识别主人更宠",
+        ],
+      },
+    ];
+    const shot = await ctx.shot.renderMenu({ title: "点赞菜单", sections });
+    if (!shot.ok) {
+      const lines = sections.flatMap((s) => [s.title, ...s.lines]);
+      await e.reply(["点赞菜单", ...lines, shot.message].join("\n"));
+      return;
+    }
+    await e.replyImage(pathToFileURL(shot.pngPath).href);
+  }
 
   async accept(e: NexusEvent, ctx: PluginContext): Promise<boolean | void> {
     if (await super.accept(e, ctx)) return true;

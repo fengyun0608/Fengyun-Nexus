@@ -1,11 +1,12 @@
+import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
-/** Sample directory plugin — Z.* id convention. Commands use `#` prefix. */
+/** 回声示例。本插件自带 #回声菜单。 */
 export class ZEchoPlugin extends Plugin {
   manifest = {
     id: "z.echo",
     name: "回声",
-    version: "0.1.1",
+    version: "0.2.0",
     priority: 1000,
     category: "demo" as const,
     kind: "framework" as const,
@@ -14,10 +15,11 @@ export class ZEchoPlugin extends Plugin {
   };
 
   rule = [
+    { reg: "^#回声菜单$", fnc: "menu", describe: "回声菜单" },
     {
       reg: "^#echo\\s+(.+)$",
       fnc: "echo",
-      describe: "Echo text after #echo",
+      describe: "回声文本",
     },
   ];
 
@@ -51,6 +53,26 @@ export class ZEchoPlugin extends Plugin {
   }
 
   async onReady(_ctx: PluginContext) {}
+
+  async menu(e: NexusEvent, ctx: PluginContext) {
+    const sections = [
+      {
+        title: "用法",
+        lines: ["#echo 文本 — 原样回一段字"],
+      },
+      {
+        title: "组合",
+        lines: ["适合练写法；可与菜单、生图同装做截图联调"],
+      },
+    ];
+    const shot = await ctx.shot.renderMenu({ title: "回声菜单", sections });
+    if (!shot.ok) {
+      const lines = sections.flatMap((s) => [s.title, ...s.lines]);
+      await e.reply(["回声菜单", ...lines, shot.message].join("\n"));
+      return;
+    }
+    await e.replyImage(pathToFileURL(shot.pngPath).href);
+  }
 
   async echo(e: NexusEvent) {
     if (this.cfg.enabled === false) return;

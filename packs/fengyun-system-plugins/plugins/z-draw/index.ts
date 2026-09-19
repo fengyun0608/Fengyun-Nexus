@@ -9,7 +9,7 @@ export class ZDrawPlugin extends Plugin {
   manifest = {
     id: "z.draw",
     name: "生图",
-    version: "0.3.0",
+    version: "0.3.1",
     priority: 20,
     category: "basic" as const,
     kind: "framework" as const,
@@ -18,6 +18,7 @@ export class ZDrawPlugin extends Plugin {
   };
 
   rule = [
+    { reg: "^#生图菜单$", fnc: "menu", describe: "生图菜单" },
     {
       reg: "^#生图\\s*(.*)$",
       fnc: "draw",
@@ -56,10 +57,44 @@ export class ZDrawPlugin extends Plugin {
 
   async onReady(_ctx: PluginContext) {}
 
+  async menu(e: NexusEvent, ctx: PluginContext) {
+    const sections = [
+      {
+        title: "用法",
+        lines: [
+          "#生图 — 渲一张示例菜单图发群",
+          "#生图 标题 — 自定义标题",
+        ],
+      },
+      {
+        title: "说明",
+        lines: [
+          "这是系统截图，不是 AI 文生图",
+          "浏览器运行时在控制台环境配置安装",
+        ],
+      },
+      {
+        title: "组合",
+        lines: ["各插件也可用 ctx.shot.renderMenu 画自己的菜单"],
+      },
+    ];
+    const shot = await ctx.shot.renderMenu({ title: "生图菜单", sections });
+    if (!shot.ok) {
+      const lines = sections.flatMap((s) => [s.title, ...s.lines]);
+      await e.reply(["生图菜单", ...lines, shot.message].join("\n"));
+      return;
+    }
+    await e.replyImage(pathToFileURL(shot.pngPath).href);
+  }
+
   async draw(e: NexusEvent, ctx: PluginContext) {
     if (this.cfg.enabled === false) return;
     const m = e.msg.match(/^#生图\s*(.*)$/);
     const arg = (m?.[1] ?? "").trim();
+    if (arg === "菜单" || arg.toLowerCase() === "menu") {
+      await this.menu(e, ctx);
+      return;
+    }
 
     const lines = [
       "电源",
@@ -67,16 +102,16 @@ export class ZDrawPlugin extends Plugin {
       "#开机 — 恢复应答",
       "#重启 — 重启",
       "更新",
-      "#更新 — 更新框架与系统插件",
+      "#更新 — 更新框架与系统插件包",
       "状态",
       "#状态 — 运行状态",
       "菜单",
-      "#菜单 — 功能菜单",
-      "#帮助 — 功能菜单",
+      "#菜单 — 框架菜单",
+      "#帮助 — 框架菜单",
     ];
 
     const shot = await ctx.shot.renderMenu({
-      title: arg && arg !== "菜单" && arg !== "menu" ? arg : "功能菜单",
+      title: arg || "框架菜单",
       lines,
     });
 

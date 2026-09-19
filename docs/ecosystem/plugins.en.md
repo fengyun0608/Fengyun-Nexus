@@ -2,21 +2,12 @@
 
 [中文](plugins.md) | English
 
-Fengyun Nexus plugins fall into two families:
+Fengyun Nexus prefers **plugin packs** — cooperating plugins published together. Singles are fine for learning.
 
-| Kind | About |
-|------|--------|
-| Channel plugins | Tied to a message channel (e.g. QQ) |
-| Framework plugins | Shared capabilities (menu, status, screenshot, …) |
+- Framework `#菜单` covers power / update / status only.
+- Feature plugins ship their own menus (e.g. `#群管`).
+- Mix simple `index.ts` and modular dirs inside one pack.
 
-Install from the remote registry (demo / basic / standard) or develop under local `plugins/`.
+See [plugin packs](plugin-packs.en.md) · [channel plugins](channel-plugins.en.md).
 
-System plugins (menu / status / draw / echo / like / group / master) update from a dedicated pack repo locked in release config.
-
-- Remotes: [GitCode](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus) · [GitHub](https://github.com/fengyun0608/Fengyun-Nexus)
-- System pack: [fengyun-system-plugins](https://gitcode.com/fengyunnb_admin/fengyun-system-plugins)
-- Console: Plugin Manager; pack URL is read-only
-
-Drop-in layout: root `index.ts`, or modular `plugin/` · `adapter/` · `workflow/` · …. Channel adapters via `defineAdapter` are picked up automatically.
-
-Recommended license: MIT. See [channel plugins](channel-plugins.en.md).
+Remotes: [GitCode](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus) · [GitHub](https://github.com/fengyun0608/Fengyun-Nexus) · system pack [fengyun-system-plugins](https://gitcode.com/fengyunnb_admin/fengyun-system-plugins).

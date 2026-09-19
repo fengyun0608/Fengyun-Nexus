@@ -1,43 +1,49 @@
 # Fengyun Nexus · 系统插件包
 
-菜单 / 状态 / 生图 / 回声 / 点赞 / 群管 / 进退群 / 主人。放到宿主 `plugins/` 下即可加载。
+这是**插件包**，不是单个插件：里面多份能力互相照应，可组合使用。装进宿主 `plugins/` 后分别加载。
 
 专仓：https://gitcode.com/fengyunnb_admin/fengyun-system-plugins
 
+包说明见 `nexus.pack.json`。写法可混用简单 `index.ts` 与模块化目录。
+
 ## 包含
 
-| 目录 | 指令 | 说明 |
-|------|------|------|
-| `plugins/z-menu` | `#菜单` `#帮助` | 分类菜单，两个词同一张图 |
-| `plugins/z-status` | `#状态` | 账号卡、曲线、运行明细（不露群号与库路径） |
-| `plugins/z-draw` | `#生图` | 菜单图截图发群 |
-| `plugins/z-echo` | `#echo 文本` | 回声示例 |
-| `plugins/z-like` | `#赞我` | 点赞；触发词不用 # |
-| `plugins/z-group-admin` | `#踢` `#禁言` `#群公告` `#群文件` | 群管 |
-| `plugins/z-group-notice` | 进群 / 退群自动说一声 | 进退群通知 |
-| `plugins/z-master` | `#添加主人` | 核心 / 新 / 普通主人 |
+| 目录 | 本插件菜单 | 说明 |
+|------|------------|------|
+| `plugins/z-menu` | `#菜单` `#帮助` | 框架菜单：电源 / 更新 / 状态 |
+| `plugins/z-status` | `#状态` | 运行状态图 |
+| `plugins/z-draw` | `#生图菜单` `#生图` | 系统截图发群 |
+| `plugins/z-echo` | `#回声菜单` `#echo` | 回声示例 |
+| `plugins/z-like` | `#点赞菜单` `#赞我` | 点赞；触发词可不用 # |
+| `plugins/z-group-admin` | `#群管` `#群管菜单` | 踢 / 禁言 / 公告 / 文件 |
+| `plugins/z-group-notice` | `#进退群菜单` | 进退群通知 |
+| `plugins/z-master` | `#主人菜单` | 核心 / 新 / 普通主人 |
+
+## 组合
+
+- 主人 + 群管：踢禁认通道主人
+- 主人 + 点赞：主客不同回复
+- 群管 + 进退群：权限与欢迎分开
+- 框架菜单不收录业务指令；各插件自己出菜单图
 
 ## 更新
 
-宿主管理指令（主人）：
+宿主主人指令：
 
-- `#更新` / `#更新插件` — 拉**框架仓**与**本插件专仓**
-- 框架或系统插件**有一方有更新**：说明改了啥，然后同窗口重启
-- 两边都最新：只回执，不重启
+- `#更新` / `#更新插件` — 拉框架仓与本插件专仓
+- 有一方更新：说明改动后同窗口重启
+- 都最新：只回执
 
-专仓地址写在宿主发行配置 `configs/registry.json` 的 `pluginsRepo`，**控制台不可改**。
+专仓地址在宿主 `configs/registry.json` 的 `pluginsRepo`，控制台不可改。
 
-## 截图与状态
+## 截图
 
 ```ts
-const shot = await ctx.shot.renderMenu({ title: "功能菜单", lines: ["#帮助", "#状态"] });
+const shot = await ctx.shot.renderMenu({ title: "群管菜单", sections: […] });
 if (shot.ok) await e.replyImage(pathToFileURL(shot.pngPath).href);
-
-const lines = ctx.runtime.statusLines(); // 宿主注入的运行信息
 ```
 
-- `e.replyImage` **只发图**，不要旁文。
-- 浏览器运行时在宿主控制台「环境配置」安装。
+`e.replyImage` 只发图。浏览器在宿主「环境配置」安装。
 
 ## 发布
 
@@ -46,5 +52,3 @@ pnpm pack:system-plugins
 cd packs/fengyun-system-plugins
 git add . && git commit -m "系统插件包更新" && git push
 ```
-
-宿主产品介绍与致谢见 [Fengyun-Nexus README](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus)。

@@ -1,0 +1,13 @@
+{
+  "id": "example.pack",
+  "name": "示例插件包",
+  "version": "0.1.0",
+  "description": "模板：说明插件包与单插件的差别，以及包内可混用多种写法。",
+  "kind": "pack",
+  "writingStyles": ["simple-index", "modular-dirs", "mixed"],
+  "plugins": [],
+  "combos": [
+    "在 plugins/ 下放入多个插件后，在此列出 id 与菜单词",
+    "在 combos 里写清彼此怎么配合"
+  ]
+}

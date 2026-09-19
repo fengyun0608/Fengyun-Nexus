@@ -48,7 +48,6 @@ function copyPlugin(name, destBase) {
       return !SKIP.has(base);
     },
   });
-  // 发布仓不依赖 monorepo workspace；截图走宿主 ctx.shot
   const pkgPath = join(dest, "package.json");
   if (existsSync(pkgPath)) {
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
@@ -59,14 +58,12 @@ function copyPlugin(name, destBase) {
     delete pkg.devDependencies;
     writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
   }
-  // 去掉仅给 monorepo 用的 screenshot 再导出（发布包只保留 index）
   const shot = join(dest, "screenshot.ts");
   if (existsSync(shot) && name === "z-draw") {
     rmSync(shot, { force: true });
   }
 }
 
-// 清空输出目录但保留已有的 .git（方便反复 pack 后 push 专仓）
 if (existsSync(outRoot)) {
   for (const name of readdirSync(outRoot)) {
     if (name === ".git") continue;
@@ -81,46 +78,80 @@ for (const name of PLUGINS) {
   copyPlugin(name, outRoot);
 }
 
+const packMeta = {
+  id: "fengyun.system",
+  name: "系统插件包",
+  version: "0.2.0",
+  description:
+    "Fengyun Nexus 官方系统插件包。包内插件互相配合：主人管权限，群管认主人，进退群管欢迎，点赞分主客文案。框架菜单只管电源/更新/状态；各功能插件自带菜单。",
+  kind: "pack",
+  writingStyles: ["simple-index", "modular-dirs", "mixed"],
+  plugins: [
+    { dir: "plugins/z-menu", id: "z.menu", menu: ["#菜单", "#帮助"] },
+    { dir: "plugins/z-status", id: "z.status", menu: ["#状态"] },
+    { dir: "plugins/z-draw", id: "z.draw", menu: ["#生图菜单", "#生图"] },
+    { dir: "plugins/z-echo", id: "z.echo", menu: ["#回声菜单", "#echo"] },
+    { dir: "plugins/z-like", id: "z.like", menu: ["#点赞菜单", "#赞我"] },
+    { dir: "plugins/z-group-admin", id: "z.group.admin", menu: ["#群管", "#群管菜单"] },
+    { dir: "plugins/z-group-notice", id: "z.group.notice", menu: ["#进退群菜单"] },
+    { dir: "plugins/z-master", id: "z.master", menu: ["#主人菜单"] },
+  ],
+  combos: [
+    "主人管理 + 群管：踢禁等指令认通道主人级别",
+    "主人管理 + 点赞：主人与普通人不同回复",
+    "群管 + 进退群：权限与欢迎语分开，可同装",
+    "菜单 + 生图：截图同一套视觉壳",
+  ],
+};
+
+writeFileSync(join(outRoot, "nexus.pack.json"), `${JSON.stringify(packMeta, null, 2)}\n`, "utf8");
+
 const readme = `# Fengyun Nexus · 系统插件包
 
-菜单 / 状态 / 生图 / 回声 / 点赞 / 群管 / 进退群 / 主人。放到宿主 \`plugins/\` 下即可加载。
+这是**插件包**，不是单个插件：里面多份能力互相照应，可组合使用。装进宿主 \`plugins/\` 后分别加载。
 
 专仓：https://gitcode.com/fengyunnb_admin/fengyun-system-plugins
 
+包说明见 \`nexus.pack.json\`。写法可混用简单 \`index.ts\` 与模块化目录。
+
 ## 包含
 
-| 目录 | 指令 | 说明 |
-|------|------|------|
-| \`plugins/z-menu\` | \`#菜单\` \`#帮助\` | 分类菜单，两个词同一张图 |
-| \`plugins/z-status\` | \`#状态\` | 账号头像、群好友、消息、在线时长 |
-| \`plugins/z-draw\` | \`#生图\` | 菜单图截图发群 |
-| \`plugins/z-echo\` | \`#echo 文本\` | 回声示例 |
-| \`plugins/z-like\` | \`#赞我\` | 点赞；触发词不用 # |
-| \`plugins/z-group-admin\` | \`#踢\` \`#禁言\` \`#群公告\` \`#群文件\` | 群管 |
-| \`plugins/z-group-notice\` | 进群 / 退群自动说一声 | 进退群通知 |
-| \`plugins/z-master\` | \`#添加主人\` | 核心 / 新 / 普通主人 |
+| 目录 | 本插件菜单 | 说明 |
+|------|------------|------|
+| \`plugins/z-menu\` | \`#菜单\` \`#帮助\` | 框架菜单：电源 / 更新 / 状态 |
+| \`plugins/z-status\` | \`#状态\` | 运行状态图 |
+| \`plugins/z-draw\` | \`#生图菜单\` \`#生图\` | 系统截图发群 |
+| \`plugins/z-echo\` | \`#回声菜单\` \`#echo\` | 回声示例 |
+| \`plugins/z-like\` | \`#点赞菜单\` \`#赞我\` | 点赞；触发词可不用 # |
+| \`plugins/z-group-admin\` | \`#群管\` \`#群管菜单\` | 踢 / 禁言 / 公告 / 文件 |
+| \`plugins/z-group-notice\` | \`#进退群菜单\` | 进退群通知 |
+| \`plugins/z-master\` | \`#主人菜单\` | 核心 / 新 / 普通主人 |
+
+## 组合
+
+- 主人 + 群管：踢禁认通道主人
+- 主人 + 点赞：主客不同回复
+- 群管 + 进退群：权限与欢迎分开
+- 框架菜单不收录业务指令；各插件自己出菜单图
 
 ## 更新
 
-宿主管理指令（主人）：
+宿主主人指令：
 
-- \`#更新\` / \`#更新插件\` — 拉**框架仓**与**本插件专仓**
-- 框架或系统插件**有一方有更新**：多群合并转发说明改了啥，然后同窗口重启
-- 两边都最新：只回执，不重启
+- \`#更新\` / \`#更新插件\` — 拉框架仓与本插件专仓
+- 有一方更新：说明改动后同窗口重启
+- 都最新：只回执
 
-专仓地址写在宿主发行配置 \`configs/registry.json\` 的 \`pluginsRepo\`，**控制台不可改**。
+专仓地址在宿主 \`configs/registry.json\` 的 \`pluginsRepo\`，控制台不可改。
 
-## 截图与状态
+## 截图
 
 \`\`\`ts
-const shot = await ctx.shot.renderMenu({ title: "功能菜单", lines: ["#帮助", "#状态"] });
+const shot = await ctx.shot.renderMenu({ title: "群管菜单", sections: […] });
 if (shot.ok) await e.replyImage(pathToFileURL(shot.pngPath).href);
-
-const lines = ctx.runtime.statusLines(); // 宿主注入的运行信息
 \`\`\`
 
-- \`e.replyImage\` **只发图**，不要旁文。
-- 浏览器运行时在宿主控制台「环境配置」安装。
+\`e.replyImage\` 只发图。浏览器在宿主「环境配置」安装。
 
 ## 发布
 
@@ -137,9 +168,9 @@ writeFileSync(
   `${JSON.stringify(
     {
       name: "fengyun-system-plugins",
-      version: "0.1.0",
+      version: "0.2.0",
       private: true,
-      description: "Fengyun Nexus 系统插件包（菜单 / 生图 / 点赞 / 群管 / 进退群 / 主人）",
+      description: "Fengyun Nexus 系统插件包（菜单 / 状态 / 生图 / 点赞 / 群管 / 进退群 / 主人）",
       license: "MIT",
     },
     null,

@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 function groupIdOf(e: NexusEvent): string {
@@ -81,25 +82,27 @@ const TEASE = [
   "哇，你居然被禁言了…是不是惹到谁了呀，杂鱼主人。",
 ];
 
-/** QQ 群管：踢 / 踢黑 / 禁言 / 全体禁言 / 公告 / 群文件 */
+/** QQ 群管：踢 / 踢黑 / 禁言 / 全体禁言 / 公告 / 群文件。本插件自带 #群管 菜单。 */
 export class ZGroupAdminPlugin extends Plugin {
   manifest = {
     id: "z.group.admin",
     name: "群管",
-    version: "0.1.2",
+    version: "0.2.0",
     priority: 850,
     category: "standard" as const,
     kind: "channel" as const,
     adapterScope: "channel" as const,
     channels: ["onebot11"],
     permissions: ["channel.send" as const, "onebot.api" as const],
-    description: "踢人、踢黑、禁言、全体禁言、群公告、群文件",
+    description: "踢人、踢黑、禁言、全体禁言、群公告、群文件；发 #群管 看菜单",
   };
 
   rule = [
+    { reg: "^#群管菜单$", fnc: "menu", describe: "群管菜单" },
+    { reg: "^#群管$", fnc: "menu", describe: "群管菜单" },
     { reg: "^#踢黑", fnc: "kickBan", permission: "master" as const, describe: "踢出并拉黑" },
     { reg: "^#踢", fnc: "kick", permission: "master" as const, describe: "踢出群" },
-    { reg: "^#禁言", fnc: "ban", permission: "master" as const, describe: "禁言（分钟）" },
+    { reg: "^#禁言", fnc: "ban", permission: "master" as const, describe: "禁言" },
     { reg: "^#解禁", fnc: "unban", permission: "master" as const, describe: "解除禁言" },
     { reg: "^#全体禁言", fnc: "wholeBan", permission: "master" as const, describe: "全体禁言" },
     { reg: "^#全体解禁", fnc: "wholeUnban", permission: "master" as const, describe: "全体解禁" },
@@ -140,6 +143,42 @@ export class ZGroupAdminPlugin extends Plugin {
   }
 
   async onReady(_ctx: PluginContext) {}
+
+  async menu(e: NexusEvent, ctx: PluginContext) {
+    const sections = [
+      {
+        title: "成员",
+        lines: [
+          "#踢 @对方 — 踢出",
+          "#踢黑 @对方 — 踢出并拉黑",
+          "#禁言 @对方 10分 — 禁言",
+          "#解禁 @对方 — 解除禁言",
+        ],
+      },
+      {
+        title: "全群",
+        lines: ["#全体禁言 — 开全体禁言", "#全体解禁 — 关全体禁言"],
+      },
+      {
+        title: "公告与文件",
+        lines: ["#群公告 内容 — 发公告", "#群文件 — 看群文件"],
+      },
+      {
+        title: "组合",
+        lines: [
+          "可与主人管理、进退群通知同装，权限与欢迎语互相配合",
+          "发 #群管 或 #群管菜单 再看本页",
+        ],
+      },
+    ];
+    const shot = await ctx.shot.renderMenu({ title: "群管菜单", sections });
+    if (!shot.ok) {
+      const lines = sections.flatMap((s) => [s.title, ...s.lines]);
+      await e.reply(["群管菜单", ...lines, shot.message].join("\n"));
+      return;
+    }
+    await e.replyImage(pathToFileURL(shot.pngPath).href);
+  }
 
   async onNotice(ev: Record<string, unknown>, ctx: PluginContext): Promise<string[] | void> {
     if (!this.cfg.teaseMasters) return;

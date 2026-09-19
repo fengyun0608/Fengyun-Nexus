@@ -2,28 +2,33 @@
 
 中文 | [English](plugins.en.md)
 
-Fengyun Nexus 的插件生态面向两类能力：
+Fengyun Nexus **优先做插件包**：一组互相照应的插件一起发布与更新。单插件适合练手；产品交付用包。
 
 | 类型 | 说明 |
 |------|------|
-| 消息通道插件 | 服务于某一消息通道（如 QQ），在对应通道场景下使用 |
-| 框架插件 | 通用能力（菜单、状态、浏览器截菜单图发群等），不绑死单一通道 |
+| 消息通道插件包 | 服务于某一消息通道，包内可多插件组合 |
+| 系统插件包 | 通用能力；官方专仓整包更新 |
+| 单插件 | 一项能力；也可收进某个包 |
 
-插件可从远程仓安装与更新（示例 / 基础 / 标准分类），也可在本地 `plugins/` 中开发。
+## 菜单
 
-系统通用插件（菜单 / 状态 / 生图 / 回声 / 点赞 / 群管 / 进退群 / 主人）走官方专仓更新，地址写在发行配置里并锁定，控制台不能改。群里主人发 `#更新` / `#更新插件` 会拉框架与该专仓；有一方更新则说明改动并同窗口重启。
+- 框架 `#菜单` / `#帮助`：只含电源、更新、状态
+- 业务插件各自出菜单：如 `#群管`、`#主人菜单`、`#点赞菜单`
+
+## 写法
+
+包内可混用：
+
+- 简单根 `index.ts`
+- 模块化 `plugin/` · `adapter/` · `workflow/` …
+- `onReady` 自定义加载文案
+
+详解：[插件包](plugin-packs.md) · [通道插件写法](channel-plugins.md)
+
+## 远程与专仓
 
 - 远程仓：[GitCode · Fengyun-Nexus](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus) · [GitHub](https://github.com/fengyun0608/Fengyun-Nexus)
 - 系统插件专仓：[fengyun-system-plugins](https://gitcode.com/fengyunnb_admin/fengyun-system-plugins)
-- 控制台：插件管理；插件更新页可检测 / 拉取，专仓地址只读
+- 主人 `#更新` 拉框架与专仓；有一方更新则说明并同窗口重启
 
-## 扩展习惯
-
-- 目录放对即可加载：根 `index.ts`，或模块化 `plugin/` · `adapter/` · `workflow/` · `http/` · `events/` · `www/`
-- `id` 英文，`name` 中文；指令以 `#` 开头（点赞等少数插件可用触发词）
-- `onReady` 可 `ctx.log` 多行 / 图案，或 `return ["行1","行2"]`；框架「已加载：xxx」不变
-- 通道 adapter：`defineAdapter` 导出后由宿主自动挂载，不必改网关手写注册
-
-推荐开源许可：MIT。写法基准见 [通道插件](channel-plugins.md)。
-
-> 本页为生态介绍。具体对接以源码与控制台可点文档为准。
+推荐开源许可：MIT。

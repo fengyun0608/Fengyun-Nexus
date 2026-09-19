@@ -1,4 +1,5 @@
-import { Plugin, type PluginContext } from "@fengyun/nexus-plugin-sdk";
+import { pathToFileURL } from "node:url";
+import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 const JOIN = [
   "哼，又钻进来一个。家里随便坐，别弄乱我的东西。",
@@ -39,20 +40,22 @@ function sameId(a: unknown, b: unknown): boolean {
   return Boolean(x) && x === y;
 }
 
-/** 只对别人进群、别人退群说话。机器人自己进退或被踢不吭声 */
+/** 只对别人进群、别人退群说话。本插件自带 #进退群菜单。 */
 export class ZGroupNoticePlugin extends Plugin {
   manifest = {
     id: "z.group.notice",
     name: "进退群通知",
-    version: "0.1.1",
+    version: "0.2.0",
     priority: 860,
     category: "standard" as const,
     kind: "channel" as const,
     adapterScope: "channel" as const,
     channels: ["onebot11"],
     permissions: ["channel.send" as const],
-    description: "别人进群或退群时说一声，自己进退或被踢不说话",
+    description: "别人进退群时说一声；发 #进退群菜单 看说明",
   };
+
+  rule = [{ reg: "^#进退群菜单$", fnc: "menu", describe: "进退群菜单" }];
 
   configSchema = [
     {
@@ -102,6 +105,34 @@ export class ZGroupNoticePlugin extends Plugin {
   }
 
   async onReady(_ctx: PluginContext) {}
+
+  async menu(e: NexusEvent, ctx: PluginContext) {
+    const sections = [
+      {
+        title: "行为",
+        lines: [
+          "别人进群 — 随机一句欢迎",
+          "别人退群 — 随机一句送别",
+          "机器人自己进退或被踢 — 不说话",
+        ],
+      },
+      {
+        title: "配置",
+        lines: ["控制台可改进群/退群语句、是否艾特对方"],
+      },
+      {
+        title: "组合",
+        lines: ["可与群管、主人管理同装，欢迎与权限分开管"],
+      },
+    ];
+    const shot = await ctx.shot.renderMenu({ title: "进退群菜单", sections });
+    if (!shot.ok) {
+      const lines = sections.flatMap((s) => [s.title, ...s.lines]);
+      await e.reply(["进退群菜单", ...lines, shot.message].join("\n"));
+      return;
+    }
+    await e.replyImage(pathToFileURL(shot.pngPath).href);
+  }
 
   async onNotice(ev: Record<string, unknown>): Promise<string[] | void> {
     if (!this.cfg.enabled) return;
