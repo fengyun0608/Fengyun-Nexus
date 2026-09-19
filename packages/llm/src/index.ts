@@ -47,6 +47,51 @@ export function stripThinking(text: string): string {
     .trim();
 }
 
+function stripToolMarkup(text: string): string {
+  let s = String(text || "");
+  s = s.replace(
+    /<[^>\n]{0,80}(?:DSML|tool_calls|tool_call|function_calls|invoke|parameter)[^>]*>[\s\S]*?<\/[^>\n]{0,80}(?:DSML|tool_calls|tool_call|function_calls|invoke|parameter)[^>]*>/gi,
+    "",
+  );
+  s = s
+    .split(/\r?\n/)
+    .filter((line) => !/DSML|tool_calls|invoke\s+name\s*=|function_calls/i.test(line))
+    .join("\n");
+  return s.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** 正文里的 DSML / XML 工具调用，转成正式 tool_calls，避免发出去也不执行。 */
+function leakedToolCalls(text: string): LlmToolCall[] {
+  const raw = String(text || "");
+  if (!/DSML|tool_calls|invoke\s+name\s*=|function_calls/i.test(raw)) return [];
+  const out: LlmToolCall[] = [];
+  const seen = new Set<string>();
+  const invokeRe =
+    /name\s*=\s*["'](nexus_[a-zA-Z0-9_.]+)["']([^]*?)(?:<\/[^>\n]*invoke>|<\/invoke>|(?=<[^>\n]*tool_calls)|$)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = invokeRe.exec(raw))) {
+    const name = m[1]!.trim().replace(/\./g, "_");
+    if (!/^nexus_[a-z0-9_]+$/i.test(name)) continue;
+    const args: Record<string, unknown> = {};
+    const paramRe = /name\s*=\s*["']([A-Za-z0-9_]+)["'][^>]*>([^<]*)/g;
+    let p: RegExpExecArray | null;
+    const body = m[2] || "";
+    while ((p = paramRe.exec(body))) {
+      if (p[1] === "name") continue;
+      args[p[1]!] = (p[2] || "").trim();
+    }
+    const key = `${name}:${JSON.stringify(args)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      id: `leak_${out.length}_${name}`,
+      type: "function",
+      function: { name, arguments: JSON.stringify(args) },
+    });
+  }
+  return out;
+}
+
 /** 已有完整正文时，小块吐出，方便控制台流式显示。 */
 async function emitSoftDeltas(text: string, onDelta: (s: string) => void): Promise<void> {
   const raw = String(text || "");
@@ -106,21 +151,23 @@ export class LlmRouter {
     if (!tools.length) return this.chat(messages, opts);
 
     const history = messages.map((m) => ({ ...m }));
-    const maxRounds = Math.min(Math.max(opts?.maxRounds ?? 4, 1), 8);
+    const maxRounds = Math.min(Math.max(opts?.maxRounds ?? 6, 1), 8);
     for (let i = 0; i < maxRounds; i++) {
       const turn = await this.chatTurn(history, tools);
-      if (!turn.tool_calls?.length) {
-        const text = stripThinking(turn.content);
+      const leaked = turn.tool_calls?.length ? [] : leakedToolCalls(turn.content);
+      const calls = turn.tool_calls?.length ? turn.tool_calls : leaked;
+      if (!calls.length) {
+        const text = stripToolMarkup(stripThinking(turn.content));
         if (opts?.onDelta && text) await emitSoftDeltas(text, opts.onDelta);
         return text;
       }
 
       history.push({
         role: "assistant",
-        content: turn.content || "",
-        tool_calls: turn.tool_calls,
+        content: leaked.length ? "" : turn.content || "",
+        tool_calls: calls,
       });
-      for (const call of turn.tool_calls) {
+      for (const call of calls) {
         let args: Record<string, unknown> = {};
         try {
           args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
@@ -137,17 +184,20 @@ export class LlmRouter {
           role: "tool",
           tool_call_id: call.id,
           name: call.function.name,
-          content: typeof result === "string" ? result : JSON.stringify(result),
+          content: typeof result === "string" ? result : JSON.stringify(result).slice(0, 6000),
         });
       }
     }
-    // 工具跑完后的终稿：有 onDelta 则真流式，否则一次拿齐
+    history.push({
+      role: "user",
+      content: "工具已经执行完。用一两句中文告诉用户结果。不要再调用工具，也不要把工具调用写进正文。",
+    });
     if (opts?.onDelta) {
       const last = await this.chatTurnStream(history, undefined, opts.onDelta);
-      return stripThinking(last.content);
+      return stripToolMarkup(stripThinking(last.content));
     }
     const last = await this.chatTurn(history);
-    return stripThinking(last.content);
+    return stripToolMarkup(stripThinking(last.content));
   }
 
   private endpoint(): string {
