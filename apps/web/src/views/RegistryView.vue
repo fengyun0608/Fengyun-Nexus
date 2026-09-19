@@ -1,156 +1,65 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { NButton, NCard, NSpace, NSpin, NTag, useMessage } from "naive-ui";
-import { api } from "@/api/client";
+import { computed, onMounted, ref } from "vue";
+import { NButton, NInput, NTag, useMessage } from "naive-ui";
+import { api, readToken } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
-
-type RegistryInfo = {
-  baseUrl?: string;
-  tokenConfigured?: boolean;
-  tokenEnv?: string;
-  pluginsRepo?: { url?: string; branch?: string } | null;
-  ecosystemRepo?: { url?: string; branch?: string } | null;
-  pluginsRepoLocked?: boolean;
-  ecosystemRepoLocked?: boolean;
-  categories?: Array<{ id: string; label: string; path: string }>;
-};
-
-type UpdateItem = {
-  id: string;
-  dir: string;
-  name?: string;
-  localVersion?: string;
-  remoteVersion?: string;
-  repoUrl?: string;
-  status: "same" | "update" | "local-only" | "remote-only" | "unknown";
-  message?: string;
-};
 
 type EcoItem = {
   id: string;
   name: string;
-  kind?: string;
-  category?: string;
   version?: string;
   description?: string;
   status: "not-installed" | "installed" | "update" | "unknown";
-  localVersion?: string;
   message?: string;
-  homepage?: string;
+  repoUrl?: string;
+  packPath?: string;
+  downloadable?: boolean;
   menus?: string[];
-};
-
-type EcoHub = {
-  name?: string;
-  gitcode?: string;
-  github?: string;
-  description?: string;
 };
 
 const auth = useAuthStore();
 const message = useMessage();
-const loading = ref(true);
-const checking = ref(false);
-const applying = ref(false);
-const ecoLoading = ref(false);
-const ecoInstalling = ref("");
+const q = ref("");
+const loading = ref(false);
+const uploading = ref(false);
+const downloading = ref("");
 const err = ref("");
-const info = ref<RegistryInfo | null>(null);
-const updateItems = ref<UpdateItem[]>([]);
-const updateMsg = ref("");
-const updateSource = ref("");
-const ecoItems = ref<EcoItem[]>([]);
-const ecoMsg = ref("");
-const ecoSource = ref("");
-const ecoHub = ref<EcoHub | null>(null);
+const items = ref<EcoItem[]>([]);
+const fileEl = ref<HTMLInputElement | null>(null);
 
-async function load() {
+const shown = computed(() => {
+  const k = q.value.trim().toLowerCase();
+  if (!k) return items.value;
+  return items.value.filter((e) =>
+    [e.name, e.id, e.description, e.repoUrl, e.packPath, ...(e.menus || [])]
+      .join(" ")
+      .toLowerCase()
+      .includes(k),
+  );
+});
+
+async function refresh() {
   loading.value = true;
   err.value = "";
-  try {
-    info.value = await api<RegistryInfo>("/v1/registry", { token: auth.token });
-  } catch (e) {
-    err.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function checkUpdates() {
-  checking.value = true;
-  try {
-    const res = await api<{
-      items?: UpdateItem[];
-      message?: string;
-      source?: string;
-      skipped?: number;
-    }>("/v1/registry/plugin-updates", { token: auth.token });
-    updateItems.value = (res.items || []).filter(
-      (u) => u.status === "update" || u.status === "remote-only",
-    );
-    updateMsg.value = res.message || "";
-    updateSource.value = res.source || "";
-    message.info(res.message || "已检测");
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e));
-  } finally {
-    checking.value = false;
-  }
-}
-
-async function applyUpdates() {
-  const need = updateItems.value.filter(
-    (u) => u.status === "update" || u.status === "remote-only",
-  );
-  if (!need.length) {
-    message.info("没有可拉取的更新");
-    return;
-  }
-  applying.value = true;
-  try {
-    const res = await api<{ message?: string }>("/v1/registry/plugin-updates/apply", {
-      method: "POST",
-      token: auth.token,
-      body: JSON.stringify({ dirs: need.map((u) => u.dir) }),
-      timeoutMs: 120_000,
-    });
-    message.success(res.message || "已拉取");
-    await checkUpdates();
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e));
-  } finally {
-    applying.value = false;
-  }
-}
-
-async function loadEcosystem(quiet = false) {
-  ecoLoading.value = true;
   try {
     const res = await api<{
       ok?: boolean;
       items?: EcoItem[];
       message?: string;
-      source?: string;
-      hub?: EcoHub | null;
     }>("/v1/registry/ecosystem", { token: auth.token, timeoutMs: 120_000 });
-    ecoItems.value = res.items || [];
-    ecoMsg.value = res.message || "";
-    ecoSource.value = res.source || "";
-    ecoHub.value = res.hub || null;
-    if (!quiet) {
-      if (!res.ok) message.warning(res.message || "生态列表拉取失败");
-      else message.info(res.message || "已刷新商店");
-    }
+    items.value = res.items || [];
+    if (!res.ok) err.value = res.message || "刷新失败";
+    else message.success(res.message || "已刷新仓库");
   } catch (e) {
-    if (!quiet) message.error(e instanceof Error ? e.message : String(e));
-    else ecoMsg.value = e instanceof Error ? e.message : String(e);
+    err.value = e instanceof Error ? e.message : String(e);
+    message.error(err.value);
   } finally {
-    ecoLoading.value = false;
+    loading.value = false;
   }
 }
 
-async function installEco(id: string) {
-  ecoInstalling.value = id;
+async function download(id: string) {
+  downloading.value = id;
   try {
     const res = await api<{ ok?: boolean; message?: string }>("/v1/registry/ecosystem/install", {
       method: "POST",
@@ -158,231 +67,202 @@ async function installEco(id: string) {
       body: JSON.stringify({ id }),
       timeoutMs: 120_000,
     });
-    if (res.ok) message.success(res.message || "已安装");
-    else message.warning(res.message || "安装未完成");
-    await loadEcosystem(true);
+    if (res.ok) message.success(res.message || "已下载");
+    else message.warning(res.message || "下载未完成");
+    await refreshQuiet();
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {
-    ecoInstalling.value = "";
+    downloading.value = "";
   }
 }
 
-function statusLabel(s: UpdateItem["status"]) {
-  if (s === "same") return "一致";
-  if (s === "update") return "有更新";
-  if (s === "local-only") return "仅本地";
-  if (s === "remote-only") return "可拉取";
-  return "未知";
+async function refreshQuiet() {
+  try {
+    const res = await api<{ ok?: boolean; items?: EcoItem[]; message?: string }>(
+      "/v1/registry/ecosystem",
+      { token: auth.token, timeoutMs: 120_000 },
+    );
+    items.value = res.items || [];
+    if (!res.ok) err.value = res.message || "";
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : String(e);
+  }
 }
 
-function ecoStatusLabel(s: EcoItem["status"]) {
-  if (s === "installed") return "已安装";
-  if (s === "update") return "可更新";
-  if (s === "not-installed") return "未安装";
-  return "需手动";
+function pickZip() {
+  fileEl.value?.click();
 }
 
-function ecoTagType(s: EcoItem["status"]): "success" | "warning" | "info" | "default" {
+async function onZip(ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith(".zip")) {
+    message.warning("请上传 zip");
+    return;
+  }
+  uploading.value = true;
+  try {
+    const token = auth.token || readToken();
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), 120_000);
+    let res: Response;
+    try {
+      res = await fetch("/v1/registry/ecosystem/upload", {
+        method: "POST",
+        headers: {
+          "content-type": "application/zip",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: file,
+        signal: ctrl.signal,
+      });
+    } finally {
+      window.clearTimeout(timer);
+    }
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string; error?: string };
+    if (!res.ok || data.ok === false) {
+      message.warning(data.error || data.message || "上传失败");
+      return;
+    }
+    message.success(data.message || "已上传");
+    await refreshQuiet();
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    uploading.value = false;
+  }
+}
+
+function actionLabel(e: EcoItem) {
+  if (e.status === "update") return "更新";
+  if (e.status === "installed") return "重新下载";
+  return "下载";
+}
+
+function tagType(s: EcoItem["status"]): "success" | "warning" | "default" | "info" {
   if (s === "installed") return "success";
   if (s === "update") return "warning";
   if (s === "not-installed") return "info";
   return "default";
 }
 
-function repoHref(url?: string | null) {
-  if (!url) return "";
-  return String(url).replace(/\.git$/i, "");
+function tagText(s: EcoItem["status"]) {
+  if (s === "installed") return "已安装";
+  if (s === "update") return "可更新";
+  if (s === "not-installed") return "未安装";
+  return "待拉取";
 }
 
-onMounted(() => {
-  void (async () => {
-    await load();
-    await loadEcosystem(true);
-  })();
-});
+onMounted(() => void refreshQuiet());
 </script>
 
 <template>
   <div class="page">
-    <header class="page-head">
-      <h1>插件商店</h1>
-      <p class="muted">浏览生态收录并一键安装；系统插件更新仍在本页下方。</p>
-    </header>
-    <n-spin :show="loading || ecoLoading">
-      <p v-if="err" class="err">{{ err }}</p>
-      <template v-else>
-        <n-card size="small" title="仓库地址" style="margin-bottom: 14px">
-          <p class="hint">主框架仓库</p>
-          <p class="repo">
-            <a
-              v-if="info?.baseUrl"
-              :href="info.baseUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-            >{{ info.baseUrl }}</a>
-            <span v-else>未配置</span>
-          </p>
-          <p class="hint">系统插件仓库（已锁定）</p>
-          <p class="repo">
-            <a
-              v-if="info?.pluginsRepo?.url"
-              :href="repoHref(info.pluginsRepo.url)"
-              target="_blank"
-              rel="noopener noreferrer"
-            >{{ repoHref(info.pluginsRepo.url) }}</a>
-            <span v-else>未配置</span>
-          </p>
-          <p class="hint">生态专仓 · 国内 GitCode（已锁定）</p>
-          <p class="repo">
-            <a
-              v-if="info?.ecosystemRepo?.url"
-              :href="repoHref(info.ecosystemRepo.url)"
-              target="_blank"
-              rel="noopener noreferrer"
-            >{{ repoHref(info.ecosystemRepo.url) }}</a>
-            <span v-else>未配置</span>
-          </p>
-          <p class="hint">生态专仓 · 国外 GitHub 镜像</p>
-          <p class="repo">
-            <a
-              v-if="ecoHub?.github"
-              :href="ecoHub.github"
-              target="_blank"
-              rel="noopener noreferrer"
-            >{{ ecoHub.github }}</a>
-            <a
-              v-else
-              href="https://github.com/fengyun0608/fengyun-nexus-ecosystem"
-              target="_blank"
-              rel="noopener noreferrer"
-            >https://github.com/fengyun0608/fengyun-nexus-ecosystem</a>
-          </p>
-        </n-card>
+    <div class="store-top">
+      <n-input
+        v-model:value="q"
+        class="q"
+        clearable
+        placeholder="搜索插件、简介或仓库"
+      />
+      <n-button :loading="uploading" @click="pickZip">上传插件</n-button>
+      <n-button type="primary" :loading="loading" @click="refresh">刷新仓库</n-button>
+      <input ref="fileEl" class="file" type="file" accept=".zip,application/zip" @change="onZip" />
+    </div>
 
-        <div class="admin-row surface">
-          <div>
-            <strong>生态收录</strong>
-            <p class="muted">
-              {{ ecoHub?.description || "社区与官方插件包。专仓内 path 型可一键装进本地 plugins/。" }}
-            </p>
-          </div>
-          <n-space>
-            <n-button type="primary" :loading="ecoLoading" @click="loadEcosystem()">刷新商店</n-button>
-          </n-space>
+    <p v-if="err" class="err">{{ err }}</p>
+    <p v-else-if="loading && !items.length" class="hint">正在拉取生态仓…</p>
+
+    <article v-for="e in shown" :key="e.id" class="card">
+      <div class="main">
+        <div class="title-row">
+          <strong>{{ e.name || e.id }}</strong>
+          <span v-if="e.version" class="ver">v{{ e.version }}</span>
+          <n-tag size="small" :type="tagType(e.status)" :bordered="false">{{ tagText(e.status) }}</n-tag>
         </div>
+        <p class="desc">{{ e.description || "暂无简介" }}</p>
+        <p v-if="e.repoUrl" class="repo">
+          <a :href="e.repoUrl" target="_blank" rel="noopener noreferrer">{{ e.repoUrl }}</a>
+          <span v-if="e.packPath"> · {{ e.packPath }}</span>
+        </p>
+        <p v-if="e.message && e.status === 'unknown'" class="hint tight">{{ e.message }}</p>
+      </div>
+      <n-button
+        v-if="e.downloadable !== false"
+        type="primary"
+        :secondary="e.status === 'installed'"
+        :loading="downloading === e.id"
+        @click="download(e.id)"
+      >
+        {{ actionLabel(e) }}
+      </n-button>
+    </article>
 
-        <n-card size="small" style="margin: 14px 0" title="商店列表">
-          <p v-if="ecoMsg">{{ ecoMsg }}</p>
-          <p v-if="ecoSource" class="hint">拉取源：{{ ecoSource }}</p>
-          <div v-for="e in ecoItems" :key="e.id" class="upd-row">
-            <div>
-              <strong>{{ e.name || e.id }}</strong>
-              <p class="hint">
-                <template v-if="e.category">{{ e.category }} · </template>
-                {{ e.version ? `v${e.version}` : "" }}
-                <template v-if="e.localVersion && e.status === 'update'">
-                  （本地 {{ e.localVersion }}）
-                </template>
-                · {{ e.message || ecoStatusLabel(e.status) }}
-              </p>
-              <p v-if="e.description" class="hint">{{ e.description }}</p>
-              <p v-if="e.menus?.length" class="hint">菜单：{{ e.menus.join(" ") }}</p>
-              <p v-if="e.homepage" class="hint">
-                <a :href="e.homepage" target="_blank" rel="noopener noreferrer">{{ e.homepage }}</a>
-              </p>
-            </div>
-            <n-space align="center">
-              <n-tag size="small" :type="ecoTagType(e.status)" :bordered="false">
-                {{ ecoStatusLabel(e.status) }}
-              </n-tag>
-              <n-button
-                v-if="e.status === 'not-installed' || e.status === 'update'"
-                size="small"
-                type="primary"
-                :loading="ecoInstalling === e.id"
-                @click="installEco(e.id)"
-              >
-                {{ e.status === "update" ? "更新" : "安装" }}
-              </n-button>
-            </n-space>
-          </div>
-          <p v-if="!ecoItems.length && !ecoLoading" class="hint">暂无收录，稍后再刷新。</p>
-        </n-card>
-
-        <div class="admin-row surface" style="margin-top: 8px">
-          <div>
-            <strong>系统插件更新</strong>
-            <p class="muted">对照官方系统插件专仓检测与拉取，与商店收录分开。</p>
-          </div>
-          <n-space>
-            <n-button type="primary" :loading="checking" @click="checkUpdates">检测更新</n-button>
-            <n-button
-              secondary
-              :loading="applying"
-              :disabled="!updateItems.some((u) => u.status === 'update' || u.status === 'remote-only')"
-              @click="applyUpdates"
-            >
-              拉取更新
-            </n-button>
-          </n-space>
-        </div>
-
-        <n-card v-if="updateMsg" size="small" style="margin: 14px 0" title="系统插件检测结果">
-          <p>{{ updateMsg }}</p>
-          <p v-if="updateSource" class="hint">来源：{{ updateSource }}</p>
-          <div v-for="u in updateItems" :key="u.dir" class="upd-row">
-            <div>
-              <strong>{{ u.name || u.id }}</strong>
-              <p class="hint">
-                版本 {{ u.localVersion || "—" }}
-                <template v-if="u.remoteVersion && u.remoteVersion !== u.localVersion">
-                  → {{ u.remoteVersion }}
-                </template>
-                · {{ u.message || statusLabel(u.status) }}
-              </p>
-              <p v-if="u.repoUrl" class="hint">
-                <a :href="u.repoUrl" target="_blank" rel="noopener noreferrer">{{ u.repoUrl }}</a>
-              </p>
-            </div>
-            <n-tag size="small" type="warning" :bordered="false">
-              {{ statusLabel(u.status) }}
-            </n-tag>
-          </div>
-          <p v-if="!updateItems.length" class="hint">没有待更新的系统插件，无更新的已跳过。</p>
-        </n-card>
-      </template>
-    </n-spin>
+    <p v-if="!loading && !shown.length" class="hint">没有匹配的插件。</p>
   </div>
 </template>
 
 <style scoped>
 @import "@/styles/page.css";
-.surface {
+.store-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.store-top .q {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.file {
+  display: none;
+}
+.card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
 }
-.upd-row {
+.main {
+  min-width: 0;
+  flex: 1;
+}
+.title-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line);
+  gap: 8px;
+  flex-wrap: wrap;
 }
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 10px 0;
+.ver {
+  color: var(--muted);
+  font-size: 12px;
+}
+.desc {
+  margin: 6px 0 4px;
 }
 .repo {
-  margin: 4px 0 12px;
-  word-break: break-all;
+  margin: 0;
   font-size: 13px;
+  word-break: break-all;
 }
 .repo a {
   color: var(--amber);
+}
+.hint.tight {
+  margin: 4px 0 0;
+}
+@media (max-width: 720px) {
+  .card {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 </style>

@@ -30,7 +30,7 @@ import { bootGroup, bootLine, installProcessGuard, printBootBanner, printBootSuc
 import { warnBootGaps } from "./boot-check.js";
 import { resolveOb11Media, setOb11MediaHost, setOb11MediaRoot } from "./ob11-media.js";
 import { checkPluginUpdates, applyPluginUpdates, ensurePluginSdkLinks } from "./registry-check.js";
-import { installEcosystemPack, loadEcosystemCatalog } from "./ecosystem-catalog.js";
+import { installEcosystemPack, installUploadedZip, loadEcosystemCatalog } from "./ecosystem-catalog.js";
 import {
   getChannelSettings,
   isChannelMaster,
@@ -2215,7 +2215,7 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  /** 生态专仓：一键安装 path 型包并热重载 */
+  /** 生态专仓：下载 path / git 收录并热重载 */
   app.post("/v1/registry/ecosystem/install", authMiddleware, async (req, res) => {
     try {
       const packId = String(req.body?.id || req.body?.packId || "").trim();
@@ -2243,6 +2243,35 @@ async function bootstrap(): Promise<void> {
       res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
     }
   });
+
+  /** 本地上传 zip 装进 plugins/。不登记到生态仓。 */
+  app.post(
+    "/v1/registry/ecosystem/upload",
+    authMiddleware,
+    express.raw({
+      limit: "32mb",
+      type: (req) => !String(req.headers["content-type"] || "").includes("application/json"),
+    }),
+    async (req, res) => {
+      try {
+        const zip = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+        const result = installUploadedZip(ROOT, zip);
+        let reloadMsg = "";
+        if (result.ok && result.applied.length) {
+          const reload = await reloadPlugins(pluginHotDeps);
+          reloadMsg = reload.ok
+            ? `；已热重载 ${reload.loaded} 个插件`
+            : `；热重载失败：${reload.message}`;
+        }
+        res.status(result.ok ? 200 : 400).json({
+          ...result,
+          message: `${result.message}${reloadMsg}`,
+        });
+      } catch (e) {
+        res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+      }
+    },
+  );
 
   app.get("/v1/admin/llm", authMiddleware, (_req, res) => {
     const snap = llm.snapshot();
