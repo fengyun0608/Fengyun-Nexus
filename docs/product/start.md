@@ -7,7 +7,7 @@
 
 ## 安装
 
-机器在哪就选哪边。脚本里也会再问一次。
+机器在哪就选哪边。脚本里也会再问一次。推荐一键管道；也可浅克隆。
 
 **国内**
 
@@ -27,6 +27,15 @@ curl -fsSL "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scr
 
 ```powershell
 irm "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.ps1" | iex
+```
+
+**浅克隆（任选镜像）**
+
+```bash
+git clone --depth=1 https://gitcode.com/fengyunnb_admin/Fengyun-Nexus.git
+# 或
+git clone --depth=1 https://github.com/fengyun0608/Fengyun-Nexus.git
+cd Fengyun-Nexus && ./boot.sh   # Windows 双击 start.bat
 ```
 
 | 变量 | 作用 |
@@ -51,3 +60,12 @@ pnpm nexus env desktop|mobile|server|termux
 pnpm nexus status
 pnpm nexus boot
 ```
+
+## 装好后建议
+
+1. 登录控制台改掉默认密码  
+2. 需要 QQ：环境配置 → 安装 NapCat → 扫码；看 OneBot 页是否已连接  
+3. 需要 AI：AI 页配置供应商密钥  
+4. 群里主人发 `#帮助` / `#状态` 试指令  
+
+更多：[环境要求](environment.md) · [文档中心](../README.md)

@@ -1,13 +1,13 @@
 # Start on each platform
 
-中文 | [English](start.en.md)
+[中文](start.md) | English
 
 Console: http://127.0.0.1:8787/  
-Default login: `console` / `console`
+Default login: `console` / `console` (change after first login)
 
 ## Install
 
-Pick the mirror for where the machine is. The script also asks once.
+Pick the mirror for where the machine is. Prefer the one-liner; shallow clone also works.
 
 **China**
 
@@ -29,6 +29,13 @@ curl -fsSL "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scr
 irm "https://raw.githubusercontent.com/fengyun0608/Fengyun-Nexus/main/scripts/get.ps1" | iex
 ```
 
+**Shallow clone**
+
+```bash
+git clone --depth=1 https://github.com/fengyun0608/Fengyun-Nexus.git
+cd Fengyun-Nexus && ./boot.sh   # Windows: start.bat
+```
+
 | Variable | Meaning |
 |----------|---------|
 | `NEXUS_MIRROR=cn\|global` | Mirror |
@@ -44,3 +51,5 @@ cd ~/Fengyun-Nexus && ./boot.sh
 ```
 
 Windows: double-click `start.bat`.
+
+See also: [Environment](environment.en.md) · [Docs hub](../README.md)

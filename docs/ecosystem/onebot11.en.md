@@ -2,17 +2,13 @@
 
 [中文](onebot11.md) | English
 
-Fengyun Nexus ships a built-in **OneBot 11** channel compatible with [NapCat](https://napneko.github.io).
-
-## Connect
+Built-in **OneBot 11** channel, compatible with [NapCat](https://napneko.github.io).
 
 | Mode | NapCat | Nexus |
 |------|--------|-------|
-| Reverse WS (recommended) | WebSocket Client | `ws://127.0.0.1:8787/onebot/v11/ws` |
-| HTTP report | HTTP Client | `POST /onebot/v11/http` |
+| Reverse WS (recommended) | WS client | `ws://<host>:8787/onebot/v11/ws` |
+| HTTP post | HTTP client | `POST /onebot/v11/http` |
 
-Console → **Message Channels → OneBot 11 Lab**.
+Install NapCat from the console Environment page. Masters and AI reply groups live in channel settings. Empty per-bot access token means no token check.
 
-## Reply policy
-
-Plugin hit → plugin reply. AI configured → LLM. **Otherwise no reply** (no local echo).
+Reply policy: plugin hit → plugin; AI configured → LLM (prefer one message); otherwise stay silent. Group AI needs @ or wake prefix; `#` commands always work.

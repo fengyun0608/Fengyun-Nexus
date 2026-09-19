@@ -9,7 +9,7 @@
 | 目录 | 指令 | 说明 |
 |------|------|------|
 | `plugins/z-menu` | `#菜单` `#帮助` | 分类菜单，两个词同一张图 |
-| `plugins/z-status` | `#状态` | 账号头像、群好友、消息、在线时长 |
+| `plugins/z-status` | `#状态` | 账号卡、曲线、运行明细（不露群号与库路径） |
 | `plugins/z-draw` | `#生图` | 菜单图截图发群 |
 | `plugins/z-echo` | `#echo 文本` | 回声示例 |
 | `plugins/z-like` | `#赞我` | 点赞；触发词不用 # |
@@ -22,7 +22,7 @@
 宿主管理指令（主人）：
 
 - `#更新` / `#更新插件` — 拉**框架仓**与**本插件专仓**
-- 框架或系统插件**有一方有更新**：多群合并转发说明改了啥，然后同窗口重启
+- 框架或系统插件**有一方有更新**：说明改了啥，然后同窗口重启
 - 两边都最新：只回执，不重启
 
 专仓地址写在宿主发行配置 `configs/registry.json` 的 `pluginsRepo`，**控制台不可改**。
@@ -46,3 +46,5 @@ pnpm pack:system-plugins
 cd packs/fengyun-system-plugins
 git add . && git commit -m "系统插件包更新" && git push
 ```
+
+宿主产品介绍与致谢见 [Fengyun-Nexus README](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus)。

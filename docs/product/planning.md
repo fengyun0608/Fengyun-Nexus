@@ -9,18 +9,18 @@
                                     │
                          ┌─ 消息通道
            平台能力 ─────┼─ 插件运行时
-                         ├─ 工作流
-                         └─ 工具桥接
+                         ├─ 工作流 / MCP
+                         └─ 截图与状态面板
                                     │
-  Fengyun Nexus ════════════════════╪════ product brand (English)
+  Fengyun Nexus ════════════════════╪════ product brand
                                     │
-                         ┌─ 示例插件
-           开源生态 ─────┼─ 基础插件  ──► GitCode 远程仓
-                         └─ 标准插件
+                         ┌─ 示例 / 基础 / 标准插件
+           开源生态 ─────┼─ 系统插件专仓
+                         └─ GitCode + GitHub 双远程
                                     │
                          ┌─ MIT 开源协议
              治理 ───────┼─ 产品文档与架构图
-                         └─ 三环境：手机 / 电脑 / 服务器
+                         └─ 姿态：手机 / 电脑 / 服务器 / Termux
 ```
 
 ```mermaid
@@ -36,21 +36,22 @@ flowchart TB
   subgraph platform [平台能力]
     channels[消息通道]
     plugins[插件运行时]
-    flows[工作流]
-    tools[工具桥接]
+    flows[工作流与MCP]
+    shot[截图与状态]
   end
 
   subgraph ecosystem [开源生态]
     demo[示例插件]
     basic[基础插件]
     standard[标准插件]
-    registry[GitCode远程仓]
+    syspack[系统插件专仓]
+    registry[GitCode与GitHub]
   end
 
   subgraph governance [治理]
     mit[MIT协议]
     docs[产品文档]
-    envs[三环境]
+    envs[多姿态]
   end
 
   product --> experience
@@ -61,4 +62,7 @@ flowchart TB
   demo --> registry
   basic --> registry
   standard --> registry
+  syspack --> registry
 ```
+
+介绍与扩展面组织感谢 [XRK-AGT](https://github.com/xrkseek/XRK-AGT) 带来的灵感；本仓实现与品牌独立。
