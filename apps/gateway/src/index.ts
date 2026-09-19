@@ -446,6 +446,7 @@ function frameworkSystemPrompt(opts?: {
       "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp，再用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。这是 Windows UIA，不是框架 # 指令。",
       "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。不要只用 web_read 只读摘要。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。",
+      "对用户只说人话正文。发现应用没开可以说正在帮你启动，做完再说一声好了。不要把思考过程、工具名、JSON、逐步内心独白甩出去，也不要每做一小步就刷很多条。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
       "专有工具优先；没有就读技能；再不行就系统命令试。别空口说不会。",
     );
@@ -1137,7 +1138,7 @@ async function bootstrap(): Promise<void> {
   /** Process inbound message: # admin → plugins (first match) → LLM. Never local-echo. */
   async function processInbound(
     msg: NexusMessage,
-    opts?: { isAdminConsole?: boolean },
+    opts?: { isAdminConsole?: boolean; onDelta?: (text: string) => void },
   ): Promise<string[]> {
     const accountId = String(msg.meta?.selfId || msg.meta?.botId || "");
     const writeMsg = (row: {
@@ -1685,12 +1686,15 @@ async function bootstrap(): Promise<void> {
     const assistant = (
       await Promise.race([
         capabilityMode
-          ? llm.chatWithTools(history, buildAgentToolDefs(mcp), (name, args) =>
-              runAgentTool(name, args, toolBag),
+          ? llm.chatWithTools(
+              history,
+              buildAgentToolDefs(mcp),
+              (name, args) => runAgentTool(name, args, toolBag),
+              opts?.onDelta ? { onDelta: opts.onDelta } : undefined,
             )
-          : llm.chat(history),
+          : llm.chat(history, opts?.onDelta ? { onDelta: opts.onDelta } : undefined),
         new Promise<string>((_, reject) => {
-          setTimeout(() => reject(new Error("AI 响应超时")), 50_000);
+          setTimeout(() => reject(new Error("AI 响应超时")), 90_000);
         }),
       ]).catch((e) => {
         const tip = e instanceof Error ? e.message : String(e);
@@ -2419,24 +2423,45 @@ async function bootstrap(): Promise<void> {
   });
 
   app.post("/v1/chat/stream", authMiddleware, async (req, res) => {
-    res.setHeader("content-type", "text/event-stream");
+    res.setHeader("content-type", "text/event-stream; charset=utf-8");
     res.setHeader("cache-control", "no-cache");
     res.setHeader("connection", "keep-alive");
+    res.flushHeaders?.();
+    const write = (obj: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    };
     try {
-      const result = await handleChat(req.body, {
+      const web = channels.get("web")!;
+      const msg = web.normalizeInbound(req.body);
+      let streamed = "";
+      const texts = await processInbound(msg, {
         isAdminConsole: true,
+        onDelta: (delta) => {
+          if (!delta) return;
+          streamed += delta;
+          write({ delta });
+        },
       });
-      const chunk = result.assistant;
-      const size = Math.max(8, Math.ceil(chunk.length / 12));
-      for (let i = 0; i < chunk.length; i += size) {
-        const part = chunk.slice(i, i + size);
-        res.write(`data: ${JSON.stringify({ delta: part })}\n\n`);
-        await new Promise((r) => setTimeout(r, 16));
+      let assistant = texts.join("\n");
+      if (!assistant) {
+        const c = String((req.body as { content?: string } | null)?.content ?? "").trim();
+        assistant = c ? "未命中指令，发送 #帮助" : "";
       }
-      res.write(`data: ${JSON.stringify({ done: true, replies: result.replies })}\n\n`);
+      // 若模型没走流式增量，把终稿一次补上
+      if (!streamed && assistant) write({ delta: assistant });
+      const replies = texts.map((content) => ({
+        id: newId("msg"),
+        channel: "web",
+        chatId: msg.chatId,
+        userId: "nexus",
+        type: "text",
+        content,
+        createdAt: nowIso(),
+      }));
+      write({ done: true, assistant, replies });
       res.end();
     } catch (e) {
-      res.write(`data: ${JSON.stringify({ error: e instanceof Error ? e.message : String(e) })}\n\n`);
+      write({ error: e instanceof Error ? e.message : String(e) });
       res.end();
     }
   });

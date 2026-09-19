@@ -77,20 +77,70 @@ async function send() {
   if (!text || busy.value) return;
   input.value = "";
   msgs.value.push({ role: "user", content: text });
+  const assistantIdx = msgs.value.length;
+  msgs.value.push({ role: "assistant", content: "" });
   busy.value = true;
   try {
-    const res = await api<{ assistant?: string; replies?: Array<{ content?: string }> }>("/v1/chat", {
-      method: "POST",
-      token: auth.token,
-      body: JSON.stringify({ content: text, chatId: CHAT_ID, userId: "console" }),
-    });
-    const out =
-      res.assistant ||
-      (res.replies || []).map((r) => r.content).filter(Boolean).join("\n") ||
-      "（无回复）";
-    msgs.value.push({ role: "assistant", content: out });
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), 100_000);
+    let res: Response;
+    try {
+      res = await fetch("/v1/chat/stream", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${auth.token}`,
+        },
+        body: JSON.stringify({ content: text, chatId: CHAT_ID, userId: "console" }),
+        signal: ctrl.signal,
+      });
+    } finally {
+      window.clearTimeout(timer);
+    }
+    if (!res.ok || !res.body) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(errText || `HTTP ${res.status}`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let got = "";
+    const flushLine = (line: string) => {
+      const s = line.trim();
+      if (!s.startsWith("data:")) return;
+      const payload = s.slice(5).trim();
+      if (!payload) return;
+      let data: { delta?: string; done?: boolean; assistant?: string; error?: string };
+      try {
+        data = JSON.parse(payload) as typeof data;
+      } catch {
+        return;
+      }
+      if (data.error) throw new Error(data.error);
+      if (data.delta) {
+        got += data.delta;
+        msgs.value[assistantIdx] = { role: "assistant", content: got };
+        void nextTick().then(() => box.value?.scrollTo({ top: box.value.scrollHeight }));
+      }
+      if (data.done && data.assistant && !got) {
+        got = data.assistant;
+        msgs.value[assistantIdx] = { role: "assistant", content: got };
+      }
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split(/\r?\n/);
+      buf = lines.pop() || "";
+      for (const line of lines) flushLine(line);
+    }
+    if (buf.trim()) flushLine(buf);
+    if (!got.trim()) msgs.value[assistantIdx] = { role: "assistant", content: "（无回复）" };
   } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e));
+    const tip = e instanceof Error ? e.message : String(e);
+    message.error(tip);
+    msgs.value[assistantIdx] = { role: "assistant", content: tip.includes("abort") ? "请求超时" : tip };
   } finally {
     busy.value = false;
     await nextTick();
@@ -106,7 +156,7 @@ onMounted(() => void loadHistory());
     <header class="page-head">
       <div>
         <h1>对话</h1>
-        <p class="muted">控制台直连网关；历史从本机库回放，刷新还在。</p>
+        <p class="muted">控制台直连网关；回复会流式显示。历史从本机库回放。</p>
       </div>
       <n-space>
         <n-button size="small" quaternary :loading="loadingHistory" @click="loadHistory">刷新历史</n-button>
