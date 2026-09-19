@@ -1,6 +1,6 @@
-# Fengyun Nexus · 文档中心
+# 风云枢纽 · 文档中心
 
-中文产品介绍与上手入口。内部运作细节以源码与控制台为准。
+**风云网络**出品。中文产品介绍与上手入口。内部运作细节以源码与控制台为准。
 
 ## 按角色阅读
 
@@ -37,4 +37,4 @@
 
 ## 致谢
 
-介绍页文风与扩展面组织参考了 [XRK-AGT](https://github.com/xrkseek/XRK-AGT)。详见仓库根 [README · 致谢](../README.md#致谢)。
+介绍页文风与扩展面组织参考了 [XRK-AGT](https://github.com/xrkseek/XRK-AGT)。出品与品牌见仓库根 [README · 关于](../README.md#关于)，致谢见 [README · 致谢](../README.md#致谢)。

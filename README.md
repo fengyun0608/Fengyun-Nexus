@@ -1,11 +1,11 @@
-# Fengyun Nexus
+# Fengyun Nexus · 风云枢纽
 
-**本地可控的 AI 对话与自动化枢纽**
+**风云网络**出品 · 本地可控的 AI 对话与自动化枢纽
 
 <p align="center">
   <img alt="license" src="https://img.shields.io/badge/License-MIT-c4842f?style=flat-square" />
   <img alt="node" src="https://img.shields.io/badge/Node.js-%E2%89%A520-339933?style=flat-square" />
-  <img alt="version" src="https://img.shields.io/badge/Version-0.2.81-2f9b78?style=flat-square" />
+  <img alt="version" src="https://img.shields.io/badge/Version-0.2.82-2f9b78?style=flat-square" />
   <img alt="platform" src="https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Termux-1a1f18?style=flat-square" />
 </p>
 
@@ -28,10 +28,11 @@
 - [快速开始](#快速开始)
 - [常用命令](#常用命令)
 - [文档](#文档)
+- [关于](#关于)
 - [致谢](#致谢)
 - [协议](#协议)
 
-Fengyun Nexus 把 **控制台、消息通道、插件、工作流、多模型** 收进同一套网关：通道入站 → `#` 管理指令与插件 → 有密钥再走模型 → 回通道并写本地库。
+**风云枢纽**（Fengyun Nexus）把控制台、消息通道、插件、工作流、多模型收进同一套网关：通道入站 → `#` 管理指令与插件 → 有密钥再走模型 → 回通道并写本地库。
 
 - **🌐 多通道**：Web 控制台 / Webhook / QQ（OneBot 11 · NapCat）
 - **🔌 插件包**：一组互相照应的插件一起发布；包内可混用简单 / 模块化写法；每个功能插件自带菜单
@@ -180,16 +181,28 @@ pnpm nexus status
 
 ---
 
+## 关于
+
+| | |
+|--|--|
+| 出品 | **风云网络**（全称：风云网络销售） |
+| 产品 | **风云枢纽** · 英文 **Fengyun Nexus** |
+| 仓库 | [GitCode](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus) · [GitHub](https://github.com/fengyun0608/Fengyun-Nexus) |
+
+风云网络做的是本地可控、可扩展的对话与自动化框架。风云枢纽是这套框架的正式产品名：网关、控制台、插件商店与生态专仓都归在它名下。对外介绍用「风云枢纽 / Fengyun Nexus」；组织简称写「风云网络」。
+
+---
+
 ## 致谢
 
-Fengyun Nexus 在产品形态与扩展思路上，受 **[XRK-AGT](https://github.com/xrkseek/XRK-AGT)**（向日葵）启发良多：分层运行时、插件 / 工作流自动挂载、Web 控制台与多平台消息接入等。感谢师父与向日葵团队带来的灵感，也感谢开源生态中的 Node.js、Vue、Naive UI、OneBot、NapCat、Playwright 等组件作者。
+风云枢纽在产品形态与扩展思路上，受 **[XRK-AGT](https://github.com/xrkseek/XRK-AGT)**（向日葵）启发良多：分层运行时、插件 / 工作流自动挂载、Web 控制台与多平台消息接入等。感谢师父与向日葵团队带来的灵感，也感谢开源生态中的 Node.js、Vue、Naive UI、OneBot、NapCat、Playwright 等组件作者。
 
 | 项目 | 说明 |
 |------|------|
 | [XRK-AGT](https://github.com/xrkseek/XRK-AGT) | 融合智能体业务逻辑的通用后端；本项目介绍与扩展面写法亦多参照其公开文档 |
 | [AGT-Cores-Tools-Index](https://github.com/xrkseek/AGT-Cores-Tools-Index) | AGT 生态索引 |
 
-本仓库是独立产品（MIT），实现与品牌均为 Fengyun Nexus；学习可以，欢迎 Issue / PR 共建。
+本仓库是风云网络的独立产品（MIT），实现与品牌均为风云枢纽 / Fengyun Nexus；学习可以，欢迎 Issue / PR 共建。
 
 ---
 
@@ -197,4 +210,4 @@ Fengyun Nexus 在产品形态与扩展思路上，受 **[XRK-AGT](https://github
 
 MIT License — [LICENSE](LICENSE)
 
-Copyright (c) 2026 Fengyun
+Copyright (c) 2026 风云网络 / Fengyun Network
