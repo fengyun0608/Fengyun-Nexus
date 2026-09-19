@@ -288,7 +288,7 @@ export class LlmRouter {
     if (!this.opts.apiKey) return { content: "" };
 
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 45_000);
+    const timer = setTimeout(() => ctrl.abort(), 90_000);
     let res: Response;
     try {
       res = await fetch(`${this.endpoint()}/chat/completions`, {
@@ -340,7 +340,7 @@ export class LlmRouter {
     if (!this.opts.apiKey) return { content: "" };
 
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 90_000);
+    const timer = setTimeout(() => ctrl.abort(), 120_000);
     let res: Response;
     try {
       res = await fetch(`${this.endpoint()}/chat/completions`, {
