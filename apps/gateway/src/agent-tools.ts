@@ -24,6 +24,23 @@ import { textToSpeechFile } from "./tts-stt.js";
 import { runHostShell } from "./host-shell.js";
 import { captureDesktop } from "./screen-capture.js";
 import { findAgentSkill, loadAgentSkills } from "./agent-skills.js";
+import {
+  uiaClick,
+  uiaFocus,
+  uiaKeys,
+  uiaSetText,
+  uiaTree,
+  uiaWindows,
+} from "./uia-bridge.js";
+import {
+  webClick,
+  webClose,
+  webKeys,
+  webOpen,
+  webScreenshot,
+  webSnapshot,
+  webType,
+} from "./web-control.js";
 import type { OneBot11Bridge } from "./onebot11-bridge.js";
 import type { OneBotConfig } from "./onebot11-bridge.js";
 import { queryLogEntries } from "./log.js";
@@ -68,6 +85,19 @@ const MASTER_TOOLS = new Set([
   "nexus_shell",
   "nexus_list_skills",
   "nexus_skill_read",
+  "nexus_uia_windows",
+  "nexus_uia_tree",
+  "nexus_uia_focus",
+  "nexus_uia_click",
+  "nexus_uia_set_text",
+  "nexus_uia_keys",
+  "nexus_web_open",
+  "nexus_web_snapshot",
+  "nexus_web_click",
+  "nexus_web_type",
+  "nexus_web_keys",
+  "nexus_web_screenshot",
+  "nexus_web_close",
   "nexus_web_search",
   "nexus_web_read",
   "nexus_list_caps",
@@ -316,6 +346,103 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
       },
       ["command"],
     ),
+    tool("nexus_uia_windows", "列出本机已开窗口（Windows UIA）。操控桌面软件前先用这个。", {}),
+    tool(
+      "nexus_uia_tree",
+      "扫描某窗口控件树，拿 name/auto_id/control_type 做精准点击填字。",
+      {
+        title: { type: "string", description: "窗口标题，可部分匹配" },
+        handle: { type: "number" },
+        depth: { type: "number" },
+        limit: { type: "number" },
+      },
+    ),
+    tool(
+      "nexus_uia_focus",
+      "把指定窗口提到前台",
+      { title: { type: "string" }, handle: { type: "number" } },
+    ),
+    tool(
+      "nexus_uia_click",
+      "点击窗口内控件。先 tree 再点。",
+      {
+        title: { type: "string" },
+        handle: { type: "number" },
+        name: { type: "string" },
+        auto_id: { type: "string" },
+        control_type: { type: "string", description: "如 Button / Edit" },
+      },
+    ),
+    tool(
+      "nexus_uia_set_text",
+      "向窗口输入框填字",
+      {
+        title: { type: "string" },
+        handle: { type: "number" },
+        name: { type: "string" },
+        auto_id: { type: "string" },
+        control_type: { type: "string" },
+        text: { type: "string" },
+      },
+      ["text"],
+    ),
+    tool(
+      "nexus_uia_keys",
+      "向窗口或控件模拟按键。keys 如 ^a{ENTER}（pywinauto 语法）",
+      {
+        title: { type: "string" },
+        handle: { type: "number" },
+        name: { type: "string" },
+        auto_id: { type: "string" },
+        control_type: { type: "string" },
+        keys: { type: "string" },
+      },
+      ["keys"],
+    ),
+    tool(
+      "nexus_web_open",
+      "打开网页会话以便操控控件。不是只读摘要。",
+      {
+        url: { type: "string" },
+        session: { type: "string", description: "会话名，默认 default" },
+        headless: { type: "boolean", description: "默认 true；false 显示浏览器窗口" },
+      },
+      ["url"],
+    ),
+    tool(
+      "nexus_web_snapshot",
+      "列出当前网页可点可选的控件与 selector",
+      { session: { type: "string" }, limit: { type: "number" } },
+    ),
+    tool(
+      "nexus_web_click",
+      "按 CSS selector 点击网页控件",
+      { selector: { type: "string" }, session: { type: "string" } },
+      ["selector"],
+    ),
+    tool(
+      "nexus_web_type",
+      "向网页输入框填字",
+      {
+        selector: { type: "string" },
+        text: { type: "string" },
+        session: { type: "string" },
+        clear: { type: "boolean" },
+      },
+      ["selector", "text"],
+    ),
+    tool(
+      "nexus_web_keys",
+      "网页模拟按键，如 Enter / Control+a / Tab",
+      { key: { type: "string" }, session: { type: "string" } },
+      ["key"],
+    ),
+    tool(
+      "nexus_web_screenshot",
+      "截当前网页会话",
+      { session: { type: "string" } },
+    ),
+    tool("nexus_web_close", "关闭网页操控会话", { session: { type: "string" } }),
     tool("nexus_channel_get", "查看当前消息通道设置（主人、人设、回复群等）", {}),
     tool(
       "nexus_channel_patch",
@@ -610,6 +737,91 @@ export async function runAgentTool(
       ...result,
       logFile: join(bag.repoRoot, "data", "logs", "gateway.log"),
     };
+  }
+
+  if (name === "nexus_uia_windows") return uiaWindows(bag.repoRoot);
+  if (name === "nexus_uia_tree") {
+    return uiaTree(bag.repoRoot, {
+      title: String(args.title || ""),
+      handle: Number(args.handle) || 0,
+      depth: Number(args.depth) || 3,
+      limit: Number(args.limit) || 120,
+    });
+  }
+  if (name === "nexus_uia_focus") {
+    return uiaFocus(bag.repoRoot, {
+      title: String(args.title || ""),
+      handle: Number(args.handle) || 0,
+    });
+  }
+  if (name === "nexus_uia_click") {
+    return uiaClick(bag.repoRoot, {
+      title: String(args.title || ""),
+      handle: Number(args.handle) || 0,
+      name: String(args.name || ""),
+      auto_id: String(args.auto_id || ""),
+      control_type: String(args.control_type || ""),
+    });
+  }
+  if (name === "nexus_uia_set_text") {
+    return uiaSetText(bag.repoRoot, {
+      title: String(args.title || ""),
+      handle: Number(args.handle) || 0,
+      name: String(args.name || ""),
+      auto_id: String(args.auto_id || ""),
+      control_type: String(args.control_type || "Edit"),
+      text: String(args.text ?? ""),
+    });
+  }
+  if (name === "nexus_uia_keys") {
+    return uiaKeys(bag.repoRoot, {
+      title: String(args.title || ""),
+      handle: Number(args.handle) || 0,
+      name: String(args.name || ""),
+      auto_id: String(args.auto_id || ""),
+      control_type: String(args.control_type || ""),
+      keys: String(args.keys || ""),
+    });
+  }
+
+  if (name === "nexus_web_open") {
+    return webOpen(bag.repoRoot, {
+      url: String(args.url || ""),
+      session: String(args.session || "default"),
+      headless: args.headless === false ? false : true,
+    });
+  }
+  if (name === "nexus_web_snapshot") {
+    return webSnapshot(bag.repoRoot, {
+      session: String(args.session || "default"),
+      limit: Number(args.limit) || 40,
+    });
+  }
+  if (name === "nexus_web_click") {
+    return webClick(bag.repoRoot, {
+      selector: String(args.selector || ""),
+      session: String(args.session || "default"),
+    });
+  }
+  if (name === "nexus_web_type") {
+    return webType(bag.repoRoot, {
+      selector: String(args.selector || ""),
+      text: String(args.text ?? ""),
+      session: String(args.session || "default"),
+      clear: args.clear !== false,
+    });
+  }
+  if (name === "nexus_web_keys") {
+    return webKeys(bag.repoRoot, {
+      key: String(args.key || args.keys || ""),
+      session: String(args.session || "default"),
+    });
+  }
+  if (name === "nexus_web_screenshot") {
+    return webScreenshot(bag.repoRoot, { session: String(args.session || "default") });
+  }
+  if (name === "nexus_web_close") {
+    return webClose({ session: String(args.session || "default") });
   }
 
   if (name === "nexus_channel_get") {

@@ -103,6 +103,23 @@ import { listOpenDesktopApps, hostInfo, hostUptime } from "./desktop-inspect.js"
 import { webRead, webSearch } from "./web-lookup.js";
 import { speechFileToText } from "./tts-stt.js";
 import { agentWorkspaceRoot, workspaceList } from "./agent-workspace.js";
+import {
+  uiaClick,
+  uiaFocus,
+  uiaKeys,
+  uiaSetText,
+  uiaTree,
+  uiaWindows,
+} from "./uia-bridge.js";
+import {
+  webClick,
+  webClose,
+  webKeys,
+  webOpen,
+  webScreenshot,
+  webSnapshot,
+  webType,
+} from "./web-control.js";
 import { isJunkAiText, splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
@@ -426,6 +443,8 @@ function frameworkSystemPrompt(opts?: {
       "nexus_shot 只渲菜单或 HTML 图，不能拿来代替电脑截图。",
       "写代码仍可用沙箱。查文件、跑系统命令、动服务器用 nexus_shell，工作目录默认框架根，也可指定绝对路径。",
       "改通道人设/回复群或 OneBot 开关路径：用 nexus_channel_patch / nexus_onebot_patch。不要改密码。",
+      "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp，再用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。这是 Windows UIA，不是框架 # 指令。",
+      "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。不要只用 web_read 只读摘要。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
       "专有工具优先；没有就读技能；再不行就系统命令试。别空口说不会。",
@@ -811,6 +830,132 @@ async function bootstrap(): Promise<void> {
         ),
       };
     },
+  });
+
+  // 桌面 UIA（Windows）
+  mcp.register({
+    name: "nexus.uia_windows",
+    description: "列出本机已打开的窗口标题（Windows UIA）",
+    handler: () => uiaWindows(ROOT),
+  });
+  mcp.register({
+    name: "nexus.uia_tree",
+    description: "扫描指定窗口的控件树，用于精准定位按钮/输入框",
+    handler: (args) =>
+      uiaTree(ROOT, {
+        title: String(args?.title || ""),
+        handle: Number(args?.handle) || 0,
+        depth: Number(args?.depth) || 3,
+        limit: Number(args?.limit) || 120,
+      }),
+  });
+  mcp.register({
+    name: "nexus.uia_focus",
+    description: "把指定窗口提到前台",
+    handler: (args) =>
+      uiaFocus(ROOT, { title: String(args?.title || ""), handle: Number(args?.handle) || 0 }),
+  });
+  mcp.register({
+    name: "nexus.uia_click",
+    description: "点击窗口内控件。用 name / auto_id / control_type 定位",
+    handler: (args) =>
+      uiaClick(ROOT, {
+        title: String(args?.title || ""),
+        handle: Number(args?.handle) || 0,
+        name: String(args?.name || ""),
+        auto_id: String(args?.auto_id || ""),
+        control_type: String(args?.control_type || ""),
+      }),
+  });
+  mcp.register({
+    name: "nexus.uia_set_text",
+    description: "向窗口内输入框填字",
+    handler: (args) =>
+      uiaSetText(ROOT, {
+        title: String(args?.title || ""),
+        handle: Number(args?.handle) || 0,
+        name: String(args?.name || ""),
+        auto_id: String(args?.auto_id || ""),
+        control_type: String(args?.control_type || "Edit"),
+        text: String(args?.text ?? ""),
+      }),
+  });
+  mcp.register({
+    name: "nexus.uia_keys",
+    description: "向窗口或控件模拟按键。keys 语法同 pywinauto，如 ^a{ENTER}",
+    handler: (args) =>
+      uiaKeys(ROOT, {
+        title: String(args?.title || ""),
+        handle: Number(args?.handle) || 0,
+        name: String(args?.name || ""),
+        auto_id: String(args?.auto_id || ""),
+        control_type: String(args?.control_type || ""),
+        keys: String(args?.keys || ""),
+      }),
+  });
+
+  // 网页控件（Playwright）
+  mcp.register({
+    name: "nexus.web_open",
+    description: "用 Playwright 打开网页会话，可点选填字按键",
+    handler: (args) =>
+      webOpen(ROOT, {
+        url: String(args?.url || ""),
+        session: String(args?.session || "default"),
+        headless: args?.headless === false ? false : true,
+      }),
+  });
+  mcp.register({
+    name: "nexus.web_snapshot",
+    description: "列出当前网页可交互控件与推荐 selector",
+    handler: (args) =>
+      webSnapshot(ROOT, {
+        session: String(args?.session || "default"),
+        limit: Number(args?.limit) || 40,
+      }),
+  });
+  mcp.register({
+    name: "nexus.web_click",
+    description: "按 CSS selector 点击网页控件",
+    handler: (args) =>
+      webClick(ROOT, {
+        selector: String(args?.selector || ""),
+        session: String(args?.session || "default"),
+      }),
+  });
+  mcp.register({
+    name: "nexus.web_type",
+    description: "向网页输入框填字",
+    handler: (args) =>
+      webType(ROOT, {
+        selector: String(args?.selector || ""),
+        text: String(args?.text ?? ""),
+        session: String(args?.session || "default"),
+        clear: args?.clear !== false,
+      }),
+  });
+  mcp.register({
+    name: "nexus.web_keys",
+    description: "网页模拟按键，如 Enter / Control+a / Tab",
+    handler: (args) =>
+      webKeys(ROOT, {
+        key: String(args?.key || args?.keys || ""),
+        session: String(args?.session || "default"),
+      }),
+  });
+  mcp.register({
+    name: "nexus.web_screenshot",
+    description: "截当前网页会话画面",
+    handler: (args) =>
+      webScreenshot(ROOT, {
+        session: String(args?.session || "default"),
+        path: args?.path ? String(args.path) : undefined,
+      }),
+  });
+  mcp.register({
+    name: "nexus.web_close",
+    description: "关闭网页操控会话",
+    handler: (args) => webClose({ session: String(args?.session || "default") }),
   });
 
   agentWorkspaceRoot(ROOT);

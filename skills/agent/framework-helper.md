@@ -21,6 +21,12 @@ description: 主人能力模式：查状态、日志、电脑截屏、搜网页�
 - 电脑屏幕发群：`nexus_screen`。有人说截图发群必须用这个，不要用 `nexus_shot` 渲状态卡片充数
 - `nexus_shot` 只渲菜单或 HTML 图
 
+桌面 UIA（Windows）与网页控件：
+- 先读技能 `uia-mcp`
+- 桌面：`nexus_uia_windows` → `tree` → `click` / `set_text` / `keys`
+- 网页：`nexus_web_open` → `snapshot` → `click` / `type` / `keys`；`web_read` 只读不能代替操控
+- 缺依赖时用 `nexus_shell` 安装 pywinauto 或浏览器运行时
+
 网页与其它：
 - `nexus_web_search` / `nexus_web_read`
 - `nexus_list_workflows` / `nexus_run_workflow`
