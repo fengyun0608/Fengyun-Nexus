@@ -101,7 +101,6 @@ import {
   originGroupId,
   originMessageType,
   peekRestartNotify,
-  saveRestartNotify,
 } from "./restart-notify.js";
 import { scheduleSystemRestart } from "./restart-exec.js";
 import { remountPluginChannels } from "./channel-adapters.js";
@@ -864,20 +863,6 @@ async function bootstrap(): Promise<void> {
         if (cmd.systemRestart) {
           const uptime = formatUptime(Date.now() - startedAt);
           replies = [buildRestartingMessage(uptime)];
-          const gid = originGroupId(msg);
-          const mt = originMessageType(msg);
-          saveRestartNotify(ROOT, {
-            channel: msg.channel,
-            chatId: gid ? `group:${gid}` : msg.chatId,
-            userId: msg.userId,
-            messageType: mt,
-            groupId: gid,
-            requestedAt: nowIso(),
-            previousUptime: uptime,
-          });
-          log.info(
-            `已记录重启回执目标  ${mt}${gid ? ` 群=${gid}` : ` 会话=${msg.chatId}`}`,
-          );
         }
 
         let updateResult: Awaited<ReturnType<typeof applyFullUpdate>> | null = null;
@@ -901,20 +886,6 @@ async function bootstrap(): Promise<void> {
             replies = [report];
             const gid = originGroupId(msg);
             const mt = originMessageType(msg);
-            // 有实际更新才记重启回执
-            if (upd.shouldExit) {
-              const uptime = formatUptime(Date.now() - startedAt);
-              saveRestartNotify(ROOT, {
-                channel: msg.channel,
-                chatId: gid ? `group:${gid}` : msg.chatId,
-                userId: msg.userId,
-                messageType: mt,
-                groupId: gid,
-                requestedAt: nowIso(),
-                previousUptime: uptime,
-                updateSummary: upd.updateSummary || upd.changeItems || [],
-              });
-            }
             if (msg.channel === "onebot11") {
               try {
                 let sent = false;
@@ -2723,7 +2694,10 @@ async function bootstrap(): Promise<void> {
       }
     }
     void printBootSuccess();
-    dropStaleRestartNotice();
+    if (peekRestartNotify(ROOT)) {
+      clearRestartNotify(ROOT);
+      log.info("本次启动不发重启完成回执");
+    }
 
     // 后端终端输入（跑代码的那个窗口），不是网页
     startTerminalRepl({
@@ -2745,13 +2719,6 @@ async function bootstrap(): Promise<void> {
       },
     });
   });
-
-  /** 启动不再补发「重启完成」和回执图。上次没发完的记录直接丢掉。 */
-  function dropStaleRestartNotice(): void {
-    if (!peekRestartNotify(ROOT)) return;
-    clearRestartNotify(ROOT);
-    log.info("启动不再补发重启完成，已清掉上次留下的回执");
-  }
 
   server.on("error", (err) => {
     const t = translateError(err);
