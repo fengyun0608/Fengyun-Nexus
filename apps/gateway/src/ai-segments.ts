@@ -22,34 +22,24 @@ function isMetaPlanning(para: string): boolean {
   );
 }
 
-/** 大段内心独白 / 翻文档过程：应进合并转发，不要当普通气泡。 */
+/** 大段内心独白 / 翻文档过程：应进合并转发，不要当普通气泡。短句一律当回话。 */
 function looksLikeThinking(para: string): boolean {
   const t = String(para || "").trim();
   if (!t) return false;
   if (isMetaPlanning(t)) return true;
+  // 「哈喽～」「今天怎么想起找我」这种短回话不是思考
+  if (t.length < 48 && !/^(我先|让我|接下来|先看|先读|文档找到|已经掌握)/.test(t)) return false;
   if (
-    /我先看|让我|接下来|文档找到了|已经掌握|先列出|我来看|我去看|看一下|读一下|检查一下|再看|继续看|先读|工具结果|技能里|framework-helper|agent-code/.test(
+    /我先看|让我看|让我读|接下来我|文档找到了|已经掌握|先列出|我来看|我去看|看一下|读一下|检查一下|再看一眼|继续看|先读|工具结果|技能里|framework-helper|agent-code/.test(
       t,
     )
   ) {
     return true;
   }
   if (t.length < 36) return false;
-  return /系统设定|系统说|根据系统|所以我要|身份上要|可以融合|不需要调用工具|当前通道的人设|问[「"]你是谁|用户想查看|我想确认/.test(
+  return /系统设定|系统说|根据系统|所以我要|身份上要|可以融合|不需要调用工具|当前通道的人设|问[「"]你是谁|用户想查看|用户只是|我想确认|应该用.+语气/.test(
     t,
   );
-}
-
-/** 真正给人看的收尾回话（不是翻文件过程）。 */
-function looksLikeFinalSpeak(para: string): boolean {
-  const t = String(para || "").trim();
-  if (!t) return false;
-  if (/^(让我|我先|接下来|文档找到|已经掌握|先列出)/.test(t)) return false;
-  if (/^(喵|主人|好的|好啦|好了|简单说|文档在|插件写法|可以这样写)/.test(t)) return true;
-  if (/docs\/[^\s]+|plugins\/templates|nexus\.plugin\.json/.test(t) && !/让我|我先看|再看/.test(t)) {
-    return true;
-  }
-  return false;
 }
 
 export function stripMetaPlanning(text: string): string {
@@ -107,23 +97,7 @@ export function splitThinkingAndSpeak(text: string): {
       thinking = [thinking, p].filter(Boolean).join("\n\n").trim();
       continue;
     }
-    if (looksLikeFinalSpeak(p)) {
-      kept.push(p);
-      continue;
-    }
-    // 还没出现过收尾回话时，默认当过程，进多段转发
-    if (!kept.length) {
-      thinking = [thinking, p].filter(Boolean).join("\n\n").trim();
-      continue;
-    }
     kept.push(p);
-  }
-  if (
-    kept.length &&
-    kept.every((p) => looksLikeThinking(p) || /让我|我先|接下来|看一下|读一下/.test(p))
-  ) {
-    thinking = [thinking, ...kept].filter(Boolean).join("\n\n").trim();
-    kept.length = 0;
   }
   const speak = kept.join("\n\n").trim();
   const thinkingNodes = packForwardNodes(thinking);
