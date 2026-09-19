@@ -66,7 +66,7 @@ import {
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
 import { applyFullUpdate } from "./full-update.js";
 import { ensureGatewayPortOpen } from "./open-port.js";
-import { buildRestartOkLines, buildRestartOkPanelHtml, buildStatusLines, buildStatusPanelHtml, type StatusShotInput } from "./status-shot.js";
+import { buildRestartOkLines, buildRestartOkPanelHtml, buildStatusLines, buildStatusPanelHtml, probePublicReach, type StatusShotInput } from "./status-shot.js";
 import { addOnlineTotal, collectStatusAccounts, ONLINE_KV, readOnlineTotals } from "./status-accounts.js";
 import { execFileSync } from "node:child_process";
 import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
@@ -796,14 +796,17 @@ async function bootstrap(): Promise<void> {
   async function collectStatusHtml(): Promise<string> {
     const base = collectStatusInput();
     const totals = readOnlineTotals(db.getKv(ONLINE_KV));
-    const accounts = await collectStatusAccounts({
-      bots: base.bots,
-      call: (action, botId) => onebot.callAction(action, {}, { botId, timeoutMs: 8000 }),
-      sessionMs: (id) => onebot.sessionMs(id),
-      totalMs: (id) => totals[id] || 0,
-      counts: (id) => db.countMessagesByAccount(id),
-    });
-    const input: StatusShotInput = { ...base, accounts };
+    const [accounts, reach] = await Promise.all([
+      collectStatusAccounts({
+        bots: base.bots,
+        call: (action, botId) => onebot.callAction(action, {}, { botId, timeoutMs: 8000 }),
+        sessionMs: (id) => onebot.sessionMs(id),
+        totalMs: (id) => totals[id] || 0,
+        counts: (id) => db.countMessagesByAccount(id),
+      }),
+      probePublicReach(),
+    ]);
+    const input: StatusShotInput = { ...base, accounts, reach };
     lastStatusLines = buildStatusLines(input);
     return buildStatusPanelHtml(input);
   }

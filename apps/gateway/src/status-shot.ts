@@ -2,8 +2,11 @@
  * #状态 / 重启成功出图：统一走 @fengyun/browser-shot 视觉壳。
  * server 姿态不展示本机 IP；mobile / desktop / termux 可展示。
  */
+import { execFile } from "node:child_process";
+import { statfsSync } from "node:fs";
 import {
   arch,
+  availableParallelism,
   cpus,
   freemem,
   hostname,
@@ -62,6 +65,8 @@ export type StatusShotInput = {
     totalOnline: string;
     avatar: string;
   }>;
+  /** 国内 / 国外连通。只含通断与延迟，不含地址。 */
+  reach?: Array<{ label: string; ok: boolean; ms: number | null }>;
 };
 
 /** server 部署不展示本机 IP，其它姿态可展示 */
@@ -85,6 +90,69 @@ function localIpv4List(): string[] {
 function replyGroupCount(ids: string[]): string {
   if (!ids.length) return "不限";
   return `${ids.length} 个`;
+}
+
+export type ReachProbe = { label: string; ok: boolean; ms: number | null };
+
+function pingOnce(host: string): Promise<{ ok: boolean; ms: number | null }> {
+  const win = process.platform === "win32";
+  const args = win ? ["-n", "1", "-w", "1600", host] : ["-c", "1", "-W", "2", host];
+  return new Promise((resolve) => {
+    execFile(
+      "ping",
+      args,
+      { timeout: 2200, windowsHide: true },
+      (err, stdout, stderr) => {
+        const text = `${stdout || ""}\n${stderr || ""}`;
+        const m = text.match(/[=<]\s*(\d+(?:\.\d+)?)\s*ms/i);
+        const ms = m ? Math.round(Number(m[1])) : null;
+        const lost = /100%|timed out|unreachable|传输失败/i.test(text);
+        resolve({ ok: !err && !lost && ms != null, ms: lost ? null : ms });
+      },
+    );
+  });
+}
+
+/** 只测通断和延迟，不打开网页，结果里不带地址。 */
+export async function probePublicReach(): Promise<ReachProbe[]> {
+  const jobs = [
+    { label: "国内", host: "www.baidu.com" },
+    { label: "国外", host: "www.google.com" },
+  ];
+  return Promise.all(
+    jobs.map(async (job) => {
+      try {
+        const r = await pingOnce(job.host);
+        return { label: job.label, ok: r.ok, ms: r.ms };
+      } catch {
+        return { label: job.label, ok: false, ms: null };
+      }
+    }),
+  );
+}
+
+function diskUsage(): { used: string; total: string; free: string; pct: number } | null {
+  try {
+    const s = statfsSync(process.cwd());
+    const bsize = Number(s.bsize) || 0;
+    const total = Number(s.blocks) * bsize;
+    const free = Number(s.bavail) * bsize;
+    if (!total || total < 0) return null;
+    const used = Math.max(0, total - free);
+    return {
+      used: formatBytes(used),
+      total: formatBytes(total),
+      free: formatBytes(free),
+      pct: Math.round((used / total) * 100),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function reachText(p: ReachProbe): string {
+  if (!p.ok) return "不通";
+  return p.ms == null ? "通" : `通 · ${p.ms} ms`;
 }
 
 function formatUsec(us: number): string {
@@ -152,6 +220,7 @@ function factRows(s: StatusShotInput, os: OsMetrics): Array<[string, string]> {
   const model = (cpu0?.model || os.cpuModel || "CPU").replace(/\s+/g, " ").trim();
   const started = new Date(Date.now() - procUptime() * 1000).toLocaleString("zh-CN", { hour12: false });
   const freePct = totalmem() ? Math.round((freemem() / totalmem()) * 100) : 0;
+  const disk = diskUsage();
   return [
     ["进程已运行", formatProcUptime(procUptime())],
     ["系统已运行", os.sysUptime],
@@ -181,7 +250,12 @@ function factRows(s: StatusShotInput, os: OsMetrics): Array<[string, string]> {
     ["分配峰值", formatBytes(heap.peak_malloced_memory || 0)],
     ["物理内存", os.memTotal],
     ["空闲内存", `${formatBytes(freemem())} · ${freePct}%`],
+    ["磁盘已用", disk ? `${disk.used} / ${disk.total}` : "—"],
+    ["磁盘空闲", disk?.free ?? "—"],
+    ["磁盘占用", disk ? `${disk.pct}%` : "—"],
+    ["并行度", String(availableParallelism())],
     ["网卡", nicNames()],
+    ...(s.reach || []).map((p) => [p.label, reachText(p)] as [string, string]),
     ["采样", `${resourceSamples.length} / 24`],
     ["CPU 区间", sampleRange("cpu")],
     ["内存区间", sampleRange("mem")],
@@ -390,6 +464,9 @@ export function buildStatusLines(s: StatusShotInput): string[] {
   lines.push(`系统 ${os.osMain} · 主机 ${os.host}`);
   lines.push(`资源 CPU ${os.cpuPct}% · 内存 ${os.memPct}% · Node ${os.nodePct}%`);
   lines.push(`网络 ${net.main}${net.sub ? ` · ${net.sub}` : ""}`);
+  for (const p of s.reach || []) lines.push(`${p.label} ${reachText(p)}`);
+  const disk = diskUsage();
+  if (disk) lines.push(`磁盘 ${disk.used} / ${disk.total} · 空闲 ${disk.free}`);
   if (s.onebot.enabled) {
     lines.push(
       s.onebot.connected
@@ -488,6 +565,13 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
     .join(" / ");
   const rss = formatBytes(memoryUsage().rss);
   const freeMem = formatBytes(freemem());
+  const disk = diskUsage();
+  const reachCards = (s.reach && s.reach.length ? s.reach : [
+    { label: "国内", ok: false, ms: null },
+    { label: "国外", ok: false, ms: null },
+  ])
+    .map((p) => tileHtml(p.label, p.ok ? "通" : "不通", p.ok && p.ms != null ? `${p.ms} ms` : "无响应"))
+    .join("");
 
   const accountCards = (s.accounts || [])
     .map((a) => {
@@ -565,6 +649,14 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
     <div class="card">
       <div class="sec">全部账号</div>
       <div class="accs">${accountCards || "<p class='foot'>还没有账号</p>"}</div>
+    </div>
+
+    <div class="card">
+      <div class="sec">网络连通</div>
+      <div class="grid3">
+        ${reachCards}
+        ${tileHtml("磁盘", disk ? `${disk.pct}%` : "—", disk ? `空闲 ${disk.free} · 共 ${disk.total}` : "本机磁盘")}
+      </div>
     </div>
 
     <div class="card">
