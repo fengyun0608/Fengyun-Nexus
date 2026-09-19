@@ -457,7 +457,7 @@ function frameworkSystemPrompt(opts?: {
       "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp。控件树是空的网页壳，用 nexus_web_attach 挂页面，或 nexus_window_see 认出字在哪再 nexus_click_text。普通窗口用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。不够就自己写脚本。",
       "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。snapshot 里有字和坐标。不要只用 web_read 只读摘要。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。",
-      "对用户只说人话正文。发现应用没开可以说正在帮你启动，做完再说一声好了。不要把思考过程、工具名、JSON、逐步内心独白甩出去，也不要每做一小步就刷很多条。",
+      "对用户说人话。可以带上思考过程（会标成「思考：」）。发现应用没开可以说正在帮你启动，做完再说一声好了。不要把工具名、JSON、DSML 甩出去，也不要每做一小步就刷很多条。",
       "工具必须走正式 function call。禁止把 tool_calls、DSML、invoke、XML 写进回复正文。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
       "现成工具能用就用；没有就自己写代码跑通。别空口说不会，也别等别人给你加工具。",

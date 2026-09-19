@@ -33,18 +33,32 @@ export type LlmToolHandler = (
 ) => Promise<unknown> | unknown;
 
 export type LlmStreamOpts = {
-  /** 仅正文增量。不发思考 / reasoning。 */
+  /** 正文与思考的增量都会回调（思考会先标「思考：」）。 */
   onDelta?: (text: string) => void;
   maxRounds?: number;
 };
 
-/** 去掉模型偶发夹带的思考标签，不发给用户。 */
-export function stripThinking(text: string): string {
+/** 把思考标签展开成可见正文，不再删掉。工具调用标记仍另清。 */
+export function revealThinking(text: string): string {
   return String(text || "")
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
-    .replace(/<\/?think>/gi, "")
+    .replace(/<think>([\s\S]*?)<\/think>/gi, "\n$1\n")
+    .replace(/<thinking>([\s\S]*?)<\/thinking>/gi, "\n$1\n")
+    .replace(/<\/?think(?:ing)?>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+/** @deprecated 现与 revealThinking 相同：思考要发给用户 */
+export function stripThinking(text: string): string {
+  return revealThinking(text);
+}
+
+function composeSpeak(reasoning: string, content: string): string {
+  const body = stripToolMarkup(revealThinking(content));
+  const think = String(reasoning || "").trim();
+  if (think && body) return `思考：\n${think}\n\n${body}`;
+  if (think) return `思考：\n${think}`;
+  return body;
 }
 
 function stripToolMarkup(text: string): string {
@@ -131,15 +145,15 @@ export class LlmRouter {
   async chat(messages: LlmMessage[], streamOpts?: LlmStreamOpts): Promise<string> {
     if (streamOpts?.onDelta) {
       const r = await this.chatTurnStream(messages, undefined, streamOpts.onDelta);
-      return stripThinking(r.content);
+      return composeSpeak(r.reasoning || "", r.content);
     }
     const r = await this.chatTurn(messages);
-    return stripThinking(r.content);
+    return composeSpeak(r.reasoning || "", r.content);
   }
 
   /**
    * OpenAI 风格 tools：模型可多轮调工具，再给最终文本。
-   * 有 onDelta 时只把最终正文流式吐出，不把思考过程发出去。
+   * 思考过程一并给人看；工具调用原文仍不发。
    */
   async chatWithTools(
     messages: LlmMessage[],
@@ -152,12 +166,14 @@ export class LlmRouter {
 
     const history = messages.map((m) => ({ ...m }));
     const maxRounds = Math.min(Math.max(opts?.maxRounds ?? 6, 1), 8);
+    const thoughts: string[] = [];
     for (let i = 0; i < maxRounds; i++) {
       const turn = await this.chatTurn(history, tools);
+      if (turn.reasoning?.trim()) thoughts.push(turn.reasoning.trim());
       const leaked = turn.tool_calls?.length ? [] : leakedToolCalls(turn.content);
       const calls = turn.tool_calls?.length ? turn.tool_calls : leaked;
       if (!calls.length) {
-        const text = stripToolMarkup(stripThinking(turn.content));
+        const text = composeSpeak(thoughts.join("\n\n"), turn.content);
         if (opts?.onDelta && text) await emitSoftDeltas(text, opts.onDelta);
         return text;
       }
@@ -190,11 +206,12 @@ export class LlmRouter {
     }
     history.push({
       role: "user",
-      content: "工具已经执行完。用一两句中文告诉用户结果。不要再调用工具，也不要把工具调用写进正文。",
+      content: "工具已经执行完。用人话告诉用户结果；可以带上简短思考。不要再调用工具，也不要把工具调用写进正文。",
     });
     let last = opts?.onDelta
       ? await this.chatTurnStream(history, undefined, opts.onDelta)
       : await this.chatTurn(history);
+    if (last.reasoning?.trim()) thoughts.push(last.reasoning.trim());
     // 终稿若还泄出工具调用，再执行一轮并强制要人话
     const more = leakedToolCalls(last.content);
     if (more.length) {
@@ -225,13 +242,15 @@ export class LlmRouter {
       }
       history.push({
         role: "user",
-        content: "好了。只用人话回复用户，一两句即可。禁止再写工具调用。",
+        content: "好了。用人话回复用户。可以带思考。禁止再写工具调用。",
       });
       last = opts?.onDelta
         ? await this.chatTurnStream(history, undefined, opts.onDelta)
         : await this.chatTurn(history);
+      if (last.reasoning?.trim()) thoughts.push(last.reasoning.trim());
     }
-    const text = stripToolMarkup(stripThinking(last.content));
+    // 流式终稿已在 onDelta 里吐过正文；若还有多轮思考，补在返回值里
+    const text = composeSpeak(thoughts.join("\n\n"), last.content);
     return text || "好了。";
   }
 
@@ -265,7 +284,7 @@ export class LlmRouter {
   private async chatTurn(
     messages: LlmMessage[],
     tools?: LlmToolDef[],
-  ): Promise<{ content: string; tool_calls?: LlmToolCall[] }> {
+  ): Promise<{ content: string; reasoning?: string; tool_calls?: LlmToolCall[] }> {
     if (!this.opts.apiKey) return { content: "" };
 
     const ctrl = new AbortController();
@@ -297,23 +316,27 @@ export class LlmRouter {
       choices?: Array<{
         message?: {
           content?: string | null;
+          reasoning_content?: string | null;
+          reasoning?: string | null;
           tool_calls?: LlmToolCall[];
         };
       }>;
     };
     const msg = data.choices?.[0]?.message;
+    const reasoning = String(msg?.reasoning_content ?? msg?.reasoning ?? "").trim();
     return {
       content: String(msg?.content ?? ""),
+      reasoning: reasoning || undefined,
       tool_calls: msg?.tool_calls?.length ? msg.tool_calls : undefined,
     };
   }
 
-  /** 流式一轮。只把 content 增量交给 onDelta；忽略 reasoning_content。 */
+  /** 流式一轮。思考与正文都会交给 onDelta。 */
   private async chatTurnStream(
     messages: LlmMessage[],
     tools: LlmToolDef[] | undefined,
     onDelta?: (text: string) => void,
-  ): Promise<{ content: string; tool_calls?: LlmToolCall[] }> {
+  ): Promise<{ content: string; reasoning?: string; tool_calls?: LlmToolCall[] }> {
     if (!this.opts.apiKey) return { content: "" };
 
     const ctrl = new AbortController();
@@ -342,7 +365,6 @@ export class LlmRouter {
       throw new Error(`LLM error ${res.status}: ${err}`);
     }
     if (!res.body) {
-      // 兼容不支持流的供应商：退回非流式
       return this.chatTurn(messages, tools);
     }
 
@@ -350,6 +372,9 @@ export class LlmRouter {
     const decoder = new TextDecoder();
     let buf = "";
     let content = "";
+    let reasoning = "";
+    let thinkHeader = false;
+    let bodyStarted = false;
     const toolAcc = new Map<number, { id: string; name: string; arguments: string }>();
 
     const flushLine = (line: string) => {
@@ -362,6 +387,7 @@ export class LlmRouter {
           delta?: {
             content?: string | null;
             reasoning_content?: string | null;
+            reasoning?: string | null;
             tool_calls?: Array<{
               index?: number;
               id?: string;
@@ -377,9 +403,21 @@ export class LlmRouter {
       }
       const delta = json.choices?.[0]?.delta;
       if (!delta) return;
-      // 思考过程不发
+      const thinkPiece = delta.reasoning_content ?? delta.reasoning;
+      if (thinkPiece) {
+        if (!thinkHeader) {
+          thinkHeader = true;
+          onDelta?.("思考：\n");
+        }
+        reasoning += thinkPiece;
+        onDelta?.(thinkPiece);
+      }
       const piece = delta.content;
       if (piece) {
+        if (thinkHeader && !bodyStarted && reasoning) {
+          bodyStarted = true;
+          onDelta?.("\n\n");
+        }
         content += piece;
         onDelta?.(piece);
       }
@@ -415,6 +453,10 @@ export class LlmRouter {
           }))
       : undefined;
 
-    return { content, tool_calls };
+    return {
+      content,
+      reasoning: reasoning.trim() || undefined,
+      tool_calls,
+    };
   }
 }
