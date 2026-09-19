@@ -414,6 +414,7 @@ function frameworkSystemPrompt(opts?: {
   if (opts?.capability) {
     lines.push(
       who ? `当前说话的人是主人（${who}），已开启能力调用。` : "当前说话的人是主人，已开启能力调用。",
+      "不会做或没有专用工具时，按这个顺序：先看可用技能（nexus_list_skills / nexus_skill_read），按技能步骤做；没有技能或技能不够就用 nexus_shell 系统命令试能不能实现；仍不行再说明原因。禁止一上来就说做不到或没有工具。",
       "可以查看并调用已加载的群内插件能力，也可以安装生态收录、排队安装 Go / Python / 浏览器 / NapCat，以及启用、停用、重载插件。",
       "主人要打开或启动本机软件时，调用 nexus_launch_app，只传软件名。不要说没有启动工具，也不要改口教对方自己去点。",
       "问电脑开了多久、开机时间，调用 nexus_host_uptime。那是整台电脑的开机时长，不是框架自己跑了多久。不要说没有这个工具，也不要编数字。",
@@ -427,6 +428,7 @@ function frameworkSystemPrompt(opts?: {
       "改通道人设/回复群或 OneBot 开关路径：用 nexus_channel_patch / nexus_onebot_patch。不要改密码。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
+      "专有工具优先；没有就读技能；再不行就系统命令试。别空口说不会。",
     );
   } else if (opts?.userId) {
     lines.push(

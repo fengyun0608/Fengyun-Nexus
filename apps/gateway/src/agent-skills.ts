@@ -1,6 +1,6 @@
 /**
- * 运行时技能：扫 skills/agent/*.md，把摘要塞进系统提示，供 AI 按文档办事。
- * 与 Cursor 个人 skill 无关；这是宿主给模型看的短说明。
+ * 运行时技能：扫 skills/agent/*.md，摘要进系统提示；完整内容可按需读取。
+ * 与 Cursor 个人 skill 无关；这是宿主给模型看的说明。
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -41,7 +41,7 @@ export function loadAgentSkills(root: string): AgentSkill[] {
         id,
         name: meta.name || id,
         description: meta.description || "",
-        body: body.slice(0, 4000),
+        body: body.slice(0, 12_000),
       });
     } catch {
       /* skip */
@@ -50,10 +50,27 @@ export function loadAgentSkills(root: string): AgentSkill[] {
   return out;
 }
 
-/** 拼进系统提示的短块；太长会截断 */
+export function findAgentSkill(root: string, idOrName: string): AgentSkill | null {
+  const key = String(idOrName || "").trim().toLowerCase();
+  if (!key) return null;
+  const skills = loadAgentSkills(root);
+  return (
+    skills.find((s) => s.id.toLowerCase() === key || s.name.toLowerCase() === key) || null
+  );
+}
+
+/** 拼进系统提示的短块 */
 export function skillsPromptBlock(skills: AgentSkill[]): string {
-  if (!skills.length) return "";
-  const lines = ["可用技能（按需要遵循）："];
+  if (!skills.length) {
+    return [
+      "当前没有 skills/agent 技能文件。",
+      "不会做时：先用已有工具；没有专用工具就用 nexus_shell 系统命令试；不要一上来就说做不到。",
+    ].join("\n");
+  }
+  const lines = [
+    "可用技能（不会就先读技能，再试系统命令）：",
+    "顺序：1）有专用工具就用；2）nexus_list_skills / nexus_skill_read 看 skills/agent；3）nexus_shell 用系统命令试能不能做；4）仍不行再说原因。禁止一上来说没有办法。",
+  ];
   for (const s of skills) {
     lines.push(`- ${s.name}（${s.id}）：${s.description || s.body.slice(0, 120)}`);
   }

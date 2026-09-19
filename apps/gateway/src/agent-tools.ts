@@ -23,6 +23,7 @@ import {
 import { textToSpeechFile } from "./tts-stt.js";
 import { runHostShell } from "./host-shell.js";
 import { captureDesktop } from "./screen-capture.js";
+import { findAgentSkill, loadAgentSkills } from "./agent-skills.js";
 import type { OneBot11Bridge } from "./onebot11-bridge.js";
 import type { OneBotConfig } from "./onebot11-bridge.js";
 import { queryLogEntries } from "./log.js";
@@ -65,6 +66,8 @@ const MASTER_TOOLS = new Set([
   "nexus_host_info",
   "nexus_logs",
   "nexus_shell",
+  "nexus_list_skills",
+  "nexus_skill_read",
   "nexus_web_search",
   "nexus_web_read",
   "nexus_list_caps",
@@ -139,6 +142,13 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
   return [
     tool("nexus_status", "查看 Fengyun Nexus 运行状态摘要", {}),
     tool("nexus_list_plugins", "列出已加载插件 id 与名称", {}),
+    tool("nexus_list_skills", "列出 skills/agent 运行时技能。不会做某事时先看这里。", {}),
+    tool(
+      "nexus_skill_read",
+      "读取某个运行时技能全文，按里面的步骤做。不会就先读技能。",
+      { id: { type: "string", description: "技能 id 或名称，如 framework-helper" } },
+      ["id"],
+    ),
     tool("nexus_whoami", "查看当前用户是否主人及级别", {}),
     tool("nexus_list_workflows", "列出可用工作流", {}),
     tool(
@@ -405,6 +415,23 @@ export async function runAgentTool(
         version: p.version,
       })),
     };
+  }
+  if (name === "nexus_list_skills") {
+    return {
+      items: loadAgentSkills(bag.repoRoot).map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+      })),
+      note: "不会做时先 nexus_skill_read 读完整技能，再按步骤做；没有技能就用 nexus_shell 试。",
+    };
+  }
+  if (name === "nexus_skill_read") {
+    const id = String(args.id || args.name || "").trim();
+    if (!id) return { error: "缺少技能 id" };
+    const skill = findAgentSkill(bag.repoRoot, id);
+    if (!skill) return { error: `没有这个技能：${id}` };
+    return { id: skill.id, name: skill.name, description: skill.description, body: skill.body };
   }
   if (name === "nexus_whoami") {
     const s = bag.channelSettings();
