@@ -55,6 +55,7 @@ async function loadPlaywright(): Promise<{
       newPage: (opts?: Record<string, unknown>) => Promise<{
         setDefaultTimeout: (ms: number) => void;
         goto: (url: string, opts?: Record<string, unknown>) => Promise<unknown>;
+        evaluate: (fn: (selector: string) => void, selector: string) => Promise<unknown>;
         locator: (sel: string) => {
           screenshot: (opts: Record<string, unknown>) => Promise<unknown>;
         };
@@ -158,18 +159,30 @@ async function captureFile(
     });
     try {
       const page = await browser.newPage({
-        viewport: { width: opts.width, height: opts.height },
-        deviceScaleFactor: 2,
+        viewport: { width: opts.width, height: Math.min(opts.height, 1400) },
+        deviceScaleFactor: 1,
       });
       page.setDefaultTimeout(20_000);
       await page.goto(pathToFileURL(htmlPath).href, {
         waitUntil: "domcontentloaded",
         timeout: 20_000,
       });
-      if (opts.selector === "body" || opts.selector === "page") {
+      const sel = opts.selector;
+      if (sel && sel !== "body" && sel !== "page") {
+        await page.evaluate((selector) => {
+          const el = document.querySelector(selector) as HTMLElement | null;
+          if (!el) return;
+          const h = el.getBoundingClientRect().height;
+          const max = 2200;
+          if (h > max) {
+            document.documentElement.style.zoom = String(max / h);
+          }
+        }, sel);
+      }
+      if (sel === "body" || sel === "page") {
         await page.screenshot({ path: pngPath, type: "png", fullPage: true, timeout: 15_000 });
       } else {
-        const el = page.locator(opts.selector);
+        const el = page.locator(sel);
         await el.screenshot({ path: pngPath, type: "png", timeout: 15_000 });
       }
     } finally {

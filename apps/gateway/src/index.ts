@@ -2813,21 +2813,32 @@ async function bootstrap(): Promise<void> {
         },
         createdAt: nowIso(),
       };
+      let useImage = sendPayload !== text;
       for (let i = 0; i < 45; i++) {
-        if (onebot.status().connected) {
-          let ok = await onebot.sendText(sendPayload, ctx);
-          if (!ok && gid) {
-            ok = await onebot.sendTextToGroup(gid, sendPayload);
-          }
-          if (ok) {
-            log.ok(
-              `重启成功已发回原${mt === "group" ? `群 ${gid}` : "会话"}`,
-            );
-            clearRestartNotify(ROOT);
-            return;
-          }
+        if (!onebot.status().connected) {
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
         }
-        await new Promise((r) => setTimeout(r, 1000));
+        const payload = useImage ? sendPayload : text;
+        let ok = await onebot.sendText(payload, { ...ctx, content: payload });
+        if (!ok && gid) {
+          ok = await onebot.sendTextToGroup(gid, payload);
+        }
+        if (ok) {
+          log.ok(
+            `重启成功已发回原${mt === "group" ? `群 ${gid}` : "会话"}`,
+          );
+          clearRestartNotify(ROOT);
+          return;
+        }
+        if (useImage) {
+          log.warn("重启报告的图发不出去，改发文字");
+          useImage = false;
+          continue;
+        }
+        log.warn("已连接但发送失败，不再反复重试");
+        clearRestartNotify(ROOT);
+        return;
       }
       log.warn("重启成功通知未发出：OneBot 未连接，保留待发记录");
       return;

@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { OneBot11Channel, type Ob11MessageEvent } from "@fengyun/nexus-channel";
@@ -26,6 +26,11 @@ function rewriteCqImagesForOneBot(text: string): string {
       return "（不支持的图片格式）";
     }
     try {
+      const size = statSync(filePath).size;
+      if (size > 1_600_000) {
+        log.warn("图片太大，QQ 收不了富媒体，改为文字说明");
+        return "（图片过大，未能发给 QQ）";
+      }
       const b64 = readFileSync(filePath).toString("base64");
       return `[CQ:image,file=base64://${b64}]`;
     } catch (e) {
@@ -441,7 +446,10 @@ export class OneBot11Bridge {
               : undefined;
         const ok = retcode === 0 || status === "ok" || status === "async";
         if (!ok) {
-          const tip = (message || "无说明").replace(/\s+/g, " ").slice(0, 180);
+          const rawTip = (message || "无说明").replace(/\s+/g, " ");
+          const tip = /rich media/i.test(rawTip)
+            ? "图片被 QQ 拒绝"
+            : rawTip.slice(0, 180);
           log.warn(`OneBot ${pend.action} 失败 ret=${retcode} ${tip}`);
         }
         pend.resolve({
