@@ -338,6 +338,7 @@ function loadRegistry(): RegistryConfig {
       ...shipped,
       ...loc,
       pluginsRepo: shipped.pluginsRepo,
+      ecosystemRepo: shipped.ecosystemRepo,
       categories: loc.categories ?? shipped.categories,
       update: loc.update ?? shipped.update,
       baseUrl: typeof loc.baseUrl === "string" ? loc.baseUrl : shipped.baseUrl,
@@ -2090,8 +2091,10 @@ async function bootstrap(): Promise<void> {
       tokenEnv: registry.tokenEnv,
       update: registry.update,
       pluginsRepo: registry.pluginsRepo || null,
+      ecosystemRepo: registry.ecosystemRepo || null,
       /** 专仓地址只读，发行配置锁定，控制台不可改 */
       pluginsRepoLocked: true,
+      ecosystemRepoLocked: true,
       categories: Object.entries(registry.categories).map(([id, c]) => ({
         id,
         label: c.label,
@@ -2102,10 +2105,11 @@ async function bootstrap(): Promise<void> {
 
   /** 专仓地址不可经 API 修改 */
   app.patch("/v1/registry", authMiddleware, (req, res) => {
-    if (req.body?.pluginsRepo !== undefined) {
+    if (req.body?.pluginsRepo !== undefined || req.body?.ecosystemRepo !== undefined) {
       res.status(403).json({
-        error: "系统插件专仓地址已锁定，不可在控制台修改",
+        error: "系统插件 / 生态专仓地址已锁定，不可在控制台修改",
         pluginsRepo: registry.pluginsRepo || null,
+        ecosystemRepo: registry.ecosystemRepo || null,
       });
       return;
     }

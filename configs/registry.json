@@ -13,5 +13,9 @@
   "pluginsRepo": {
     "url": "https://gitcode.com/fengyunnb_admin/fengyun-system-plugins.git",
     "branch": "main"
+  },
+  "ecosystemRepo": {
+    "url": "https://gitcode.com/fengyunnb_admin/fengyun-nexus-ecosystem.git",
+    "branch": "main"
   }
 }

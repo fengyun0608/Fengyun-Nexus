@@ -10,7 +10,7 @@
 | 确认环境 | [环境要求](product/environment.md) |
 | 了解产品 | [产品介绍](product/README.md) |
 | 看目录与规划 | [目录鱼骨](product/directory.md) · [能力鱼骨](product/fishbone.md) · [产品规划](product/planning.md) |
-| 插件生态 | [插件生态](ecosystem/plugins.md) · [插件包](ecosystem/plugin-packs.md) · [通道插件写法](ecosystem/channel-plugins.md) |
+| 插件生态 | [插件生态](ecosystem/plugins.md) · [插件包](ecosystem/plugin-packs.md) · [生态专仓](ecosystem/hub.md) · [通道插件写法](ecosystem/channel-plugins.md) |
 | 接 QQ · NapCat | [OneBot 11](ecosystem/onebot11.md) |
 | 系统插件专仓 | [packs/fengyun-system-plugins](../packs/fengyun-system-plugins/README.md) |
 
@@ -31,6 +31,7 @@
 |------|------|
 | [ecosystem/plugins.md](ecosystem/plugins.md) | 通道插件 / 框架插件 / 专仓更新 |
 | [ecosystem/plugin-packs.md](ecosystem/plugin-packs.md) | 插件包 vs 单插件 · 写法 · 菜单 · 组合 |
+| [ecosystem/hub.md](ecosystem/hub.md) | 生态专仓收录 · 与系统插件仓分工 |
 | [ecosystem/channel-plugins.md](ecosystem/channel-plugins.md) | 通道 + 插件编写基准 |
 | [ecosystem/onebot11.md](ecosystem/onebot11.md) | OneBot 11 · NapCat |
 

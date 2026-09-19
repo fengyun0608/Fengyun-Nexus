@@ -60,8 +60,10 @@ export interface RegistryConfig {
   tokenEnv: string;
   categories: Record<string, { path: string; label: string }>;
   update: { enabled: boolean; checkOnStart: boolean };
-  /** 插件专仓（可选）。未配时对照本仓 origin 的 plugins/ 目录。 */
+  /** 系统插件专仓。未配时对照本仓 origin 的 plugins/。 */
   pluginsRepo?: { url: string; branch?: string };
+  /** 生态收录专仓（catalog.json）。线上收录与社区包更新走这里。 */
+  ecosystemRepo?: { url: string; branch?: string };
 }
 
 export function newId(prefix = "nx"): string {

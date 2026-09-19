@@ -63,4 +63,8 @@ Fengyun Nexus 优先做的是 **插件包**，不是零散单插件硬凑。
 - 本地副本：`packs/fengyun-system-plugins`
 - 导出：`pnpm pack:system-plugins`
 
+## 生态收录
+
+线上插件包目录与社区登记走 [生态专仓](hub.md)（`fengyun-nexus-ecosystem`），与系统插件仓分开。
+
 另见 [插件生态](plugins.md) · [通道插件写法](channel-plugins.md)。

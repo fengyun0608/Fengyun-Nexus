@@ -29,6 +29,7 @@ Fengyun Nexus **优先做插件包**：一组互相照应的插件一起发布�
 
 - 远程仓：[GitCode · Fengyun-Nexus](https://gitcode.com/fengyunnb_admin/Fengyun-Nexus) · [GitHub](https://github.com/fengyun0608/Fengyun-Nexus)
 - 系统插件专仓：[fengyun-system-plugins](https://gitcode.com/fengyunnb_admin/fengyun-system-plugins)
-- 主人 `#更新` 拉框架与专仓；有一方更新则说明并同窗口重启
+- **生态专仓**（收录 / 社区包）：[fengyun-nexus-ecosystem](https://gitcode.com/fengyunnb_admin/fengyun-nexus-ecosystem) · 说明见 [生态专仓](hub.md)
+- 主人 `#更新` 拉框架与系统插件专仓；有一方更新则说明并同窗口重启
 
 推荐开源许可：MIT。
