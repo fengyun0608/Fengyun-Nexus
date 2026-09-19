@@ -92,7 +92,7 @@ import {
   toWorkflowDef,
 } from "./workflow-files.js";
 import { makePluginCtx, setPluginRuntime, setPluginChannelBag, setPluginOneBot } from "./plugin-ctx.js";
-import { splitAiSegments } from "./ai-segments.js";
+import { isJunkAiText, splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
   buildRestartingMessage,
@@ -1127,7 +1127,7 @@ async function bootstrap(): Promise<void> {
       stripWakeForChat(trimmedRaw, botCfg),
       msg.meta?.selfId as string | undefined,
     );
-    if (!userAsk) return [];
+    if (!userAsk || isJunkAiText(userAsk)) return [];
 
     sessions.append(session, "user", userAsk);
     writeMsg({
