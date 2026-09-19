@@ -68,7 +68,7 @@ export const router = createRouter({
       path: "/registry",
       name: "registry",
       component: () => import("@/views/RegistryView.vue"),
-      meta: { title: "插件更新" },
+      meta: { title: "插件商店" },
     },
     {
       path: "/logs",

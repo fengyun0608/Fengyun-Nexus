@@ -7,6 +7,6 @@ Online **plugin-pack catalog** lives in a dedicated repo. System plugins stay se
 | Repo | Role |
 |------|------|
 | [fengyun-system-plugins](https://gitcode.com/fengyunnb_admin/fengyun-system-plugins) | Built-in system pack |
-| [fengyun-nexus-ecosystem](https://gitcode.com/fengyunnb_admin/fengyun-nexus-ecosystem) | Catalog (`catalog.json`) + samples + community listings |
+| [fengyun-nexus-ecosystem](https://gitcode.com/fengyunnb_admin/fengyun-nexus-ecosystem) · [GitHub](https://github.com/fengyun0608/fengyun-nexus-ecosystem) | Catalog (`catalog.json`) + samples + community listings |
 
 Host `configs/registry.json`: `pluginsRepo` / `ecosystemRepo` (locked, not editable in console).

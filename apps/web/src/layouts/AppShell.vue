@@ -75,7 +75,7 @@ const staticGroups: NavGroup[] = [
     title: "插件",
     items: [
       { to: "/plugins", label: "插件管理", names: ["plugins"] },
-      { to: "/registry", label: "插件更新", names: ["registry"] },
+      { to: "/registry", label: "插件商店", names: ["registry"] },
     ],
   },
   {
