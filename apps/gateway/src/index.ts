@@ -99,6 +99,7 @@ import { makePluginCtx, setPluginRuntime, setPluginChannelBag, setPluginOneBot }
 import { loadAgentSkills, skillsPromptBlock } from "./agent-skills.js";
 import { buildAgentToolDefs, runAgentTool } from "./agent-tools.js";
 import { listOpenDesktopApps } from "./desktop-inspect.js";
+import { webRead, webSearch } from "./web-lookup.js";
 import { isJunkAiText, splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
@@ -413,6 +414,8 @@ function frameworkSystemPrompt(opts?: {
       "主人要打开或启动本机软件时，调用 nexus_launch_app，只传软件名。不要说没有启动工具，也不要改口教对方自己去点。",
       "问电脑开了多久、开机时间，调用 nexus_host_uptime。那是整台电脑的开机时长，不是框架自己跑了多久。不要说没有这个工具，也不要编数字。",
       "问内存、处理器、磁盘、系统版本或系统信息，调用 nexus_host_info。不要说还要去装这个能力。",
+      "有人要搜网页、查资料、看某个网址，调用 nexus_web_search 或 nexus_web_read。不要说没有搜索。",
+      "平常问答用一两段说完，不要空行拆成很多条。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
     );
   } else if (opts?.userId) {
@@ -750,6 +753,16 @@ async function bootstrap(): Promise<void> {
     name: "nexus.open_apps",
     description: "List open desktop apps / window titles on this machine",
     handler: async (args) => listOpenDesktopApps({ limit: Number(args?.limit) || 20 }),
+  });
+  mcp.register({
+    name: "nexus.web_search",
+    description: "搜索公开网页，返回标题、链接和摘要",
+    handler: async (args) => webSearch(String(args?.query || args?.q || "")),
+  });
+  mcp.register({
+    name: "nexus.web_read",
+    description: "读取一个公开网页的正文摘要",
+    handler: async (args) => webRead(String(args?.url || "")),
   });
 
   workflows.setHandlers({

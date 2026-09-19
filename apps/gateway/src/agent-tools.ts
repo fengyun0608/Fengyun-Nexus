@@ -9,6 +9,7 @@ import type { PluginHost } from "@fengyun/nexus-plugin-sdk";
 import type { ChannelSettings } from "./channel-settings.js";
 import { isChannelMaster, masterLevelOf } from "./channel-settings.js";
 import { hostInfo, hostUptime, launchDesktopApp, listOpenDesktopApps } from "./desktop-inspect.js";
+import { webRead, webSearch } from "./web-lookup.js";
 
 export type AgentToolBag = {
   mcp: McpHost;
@@ -71,6 +72,18 @@ export function buildAgentToolDefs(mcp: McpHost): LlmToolDef[] {
         args: { type: "object", description: "参数对象" },
       },
       ["name"],
+    ),
+    tool(
+      "nexus_web_search",
+      "搜索公开网页。有人说搜、查一下、网上看看时必须用这个，不要说没有搜索。只传搜索词。",
+      { query: { type: "string", description: "搜索词" } },
+      ["query"],
+    ),
+    tool(
+      "nexus_web_read",
+      "读取一个公开网页的标题和正文摘要（主人或控制台）。只传 http 或 https 网址，不读本机和内网。",
+      { url: { type: "string", description: "公开网址" } },
+      ["url"],
     ),
     tool(
       "nexus_host_info",
@@ -152,6 +165,8 @@ export async function runAgentTool(
     name === "nexus_launch_app" ||
     name === "nexus_host_uptime" ||
     name === "nexus_host_info" ||
+    name === "nexus_web_search" ||
+    name === "nexus_web_read" ||
     name === "nexus_list_caps" ||
     name === "nexus_call_cap" ||
     name === "nexus_plugin_switch" ||
@@ -179,6 +194,16 @@ export async function runAgentTool(
   }
   if (name === "nexus_host_info") {
     return hostInfo();
+  }
+  if (name === "nexus_web_search") {
+    const query = String(args.query || args.q || "").trim();
+    if (!query) return { error: "缺少搜索词" };
+    return webSearch(query);
+  }
+  if (name === "nexus_web_read") {
+    const url = String(args.url || "").trim();
+    if (!url) return { error: "缺少网址" };
+    return webRead(url);
   }
   if (name === "nexus_list_plugins") {
     return {
