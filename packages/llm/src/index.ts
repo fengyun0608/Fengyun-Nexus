@@ -192,12 +192,47 @@ export class LlmRouter {
       role: "user",
       content: "工具已经执行完。用一两句中文告诉用户结果。不要再调用工具，也不要把工具调用写进正文。",
     });
-    if (opts?.onDelta) {
-      const last = await this.chatTurnStream(history, undefined, opts.onDelta);
-      return stripToolMarkup(stripThinking(last.content));
+    let last = opts?.onDelta
+      ? await this.chatTurnStream(history, undefined, opts.onDelta)
+      : await this.chatTurn(history);
+    // 终稿若还泄出工具调用，再执行一轮并强制要人话
+    const more = leakedToolCalls(last.content);
+    if (more.length) {
+      history.push({
+        role: "assistant",
+        content: "",
+        tool_calls: more,
+      });
+      for (const call of more) {
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
+        } catch {
+          args = {};
+        }
+        let result: unknown;
+        try {
+          result = await onTool(call.function.name, args);
+        } catch (e) {
+          result = { error: e instanceof Error ? e.message : String(e) };
+        }
+        history.push({
+          role: "tool",
+          tool_call_id: call.id,
+          name: call.function.name,
+          content: typeof result === "string" ? result : JSON.stringify(result).slice(0, 6000),
+        });
+      }
+      history.push({
+        role: "user",
+        content: "好了。只用人话回复用户，一两句即可。禁止再写工具调用。",
+      });
+      last = opts?.onDelta
+        ? await this.chatTurnStream(history, undefined, opts.onDelta)
+        : await this.chatTurn(history);
     }
-    const last = await this.chatTurn(history);
-    return stripToolMarkup(stripThinking(last.content));
+    const text = stripToolMarkup(stripThinking(last.content));
+    return text || "好了。";
   }
 
   private endpoint(): string {

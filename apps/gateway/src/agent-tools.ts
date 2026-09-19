@@ -225,8 +225,8 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     ),
     tool(
       "nexus_launch_app",
-      "在本机启动已安装软件。只传软件名。",
-      { name: { type: "string", description: "软件名" } },
+      "在本机启动已安装软件。听歌、打开汽水音乐/网易云/QQ音乐/Spotify、打开 ToDesk 等都用这个。只传软件名，例如「汽水音乐」。不要先截图，不要先扫窗口。",
+      { name: { type: "string", description: "软件名，如 汽水音乐" } },
       ["name"],
     ),
     tool("nexus_open_apps", "查看本机当前打开的带窗口软件", {

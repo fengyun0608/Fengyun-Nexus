@@ -1695,7 +1695,10 @@ async function bootstrap(): Promise<void> {
           ? llm.chatWithTools(
               history,
               buildAgentToolDefs(mcp),
-              (name, args) => runAgentTool(name, args, toolBag),
+              async (name, args) => {
+                log.info(`工具 ${name}`);
+                return runAgentTool(name, args, toolBag);
+              },
               opts?.onDelta ? { onDelta: opts.onDelta } : undefined,
             )
           : llm.chat(history, opts?.onDelta ? { onDelta: opts.onDelta } : undefined),
@@ -1709,58 +1712,14 @@ async function bootstrap(): Promise<void> {
       })
     ).trim();
 
-    let spoken = assistant;
-    if (capabilityMode) {
-      const follow = history.map((m) => ({ ...m }));
-      for (let round = 0; round < 3; round++) {
-        const leaked = extractLeakedToolCalls(spoken);
-        if (!leaked.length) break;
-        log.warn(`模型把工具写进正文，改为正式执行：${leaked.map((c) => c.name).join("、")}`);
-        const results: string[] = [];
-        for (const call of leaked) {
-          try {
-            const result = await runAgentTool(call.name, call.args, toolBag);
-            const packed =
-              typeof result === "string" ? result : JSON.stringify(result ?? {}).slice(0, 3500);
-            results.push(`${call.name} => ${packed}`);
-            log.info(`补执行 ${call.name}`);
-          } catch (e) {
-            const tip = e instanceof Error ? e.message : String(e);
-            results.push(`${call.name} => ${tip}`);
-            log.warn(`补执行失败 ${call.name}：${tip}`);
-          }
-        }
-        const cleaned = stripLeakedToolMarkup(spoken);
-        follow.push({ role: "assistant", content: cleaned || "已调用工具" });
-        follow.push({
-          role: "user",
-          content: [
-            "上面这些工具已经执行完，结果在下面。",
-            "请继续完成用户原来的请求：该再调用正式工具就调用，该回复就用一两句人话说。",
-            "不要把 tool_calls、DSML、invoke 写进正文。不要停在读技能。",
-            results.join("\n").slice(0, 6000),
-          ].join("\n"),
-        });
-        spoken = (
-          await llm
-            .chatWithTools(
-              follow,
-              buildAgentToolDefs(mcp),
-              (name, args) => runAgentTool(name, args, toolBag),
-              opts?.onDelta ? { onDelta: opts.onDelta } : undefined,
-            )
-            .catch((e) => {
-              const tip = e instanceof Error ? e.message : String(e);
-              log.warn(`补执行后续对话失败：${tip}`);
-              return "";
-            })
-        ).trim();
-      }
-      spoken = stripLeakedToolMarkup(spoken);
+    let spoken = stripLeakedToolMarkup(assistant);
+    // 泄出工具已在 chatWithTools 内正式执行；这里只清残留标记，避免再跑一遍
+    if (capabilityMode && extractLeakedToolCalls(assistant).length) {
+      log.info("正文里的工具调用已在对话循环里执行，不再重复补跑");
     }
 
     if (!spoken.trim() && capabilityMode) {
-      spoken = "这边没接上，你再说一次，我接着做。";
+      spoken = "好了。";
       log.warn("能力模式结束后没有可发正文，已改发一句提示");
     }
 
