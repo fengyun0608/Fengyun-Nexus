@@ -3,6 +3,7 @@
  * server 姿态不展示本机 IP；mobile / desktop / termux 可展示。
  */
 import {
+  arch,
   cpus,
   freemem,
   hostname,
@@ -14,11 +15,10 @@ import {
   type,
   uptime as osUptime,
 } from "node:os";
-import { memoryUsage } from "node:process";
+import { memoryUsage, pid, version as nodeVersion } from "node:process";
 import { getHeapStatistics } from "node:v8";
 import {
   escapeShotHtml,
-  meterBarHtml,
   nexusShotCss,
   tileHtml,
 } from "@fengyun/browser-shot";
@@ -82,10 +82,9 @@ function localIpv4List(): string[] {
   return out;
 }
 
-function fmtGroups(ids: string[], empty: string): string {
-  if (!ids.length) return empty;
-  if (ids.length <= 3) return ids.join("、");
-  return `${ids.slice(0, 3).join("、")} 等 ${ids.length} 个`;
+function replyGroupCount(ids: string[]): string {
+  if (!ids.length) return "不限";
+  return `${ids.length} 个`;
 }
 
 function formatBytes(n: number): string {
@@ -167,6 +166,78 @@ export function collectOsMetrics(): OsMetrics {
   };
 }
 
+type ResourceSample = { cpu: number; mem: number; node: number };
+const resourceSamples: ResourceSample[] = [];
+let prevCpuTick: { idle: number; total: number } | null = null;
+
+function cpuSinceLastTick(): number {
+  const list = cpus();
+  let idle = 0;
+  let total = 0;
+  for (const c of list) {
+    const t = Object.values(c.times).reduce((a, b) => a + b, 0);
+    idle += c.times.idle;
+    total += t;
+  }
+  const prev = prevCpuTick;
+  prevCpuTick = { idle, total };
+  if (!prev || total <= prev.total) return cpuPercent();
+  const dt = total - prev.total;
+  const di = idle - prev.idle;
+  return Math.min(100, Math.max(0, Math.round((1 - di / dt) * 100)));
+}
+
+function pushResourceSample(): void {
+  const os = collectOsMetrics();
+  resourceSamples.push({
+    cpu: cpuSinceLastTick(),
+    mem: os.memPct,
+    node: os.nodePct,
+  });
+  if (resourceSamples.length > 24) resourceSamples.shift();
+}
+
+pushResourceSample();
+const resourceTimer = setInterval(pushResourceSample, 12_000);
+resourceTimer.unref?.();
+
+function risingCurveSvg(values: number[], stroke: string, fillId: string): string {
+  const w = 260;
+  const h = 72;
+  const src = values.length >= 2 ? values : [values[0] ?? 0, values[0] ?? 0];
+  const xy = src.map((v, i) => {
+    const x = src.length === 1 ? 0 : (i / (src.length - 1)) * w;
+    const y = h - 4 - (Math.min(100, Math.max(0, v)) / 100) * (h - 8);
+    return [x, y] as const;
+  });
+  let line = `M ${xy[0][0].toFixed(1)} ${xy[0][1].toFixed(1)}`;
+  for (let i = 1; i < xy.length; i++) {
+    const [x, y] = xy[i];
+    const [px, py] = xy[i - 1];
+    const mx = (px + x) / 2;
+    line += ` C ${mx.toFixed(1)} ${py.toFixed(1)}, ${mx.toFixed(1)} ${y.toFixed(1)}, ${x.toFixed(1)} ${y.toFixed(1)}`;
+  }
+  const area = `${line} L ${w} ${h} L 0 ${h} Z`;
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <defs>
+      <linearGradient id="${fillId}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${stroke}" stop-opacity="0.38"/>
+        <stop offset="100%" stop-color="${stroke}" stop-opacity="0.02"/>
+      </linearGradient>
+    </defs>
+    <path d="${area}" fill="url(#${fillId})"/>
+    <path d="${line}" fill="none" stroke="${stroke}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function curveCard(name: string, values: number[], now: number, detail: string, stroke: string, fillId: string): string {
+  return `<div class="curve">
+    <div class="curve-top"><span>${escapeShotHtml(name)}</span><b>${Math.round(now)}%</b></div>
+    ${risingCurveSvg(values, stroke, fillId)}
+    <div class="curve-sub">${escapeShotHtml(detail)}</div>
+  </div>`;
+}
+
 function networkDisplay(s: StatusShotInput): { main: string; sub: string } {
   const showIp = shouldExposeLocalIp(s.envId);
   const ips = showIp ? localIpv4List() : [];
@@ -235,13 +306,19 @@ export function buildStatusLines(s: StatusShotInput): string[] {
       `${name} QQ ${qq} · 群 ${groups} · 好友 ${friends} · 收到 ${a.msgIn} · 发出 ${a.msgOut} · 在线 ${a.session} · 累计 ${a.totalOnline}`,
     );
   }
-  lines.push(`AI 回复群 ${fmtGroups(s.replyGroupIds, "不限")}`);
+  lines.push(`AI 回复群 ${replyGroupCount(s.replyGroupIds)}`);
   return lines;
 }
 
 /** 状态面板 HTML（截 #panel） */
 export function buildStatusPanelHtml(s: StatusShotInput): string {
   const os = collectOsMetrics();
+  pushResourceSample();
+  const last = resourceSamples[resourceSamples.length - 1] || {
+    cpu: os.cpuPct,
+    mem: os.memPct,
+    node: os.nodePct,
+  };
   const net = networkDisplay(s);
   const online = !s.powerOff && (!s.onebot.enabled || s.onebot.connected);
   const statusLabel = s.powerOff ? "已关机" : online ? "运行中" : "待连接";
@@ -282,6 +359,16 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
         `<li><b>${escapeShotHtml(b.label || b.selfId || "号")}</b><span>${b.connected ? "已连接" : "未连接"}</span></li>`,
     )
     .join("");
+
+  const acc = s.accounts || [];
+  const onlineN = acc.filter((a) => a.connected).length;
+  const msgIn = acc.reduce((n, a) => n + a.msgIn, 0);
+  const msgOut = acc.reduce((n, a) => n + a.msgOut, 0);
+  const la = loadavg()
+    .map((n) => (Number.isFinite(n) ? n.toFixed(2) : "0"))
+    .join(" / ");
+  const rss = formatBytes(memoryUsage().rss);
+  const freeMem = formatBytes(freemem());
 
   const accountCards = (s.accounts || [])
     .map((a) => {
@@ -331,6 +418,13 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
 .pill.off { background:#f3f4f3; color:#6b7280; }
 .qq, .nums, .times { color:var(--muted); font-size:12px; margin-top:2px; }
 .tree { margin-top:6px; font-size:12px; line-height:1.45; color:var(--ink); }
+.curves { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+.curve { padding:8px 10px 6px; border:1px solid var(--line); border-radius:14px; background:#fff; }
+.curve-top { display:flex; justify-content:space-between; align-items:baseline; }
+.curve-top span { color:var(--muted); font-size:12px; }
+.curve-top b { font-size:22px; color:#1f7a56; }
+.curve svg { width:100%; height:78px; display:block; margin-top:4px; }
+.curve-sub { color:var(--muted); font-size:11px; line-height:1.35; min-height:2.6em; }
 </style>
 </head>
 <body>
@@ -356,17 +450,23 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
         ${tileHtml("主机", os.host, `已运行 ${os.sysUptime}`)}
         ${tileHtml("网络", net.main, `${net.sub}`)}
         ${tileHtml("电源", statusLabel, s.uptime)}
-        ${tileHtml("数据库", s.db.driver, `消息 ${s.db.messages} · 插件记录 ${s.db.plugins} · kv ${s.db.kv}`)}
+        ${tileHtml("数据库", s.db.driver, `消息 ${s.db.messages} · 插件记录 ${s.db.plugins} · 键值 ${s.db.kv}`)}
         ${tileHtml("AI", aiLine, `插件 ${s.pluginsEnabled}/${s.pluginsTotal}`)}
+        ${tileHtml("负载", la, "1 分 / 5 分 / 15 分")}
+        ${tileHtml("内存余量", freeMem, `已用 ${os.memUsed}`)}
+        ${tileHtml("进程", `PID ${pid}`, `RSS ${rss} · Node ${nodeVersion}`)}
+        ${tileHtml("在线账号", `${onlineN}/${acc.length || s.bots.length || 0}`, `收到 ${msgIn} · 发出 ${msgOut}`)}
+        ${tileHtml("架构", `${arch()} · ${os.cores} 核`, os.cpuModel)}
+        ${tileHtml("AI 回复群", replyGroupCount(s.replyGroupIds), "仅数量")}
       </div>
     </div>
 
     <div class="card">
-      <div class="sec">资源占用</div>
-      <div class="meters">
-        ${meterBarHtml("CPU", os.cpuPct, `${os.cores} 核 · ${os.cpuModel}`)}
-        ${meterBarHtml("内存", os.memPct, `${os.memUsed} / ${os.memTotal}`)}
-        ${meterBarHtml("Node", os.nodePct, `堆 ${os.nodeUsed} / 上限 ${os.nodeTotal}`)}
+      <div class="sec">资源曲线</div>
+      <div class="curves">
+        ${curveCard("CPU", resourceSamples.map((p) => p.cpu), last.cpu, `${os.cores} 核 · ${os.cpuModel}`, "#2f9b78", "fyCpu")}
+        ${curveCard("内存", resourceSamples.map((p) => p.mem), last.mem, `${os.memUsed} / ${os.memTotal}`, "#3a9aaa", "fyMem")}
+        ${curveCard("Node", resourceSamples.map((p) => p.node), last.node, `堆 ${os.nodeUsed} / 上限 ${os.nodeTotal}`, "#5b7fd6", "fyNode")}
       </div>
     </div>
 
@@ -385,8 +485,8 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
     </div>
 
     <div class="card foot">
-      <span>AI 回复群 <b>${escapeShotHtml(fmtGroups(s.replyGroupIds, "不限"))}</b></span>
-      <span>库文件 <b>${escapeShotHtml(s.db.path || "—")}</b></span>
+      <span>AI 回复群 <b>${escapeShotHtml(replyGroupCount(s.replyGroupIds))}</b></span>
+      <span>在线 <b>${onlineN}</b> / 账号 <b>${acc.length || s.bots.length || 0}</b></span>
       <span class="stamp">${escapeShotHtml(stamp)}</span>
     </div>
   </div>
