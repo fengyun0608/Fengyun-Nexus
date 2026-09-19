@@ -22,12 +22,21 @@ function isMetaPlanning(para: string): boolean {
   );
 }
 
+/** 英文内心独白（The user / I should / no tools）也是思考，不要当普通气泡。 */
+function englishReasoning(para: string): boolean {
+  const t = String(para || "").trim();
+  const en = (t.match(/[A-Za-z]/g) || []).length;
+  const zh = (t.match(/[\u4e00-\u9fff]/g) || []).length;
+  if (en < 36 || zh > en) return false;
+  return /the user|i should|i need to|no tools|respond in character|casual chat|this is a|let me /i.test(t);
+}
+
 /** 大段内心独白 / 翻文档过程：应进合并转发，不要当普通气泡。短句一律当回话。 */
 function looksLikeThinking(para: string): boolean {
   const t = String(para || "").trim();
   if (!t) return false;
-  if (isMetaPlanning(t)) return true;
-  // 「哈喽～」「今天怎么想起找我」这种短回话不是思考
+  if (isMetaPlanning(t) || englishReasoning(t)) return true;
+  // 「哈喽～」「喵呜~ 是主人来啦」这种短回话不是思考
   if (t.length < 48 && !/^(我先|让我|接下来|先看|先读|文档找到|已经掌握)/.test(t)) return false;
   if (
     /我先看|让我看|让我读|接下来我|文档找到了|已经掌握|先列出|我来看|我去看|看一下|读一下|检查一下|再看一眼|继续看|先读|工具结果|技能里|framework-helper|agent-code/.test(
