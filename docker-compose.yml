@@ -1,0 +1,19 @@
+services:
+  nexus:
+    build: .
+    container_name: fengyun-nexus
+    ports:
+      - "${PORT:-8787}:8787"
+    environment:
+      NEXUS_ENV: server
+      HOST: 0.0.0.0
+      PORT: "8787"
+      NEXUS_OPEN_PORT: "0"
+    volumes:
+      - nexus-data:/app/data
+      - nexus-configs:/app/configs
+    restart: unless-stopped
+
+volumes:
+  nexus-data:
+  nexus-configs:

@@ -206,31 +206,31 @@ function sleep(ms) {
 async function detectDeps() {
   bootLog("INFO", ANSI.cyan, "[依赖]");
   if (nodeMajor() < 20) {
-    throw new Error(`Node.js >= 20 required (got ${process.versions.node})`);
+    throw new Error(`需要 Node.js 20 或更高（当前 ${process.versions.node}）`);
   }
-  bootLog("OK", ANSI.green, `node ${process.versions.node}`);
+  bootLog("OK", ANSI.green, `Node ${process.versions.node}`);
 
   if (isTermux()) {
     process.env.NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS = "false";
-    bootLog("OK", ANSI.green, "Termux: skip pnpm native binary switch");
+    bootLog("OK", ANSI.green, "Termux：已关闭 pnpm 原生二进制切换");
   }
 
   if (!which("pnpm") && !which("pnpm.cmd")) {
-    bootLog("WARN", ANSI.yellow, "pnpm not found — try: npm i -g pnpm@9.15.0");
-    throw new Error("pnpm is required");
+    bootLog("WARN", ANSI.yellow, "没找到 pnpm。请先执行：npm i -g pnpm@9.15.0");
+    throw new Error("需要 pnpm");
   }
   bootLog("OK", ANSI.green, "pnpm");
 
   if (!which("git") && !which("git.exe")) {
-    bootLog("WARN", ANSI.yellow, "git not found (optional for plugin updates)");
+    bootLog("WARN", ANSI.yellow, "没找到 git（#更新 会用到，可稍后装）");
   } else {
     bootLog("OK", ANSI.green, "git");
   }
 
   if (!existsSync(join(root, "node_modules"))) {
-    bootLog("INFO", ANSI.cyan, "installing workspace dependencies…");
+    bootLog("INFO", ANSI.cyan, "正在安装依赖…");
     await run(["install"]);
-    bootLog("OK", ANSI.green, "dependencies installed");
+    bootLog("OK", ANSI.green, "依赖已装好");
   } else if (pluginsMissingSdkLinks()) {
     bootLog("INFO", ANSI.cyan, "检测到新插件未链接 SDK，正在 pnpm install…");
     await run(["install"]);
@@ -392,6 +392,8 @@ async function main() {
   await ensureBuild();
 
   bootLog("OK", ANSI.green, `姿态=${process.env.NEXUS_ENV}`);
+  const showPort = String(process.env.PORT || "8787").trim() || "8787";
+  bootLog("OK", ANSI.green, `控制台：http://127.0.0.1:${showPort}/`);
 
   // 正式启动用 start（无 watch）。开发热重载：NEXUS_DEV=1 或 pnpm --filter @fengyun/nexus-gateway dev
   const gatewayScript = process.env.NEXUS_DEV === "1" ? "dev" : "start";

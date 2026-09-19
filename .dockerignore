@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+.git
+.github
+data
+docs/internal
+apps/web/dist
+apps/gateway/public
+**/*.local.json
+.env
+.env.*
+*.log
+.turbo
+coverage
+.tmp-ref

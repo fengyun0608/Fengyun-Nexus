@@ -54,6 +54,14 @@ cd ~/Fengyun-Nexus && ./boot.sh
 
 Windows：目录里双击 `start.bat`。
 
+已装 Docker：
+
+```bash
+docker compose up -d --build
+```
+
+停掉：`docker compose down`（数据还在）。清空数据：`docker compose down -v`。
+
 ```bash
 pnpm nexus setup
 pnpm nexus env desktop|mobile|server|termux

@@ -5,7 +5,7 @@
 <p align="center">
   <img alt="license" src="https://img.shields.io/badge/License-MIT-c4842f?style=flat-square" />
   <img alt="node" src="https://img.shields.io/badge/Node.js-%E2%89%A520-339933?style=flat-square" />
-  <img alt="version" src="https://img.shields.io/badge/Version-0.2.68-2f9b78?style=flat-square" />
+  <img alt="version" src="https://img.shields.io/badge/Version-0.2.69-2f9b78?style=flat-square" />
   <img alt="platform" src="https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Termux-1a1f18?style=flat-square" />
 </p>
 
@@ -136,7 +136,15 @@ cd Fengyun-Nexus
 chmod +x boot.sh && ./boot.sh
 ```
 
-已装过：目录里 `./boot.sh` 或双击 `start.bat`。细节见 [上手](docs/product/start.md)。
+已装过：目录里 `./boot.sh` 或双击 `start.bat`。
+
+本机已装 Docker 时：
+
+```bash
+docker compose up -d --build
+```
+
+同样打开 http://127.0.0.1:8787/ 。数据在 Docker 卷里，`docker compose down` 不会清掉；要清空再加 `-v`。细节见 [上手](docs/product/start.md)。
 
 ---
 

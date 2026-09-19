@@ -52,4 +52,6 @@ cd ~/Fengyun-Nexus && ./boot.sh
 
 Windows: double-click `start.bat`.
 
+Docker: `docker compose up -d --build` then open http://127.0.0.1:8787/ . `docker compose down` keeps data; add `-v` to wipe.
+
 See also: [Environment](environment.en.md) · [Docs hub](../README.md)
