@@ -30,6 +30,7 @@ import { bootGroup, bootLine, installProcessGuard, printBootBanner, printBootSuc
 import { warnBootGaps } from "./boot-check.js";
 import { resolveOb11Media, setOb11MediaHost, setOb11MediaRoot } from "./ob11-media.js";
 import { checkPluginUpdates, applyPluginUpdates, ensurePluginSdkLinks } from "./registry-check.js";
+import { installEcosystemPack, loadEcosystemCatalog } from "./ecosystem-catalog.js";
 import {
   getChannelSettings,
   isChannelMaster,
@@ -2182,6 +2183,57 @@ async function bootstrap(): Promise<void> {
       if (result.applied.length) {
         const reload = await reloadPlugins(pluginHotDeps);
         reloadMsg = reload.ok ? `；已热重载 ${reload.loaded} 个插件` : `；热重载失败：${reload.message}`;
+      }
+      res.json({
+        ...result,
+        message: `${result.message}${reloadMsg}`,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  /** 生态专仓：读 catalog，对照本地安装状态 */
+  app.get("/v1/registry/ecosystem", authMiddleware, (_req, res) => {
+    try {
+      const ecoUrl = String(registry.ecosystemRepo?.url || "").trim();
+      const result = loadEcosystemCatalog(ROOT, {
+        ecosystemRepoUrl: ecoUrl || undefined,
+        ecosystemRepoBranch: registry.ecosystemRepo?.branch || "main",
+      });
+      res.json({
+        ok: result.ok,
+        source: result.source,
+        message: result.message,
+        hub: result.catalog?.hub || null,
+        categories: result.catalog?.categories || [],
+        items: result.items,
+        ecosystemRepo: registry.ecosystemRepo || null,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  /** 生态专仓：一键安装 path 型包并热重载 */
+  app.post("/v1/registry/ecosystem/install", authMiddleware, async (req, res) => {
+    try {
+      const packId = String(req.body?.id || req.body?.packId || "").trim();
+      if (!packId) {
+        res.status(400).json({ error: "请指定要安装的收录 id" });
+        return;
+      }
+      const ecoUrl = String(registry.ecosystemRepo?.url || "").trim();
+      const result = installEcosystemPack(ROOT, packId, {
+        ecosystemRepoUrl: ecoUrl || undefined,
+        ecosystemRepoBranch: registry.ecosystemRepo?.branch || "main",
+      });
+      let reloadMsg = "";
+      if (result.ok && result.applied.length) {
+        const reload = await reloadPlugins(pluginHotDeps);
+        reloadMsg = reload.ok
+          ? `；已热重载 ${reload.loaded} 个插件`
+          : `；热重载失败：${reload.message}`;
       }
       res.json({
         ...result,
