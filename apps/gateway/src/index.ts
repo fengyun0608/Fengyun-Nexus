@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, join, resolve, sep, basename } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import cors from "cors";
 import express from "express";
 import {
@@ -66,7 +66,7 @@ import {
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
 import { applyFullUpdate } from "./full-update.js";
 import { ensureGatewayPortOpen } from "./open-port.js";
-import { buildStatusLines, buildStatusPanelHtml, probePublicReach, type StatusShotInput } from "./status-shot.js";
+import { buildRestartOkLines, buildRestartOkPanelHtml, buildStatusLines, buildStatusPanelHtml, probePublicReach, type StatusShotInput } from "./status-shot.js";
 import { addOnlineTotal, collectStatusAccounts, ONLINE_KV, readOnlineTotals } from "./status-accounts.js";
 import { execFileSync } from "node:child_process";
 import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
@@ -101,6 +101,7 @@ import {
   originGroupId,
   originMessageType,
   peekRestartNotify,
+  saveRestartNotify,
 } from "./restart-notify.js";
 import { scheduleSystemRestart } from "./restart-exec.js";
 import { remountPluginChannels } from "./channel-adapters.js";
@@ -114,6 +115,7 @@ import {
 } from "./plugin-config-store.js";
 import { getChannelPluginAssign, saveChannelPluginAssign } from "./channel-plugin-assign.js";
 import { getLogEntries, log } from "./log.js";
+import { renderHtmlShot } from "./menu-shot.js";
 import {
   activeProvider,
   loadProvidersFile,
@@ -863,6 +865,20 @@ async function bootstrap(): Promise<void> {
         if (cmd.systemRestart) {
           const uptime = formatUptime(Date.now() - startedAt);
           replies = [buildRestartingMessage(uptime)];
+          const gid = originGroupId(msg);
+          const mt = originMessageType(msg);
+          saveRestartNotify(ROOT, {
+            channel: msg.channel,
+            chatId: gid ? `group:${gid}` : msg.chatId,
+            userId: msg.userId,
+            messageType: mt,
+            groupId: gid,
+            requestedAt: nowIso(),
+            previousUptime: uptime,
+          });
+          log.info(
+            `已记重启回执目标：${mt}${gid ? ` 群 ${gid}` : ` 会话=${msg.chatId}`}`,
+          );
         }
 
         let updateResult: Awaited<ReturnType<typeof applyFullUpdate>> | null = null;
@@ -886,6 +902,19 @@ async function bootstrap(): Promise<void> {
             replies = [report];
             const gid = originGroupId(msg);
             const mt = originMessageType(msg);
+            if (upd.shouldExit) {
+              const uptime = formatUptime(Date.now() - startedAt);
+              saveRestartNotify(ROOT, {
+                channel: msg.channel,
+                chatId: gid ? `group:${gid}` : msg.chatId,
+                userId: msg.userId,
+                messageType: mt,
+                groupId: gid,
+                requestedAt: nowIso(),
+                previousUptime: uptime,
+                updateSummary: upd.updateSummary || upd.changeItems || [],
+              });
+            }
             if (msg.channel === "onebot11") {
               try {
                 let sent = false;
@@ -2694,10 +2723,7 @@ async function bootstrap(): Promise<void> {
       }
     }
     void printBootSuccess();
-    if (peekRestartNotify(ROOT)) {
-      clearRestartNotify(ROOT);
-      log.info("本次启动不发重启完成回执");
-    }
+    void deliverRestartSuccessNotice();
 
     // 后端终端输入（跑代码的那个窗口），不是网页
     startTerminalRepl({
@@ -2719,6 +2745,110 @@ async function bootstrap(): Promise<void> {
       },
     });
   });
+
+  async function deliverRestartSuccessNotice(): Promise<void> {
+    const pending = peekRestartNotify(ROOT);
+    if (!pending) return;
+
+    const ageMs = Date.now() - Date.parse(pending.requestedAt || "");
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > 10 * 60_000) {
+      clearRestartNotify(ROOT);
+      log.info("重启回执记录过期或无效，已丢弃");
+      return;
+    }
+    // 先清掉，避免这次发失败后手动再启又补发刷屏
+    clearRestartNotify(ROOT);
+
+    const loaded = plugins
+      .listConsole()
+      .filter((p) => p.enabled !== false)
+      .map((p) => ({ id: p.id, name: p.name, version: p.version }));
+    const lines = buildRestartOkLines(loaded, {
+      previousUptime: pending.previousUptime,
+      version: readLocalVersion(ROOT),
+      commit: shortCommit() || undefined,
+      updateSummary: pending.updateSummary,
+    });
+    const text = lines.join("\n");
+
+    let sendPayload = text;
+    try {
+      const html = buildRestartOkPanelHtml(loaded, {
+        previousUptime: pending.previousUptime,
+        version: readLocalVersion(ROOT),
+        commit: shortCommit() || undefined,
+        updateSummary: pending.updateSummary,
+      });
+      const shot = await renderHtmlShot({
+        html,
+        selector: "#panel",
+        width: 820,
+        height: 1400,
+      });
+      if (shot.ok) {
+        sendPayload = `[CQ:image,file=${pathToFileURL(shot.pngPath).href}]`;
+      }
+    } catch (e) {
+      log.warn(`重启报告出图失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    db.insertMessage({
+      id: newId("msg"),
+      channel: pending.channel,
+      chatId: pending.chatId,
+      userId: "nexus",
+      role: "assistant",
+      content: text,
+      createdAt: nowIso(),
+    });
+
+    if (pending.channel === "onebot11") {
+      const gid =
+        pending.groupId ||
+        (pending.chatId.startsWith("group:") ? pending.chatId.slice(6) : undefined);
+      const mt = pending.messageType || (gid ? "group" : "private");
+      const ctx = {
+        id: newId("msg"),
+        channel: "onebot11" as const,
+        chatId: gid ? `group:${gid}` : pending.chatId,
+        userId: pending.userId,
+        type: "text" as const,
+        content: sendPayload,
+        meta: {
+          messageType: mt,
+          groupId: gid,
+        },
+        createdAt: nowIso(),
+      };
+      let useImage = sendPayload !== text;
+      for (let i = 0; i < 30; i++) {
+        if (!onebot.status().connected) {
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        const payload = useImage ? sendPayload : text;
+        let ok = await onebot.sendText(payload, { ...ctx, content: payload });
+        if (!ok && gid) {
+          ok = await onebot.sendTextToGroup(gid, payload);
+        }
+        if (ok) {
+          log.ok(`重启成功已发回原${mt === "group" ? `群 ${gid}` : "会话"}`);
+          return;
+        }
+        if (useImage) {
+          log.warn("重启报告的图发不出去，改发文字");
+          useImage = false;
+          continue;
+        }
+        log.warn("重启成功通知已连接但发送失败，不再重试");
+        return;
+      }
+      log.warn("重启成功通知未发出：OneBot 等待超时");
+      return;
+    }
+
+    log.ok("重启成功通知已写入消息流");
+  }
 
   server.on("error", (err) => {
     const t = translateError(err);
