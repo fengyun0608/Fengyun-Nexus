@@ -4,6 +4,7 @@
  * 不占用日常的 8787。
  */
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,6 +14,39 @@ const base = `http://127.0.0.1:${port}`;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function adminCreds() {
+  const localPath = join(root, "configs/admin.local.json");
+  let user = process.env.NEXUS_SMOKE_USER || "";
+  let pass = process.env.NEXUS_SMOKE_PASS || process.env.NEXUS_ADMIN_PASSWORD || "";
+  if ((!user || !pass) && existsSync(localPath)) {
+    try {
+      const j = JSON.parse(readFileSync(localPath, "utf8"));
+      if (!user) user = String(j.username || "").trim();
+      if (!pass) pass = String(j.defaultPassword || "").trim();
+    } catch {
+      /* 用默认 */
+    }
+  }
+  if (!user) user = "console";
+  if (!pass) pass = "console";
+  return { user, pass };
+}
+
+async function login() {
+  const { user, pass } = adminCreds();
+  const res = await fetch(`${base}/v1/admin/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: user, password: pass }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const j = await res.json();
+  if (!res.ok || !j?.token) {
+    throw new Error(`登录失败 ${res.status}（账号 ${user}）。可设 NEXUS_SMOKE_PASS`);
+  }
+  return String(j.token);
 }
 
 const child = spawn(
@@ -79,10 +113,13 @@ async function waitUp() {
   throw new Error(`超时还没听上 ${base}\n${logBuf.slice(-800)}`);
 }
 
-async function askHelp() {
+async function askHelp(token) {
   const res = await fetch(`${base}/v1/chat`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({
       content: "#帮助",
       chatId: "smoke",
@@ -92,14 +129,15 @@ async function askHelp() {
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`#帮助 HTTP ${res.status} ${text.slice(0, 300)}`);
-  if (!/框架菜单|#关机|CQ:image|出错了/.test(text)) {
+  if (!/框架菜单|#关机|CQ:image|出错了|http:\/\/127\.0\.0\.1/.test(text)) {
     throw new Error(`#帮助 没有像样的回执：${text.slice(0, 400)}`);
   }
 }
 
 try {
   await waitUp();
-  await askHelp();
+  const token = await login();
+  await askHelp(token);
   console.log(`冒烟通过：${base} 已听，#帮助 有回`);
   try {
     child.stdout?.destroy();

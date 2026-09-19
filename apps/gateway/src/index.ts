@@ -28,6 +28,7 @@ import {
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
 import { bootGroup, bootLine, installProcessGuard, printBootBanner, printBootSuccess, quietNodeSqliteWarning } from "./boot-banner.js";
 import { warnBootGaps } from "./boot-check.js";
+import { resolveOb11Media, setOb11MediaRoot } from "./ob11-media.js";
 import { checkPluginUpdates, applyPluginUpdates, ensurePluginSdkLinks } from "./registry-check.js";
 import {
   getChannelSettings,
@@ -433,6 +434,7 @@ async function bootstrap(): Promise<void> {
   channels.register(new WebhookChannel());
   const onebotCfg = loadOneBotConfig();
   const onebot = new OneBot11Bridge(onebotCfg);
+  setOb11MediaRoot(ROOT);
   onebot.setOfflineHandler((sid, ms) => {
     const prev = readOnlineTotals(db.getKv(ONLINE_KV));
     db.setKv(ONLINE_KV, JSON.stringify(addOnlineTotal(prev, sid, ms)));
@@ -1267,6 +1269,17 @@ async function bootstrap(): Promise<void> {
   if (profile.gateway.cors) app.use(cors());
   app.use(express.json({ limit: "2mb" }));
 
+  app.get("/v1/ob11-media/:name", (req, res) => {
+    const file = resolveOb11Media(String(req.params.name || ""));
+    if (!file) {
+      res.status(404).end();
+      return;
+    }
+    res.type(file.toLowerCase().endsWith(".png") ? "png" : "jpeg");
+    res.setHeader("Cache-Control", "no-store");
+    res.sendFile(file);
+  });
+
   app.get("/v1/media/shot/:name", (req, res) => {
     const header = req.headers.authorization ?? "";
     const token = header.startsWith("Bearer ")
@@ -1525,7 +1538,7 @@ async function bootstrap(): Promise<void> {
     });
   });
 
-  app.get("/v1/plugins", (_req, res) => {
+  app.get("/v1/plugins", authMiddleware, (_req, res) => {
     res.json({
       items: plugins.listConsole(),
       tips: scan.tips,
@@ -1656,7 +1669,7 @@ async function bootstrap(): Promise<void> {
     res.json({ ok: true, message: "已修改成功，立即生效", id, values });
   });
 
-  app.get("/v1/channels", (_req, res) => {
+  app.get("/v1/channels", authMiddleware, (_req, res) => {
     res.json({
       items: channels.list().map((c) => {
         const s = getChannelSettings(channelCfg, c.id);
@@ -1791,7 +1804,7 @@ async function bootstrap(): Promise<void> {
     res.json({ ok: true, message: "已修改成功，立即生效", ...saved });
   });
 
-  app.get("/v1/workflows", (_req, res) => {
+  app.get("/v1/workflows", authMiddleware, (_req, res) => {
     const local = listLocalWorkflows(ROOT);
     const byId = new Map(local.map((w) => [w.id, w]));
     res.json({
@@ -1844,7 +1857,7 @@ async function bootstrap(): Promise<void> {
     res.json({ ok: true, ...db.stats() });
   });
 
-  app.get("/v1/mcp/tools", (_req, res) => {
+  app.get("/v1/mcp/tools", authMiddleware, (_req, res) => {
     res.json({ items: mcp.list() });
   });
 
@@ -1859,10 +1872,10 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  app.post("/v1/chat", async (req, res) => {
+  app.post("/v1/chat", authMiddleware, async (req, res) => {
     try {
       const result = await handleChat(req.body, {
-        isAdminConsole: tokenIsAdmin(req),
+        isAdminConsole: true,
       });
       res.json({ ok: true, ...result });
     } catch (e) {
@@ -1872,13 +1885,13 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  app.post("/v1/chat/stream", async (req, res) => {
+  app.post("/v1/chat/stream", authMiddleware, async (req, res) => {
     res.setHeader("content-type", "text/event-stream");
     res.setHeader("cache-control", "no-cache");
     res.setHeader("connection", "keep-alive");
     try {
       const result = await handleChat(req.body, {
-        isAdminConsole: tokenIsAdmin(req),
+        isAdminConsole: true,
       });
       const chunk = result.assistant;
       const size = Math.max(8, Math.ceil(chunk.length / 12));
@@ -2832,10 +2845,18 @@ async function bootstrap(): Promise<void> {
         createdAt: nowIso(),
       };
       let useImage = sendPayload !== text;
-      for (let i = 0; i < 30; i++) {
+      let connectedAt = 0;
+      let textFails = 0;
+      for (let i = 0; i < 45; i++) {
         if (!onebot.status().connected) {
+          connectedAt = 0;
           await new Promise((r) => setTimeout(r, 1000));
           continue;
+        }
+        if (!connectedAt) {
+          connectedAt = Date.now();
+          // 刚连上 QQ 内核常还没就绪，先等两秒
+          await new Promise((r) => setTimeout(r, 2000));
         }
         const payload = useImage ? sendPayload : text;
         const ok = await onebot.sendText(payload, { ...ctx, content: payload });
@@ -2848,8 +2869,12 @@ async function bootstrap(): Promise<void> {
           useImage = false;
           continue;
         }
-        log.warn("重启成功通知已连接但发送失败，不再重试");
-        return;
+        textFails += 1;
+        if (textFails >= 6) {
+          log.warn("重启成功通知发送失败，已重试多次");
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 1000 + textFails * 500));
       }
       log.warn("重启成功通知未发出：OneBot 等待超时");
       return;

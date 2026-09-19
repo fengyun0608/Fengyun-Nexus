@@ -7,34 +7,42 @@ import { WebSocketServer, WebSocket } from "ws";
 import { OneBot11Channel, type Ob11MessageEvent } from "@fengyun/nexus-channel";
 import type { NexusMessage } from "@fengyun/nexus-shared";
 import { log } from "./log.js";
+import { publishLocalImage, setOb11MediaPort } from "./ob11-media.js";
 
 /**
- * NapCat 在 Windows 上会把 file:///C:/ 当成 pathname /C:/ 去 open，直接 ENOENT。
- * 拷到英文临时目录后，Windows 给盘符路径，其它系统仍用 file://。
+ * NapCat 要能识别的 URI。Windows 上 file:///C:/ 会变成 /C:/ ENOENT，
+ * 裸盘符路径又报「识别URL失败」。优先走本机 http，小图再 base64。
  */
-function napCatLocalFile(absPath: string): string {
-  let p = absPath;
-  try {
-    p = realpathSync(absPath);
-  } catch {
-    /* 保持原路径 */
-  }
-  const slash = p.replace(/\\/g, "/");
-  if (process.platform === "win32") return slash;
-  return pathToFileURL(p).href;
-}
-
 function localImageForNapCat(filePath: string): string {
+  const http = publishLocalImage(filePath);
+  if (http) return http;
+
+  try {
+    const size = statSync(filePath).size;
+    if (size <= 900_000) {
+      const b64 = readFileSync(filePath).toString("base64");
+      return `base64://${b64}`;
+    }
+  } catch {
+    /* 继续拷临时目录 */
+  }
+
   const dir = join(tmpdir(), "fengyun-nexus-shot");
   mkdirSync(dir, { recursive: true });
   const ext = (filePath.match(/\.(png|jpe?g|gif|webp|bmp)$/i)?.[0] || ".png").toLowerCase();
   const dest = join(dir, `s-${Date.now()}-${Math.floor(Math.random() * 1000)}${ext}`);
   copyFileSync(filePath, dest);
-  return napCatLocalFile(dest);
+  let p = dest;
+  try {
+    p = realpathSync(dest);
+  } catch {
+    /* 保持 dest */
+  }
+  return pathToFileURL(p).href;
 }
 
 function transientSendFail(message?: string): boolean {
-  return /网络连接异常|调用超时|超时|timeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang|EAI_AGAIN/i.test(
+  return /网络连接异常|调用超时|超时|timeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang|EAI_AGAIN|NTEvent/i.test(
     String(message || ""),
   );
 }
@@ -204,6 +212,7 @@ export class OneBot11Bridge {
 
   setGatewayPort(port: number): void {
     this.gatewayPort = Math.floor(Number(port) || 0);
+    setOb11MediaPort(this.gatewayPort);
   }
 
   /** 写成网关自己的端口不算 NapCat 接口，留空走反向连接。 */

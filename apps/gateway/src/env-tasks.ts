@@ -110,6 +110,8 @@ function which(bin: string): string | null {
     const out = execSync(process.platform === "win32" ? `where ${bin}` : `command -v ${bin}`, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      timeout: 8_000,
+      windowsHide: true,
     })
       .trim()
       .split(/\r?\n/)[0];
@@ -153,7 +155,13 @@ function refreshInstalledFlags(): void {
     if (rt.id === "go" && which("go")) {
       rt.installed = true;
       try {
-        rt.activeVersion = execSync("go version", { encoding: "utf8" }).trim().slice(0, 40);
+        rt.activeVersion = execSync("go version", {
+          encoding: "utf8",
+          timeout: 8_000,
+          windowsHide: true,
+        })
+          .trim()
+          .slice(0, 40);
       } catch {
         rt.activeVersion = "system";
       }
@@ -163,7 +171,11 @@ function refreshInstalledFlags(): void {
       rt.installed = true;
       const py = which("python3") || which("python")!;
       try {
-        rt.activeVersion = execSync(`"${py}" --version`, { encoding: "utf8" }).trim();
+        rt.activeVersion = execSync(`"${py}" --version`, {
+          encoding: "utf8",
+          timeout: 8_000,
+          windowsHide: true,
+        }).trim();
       } catch {
         rt.activeVersion = "system";
       }
