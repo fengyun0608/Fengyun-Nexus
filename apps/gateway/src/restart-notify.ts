@@ -7,6 +7,8 @@ export type RestartNotify = {
   userId: string;
   messageType?: string;
   groupId?: string;
+  /** 当时是哪个 QQ 收到的指令，回执必须走这个号 */
+  botId?: string;
   requestedAt: string;
   previousUptime?: string;
   /** #更新 摘要，重启成功回执里再念一遍改了啥 */

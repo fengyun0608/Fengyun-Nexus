@@ -880,11 +880,12 @@ async function bootstrap(): Promise<void> {
             userId: msg.userId,
             messageType: mt,
             groupId: gid,
+            botId: String(msg.meta?.botId || msg.meta?.selfId || ""),
             requestedAt: nowIso(),
             previousUptime: uptime,
           });
           log.info(
-            `已记重启回执目标：${mt}${gid ? ` 群 ${gid}` : ` 会话=${msg.chatId}`}`,
+            `已记重启回执目标：${mt}${gid ? ` 群 ${gid}` : ` 会话=${msg.chatId}`}  bot=${String(msg.meta?.botId || msg.meta?.selfId || "?")}`,
           );
         }
 
@@ -917,6 +918,7 @@ async function bootstrap(): Promise<void> {
                 userId: msg.userId,
                 messageType: mt,
                 groupId: gid,
+                botId: String(msg.meta?.botId || msg.meta?.selfId || ""),
                 requestedAt: nowIso(),
                 previousUptime: uptime,
                 updateSummary: upd.updateSummary || upd.changeItems || [],
@@ -2811,8 +2813,8 @@ async function bootstrap(): Promise<void> {
       const shot = await renderHtmlShot({
         html,
         selector: "#panel",
-        width: 820,
-        height: 1400,
+        width: 720,
+        height: 960,
       });
       if (shot.ok) {
         sendPayload = `[CQ:image,file=${pathToFileURL(shot.pngPath).href}]`;
@@ -2846,43 +2848,46 @@ async function bootstrap(): Promise<void> {
         meta: {
           messageType: mt,
           groupId: gid,
+          botId: pending.botId || undefined,
+          selfId: pending.botId || undefined,
         },
         createdAt: nowIso(),
       };
-      let useImage = sendPayload !== text;
-      let connectedAt = 0;
-      let textFails = 0;
-      for (let i = 0; i < 40; i++) {
-        if (!onebot.status().connected) {
-          connectedAt = 0;
+      const botHint = pending.botId || "最近连上的号";
+      log.info(`重启回执准备发往 bot=${botHint}${gid ? ` 群 ${gid}` : ""}`);
+      let readyAt = 0;
+      for (let i = 0; i < 20; i++) {
+        const live = pending.botId
+          ? onebot.listConnectedSelfIds().includes(pending.botId)
+          : onebot.status().connected;
+        if (!live) {
+          readyAt = 0;
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         }
-        if (!connectedAt) {
-          connectedAt = Date.now();
-          // QQ 刚连上内核常还在抖，多等一会儿再发
-          log.info("重启回执：通道已连，等待 QQ 就绪…");
+        if (!readyAt) {
+          readyAt = Date.now();
+          log.info("重启回执：目标号已连，等 QQ 内核 6 秒");
+          await new Promise((r) => setTimeout(r, 6000));
+        }
+        const textOk = await onebot.sendText(text, { ...ctx, content: text });
+        if (!textOk) {
+          log.warn("重启文字回执没发出，8 秒后再试一次");
           await new Promise((r) => setTimeout(r, 8000));
+          const again = await onebot.sendText(text, { ...ctx, content: text });
+          if (!again) {
+            log.warn("重启成功通知发送失败。群里发 #状态 可再看");
+            return;
+          }
         }
-        const payload = useImage ? sendPayload : text;
-        const ok = await onebot.sendText(payload, { ...ctx, content: payload });
-        if (ok) {
-          log.ok(`重启成功已发回原${mt === "group" ? `群 ${gid}` : "会话"}`);
-          return;
+        if (sendPayload !== text) {
+          const imgOk = await onebot.sendText(sendPayload, { ...ctx, content: sendPayload });
+          if (!imgOk) log.warn("重启文字已发出，图被 QQ 拒绝");
         }
-        if (useImage) {
-          log.warn("重启报告的图发不出去，改发文字");
-          useImage = false;
-          continue;
-        }
-        textFails += 1;
-        if (textFails >= 5) {
-          log.warn("重启成功通知发送失败，已重试多次。可稍后再发 #状态 确认");
-          return;
-        }
-        await new Promise((r) => setTimeout(r, 3000 + textFails * 1500));
+        log.ok(`重启成功已发回原${mt === "group" ? `群 ${gid}` : "会话"}`);
+        return;
       }
-      log.warn("重启成功通知未发出：OneBot 等待超时");
+      log.warn("重启成功通知未发出：目标号没连上");
       return;
     }
 

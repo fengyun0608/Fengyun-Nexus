@@ -54,11 +54,12 @@ let lastRichMediaWarn = 0;
 
 function warnSendFail(action: string, retcode: number, message?: string): void {
   const raw = (message || "无说明").replace(/\s+/g, " ");
-  if (/rich media/i.test(raw)) {
-    const now = Date.now();
+  const now = Date.now();
+  if (/rich media|网络连接异常|1006514/i.test(raw)) {
     if (now - lastRichMediaWarn < 20_000) return;
     lastRichMediaWarn = now;
-    log.warn(`OneBot ${action} 发图被 QQ 拒绝。指令文字照常回，这条报错不再连打`);
+    const tip = /rich media/i.test(raw) ? "发图被 QQ 拒绝" : "QQ 内核暂时发不出（1006514）";
+    log.warn(`OneBot ${action} ${tip}。同一条不再连打`);
     return;
   }
   log.warn(`OneBot ${action} 失败 ret=${retcode} ${raw.slice(0, 180)}`);
@@ -580,17 +581,16 @@ export class OneBot11Bridge {
 
   private openSockets(prefer?: WebSocket, botId?: string): WebSocket[] {
     if (prefer && prefer.readyState === WebSocket.OPEN) return [prefer];
+    const open = [...this.sockets].filter((ws) => ws.readyState === WebSocket.OPEN);
     const want = String(botId || "").trim();
     if (want) {
-      for (const ws of this.sockets) {
-        if (ws.readyState !== WebSocket.OPEN) continue;
-        if (this.sockMeta.get(ws)?.selfId === want) return [ws];
-      }
+      const hit = open.filter((ws) => this.sockMeta.get(ws)?.selfId === want);
+      if (hit.length) return [hit[hit.length - 1]];
+      return [];
     }
-    for (const ws of this.sockets) {
-      if (ws.readyState === WebSocket.OPEN) return [ws];
-    }
-    return [];
+    const named = open.filter((ws) => this.sockMeta.get(ws)?.selfId);
+    const pool = named.length ? named : open;
+    return pool.length ? [pool[pool.length - 1]] : [];
   }
 
   private findBotCfg(botId?: string): OneBotBotConfig | undefined {
@@ -728,7 +728,9 @@ export class OneBot11Bridge {
       if (r.ok) return true;
       const tip = String(r.message || "");
       // 本机 http 拉图失败 / 识别 URL 失败：立刻交给外层改文字，别连试三次
-      if (/ECONNREFUSED|识别URL失败|文件处理失败/i.test(tip)) return false;
+      if (/ECONNREFUSED|识别URL失败|文件处理失败|rich media|网络连接异常|1006514/i.test(tip)) {
+        return false;
+      }
       if (!transientSendFail(tip) || i === 2) return false;
       await sleep(800 * (i + 1));
     }
