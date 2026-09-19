@@ -8,6 +8,7 @@ import type { WorkflowRunner } from "@fengyun/nexus-workflow";
 import type { PluginHost } from "@fengyun/nexus-plugin-sdk";
 import type { ChannelSettings } from "./channel-settings.js";
 import { isChannelMaster, masterLevelOf } from "./channel-settings.js";
+import { listOpenDesktopApps } from "./desktop-inspect.js";
 
 export type AgentToolBag = {
   mcp: McpHost;
@@ -63,6 +64,16 @@ export function buildAgentToolDefs(mcp: McpHost): LlmToolDef[] {
       },
       ["name"],
     ),
+    tool(
+      "nexus_open_apps",
+      "查看本机当前打开的带窗口软件/应用（主人或控制台）。回答「开了什么软件」时用这个。",
+      {
+        limit: {
+          type: "number",
+          description: "最多返回几条，默认 20，最大 40",
+        },
+      },
+    ),
   ];
   for (const t of mcp.list()) {
     if (defs.some((d) => d.function.name === t.name)) continue;
@@ -75,13 +86,19 @@ export async function runAgentTool(
   args: Record<string, unknown>,
   bag: AgentToolBag,
 ): Promise<unknown> {
-  const needMaster = name === "nexus_run_workflow" || name === "nexus_call_mcp";
+  const needMaster =
+    name === "nexus_run_workflow" ||
+    name === "nexus_call_mcp" ||
+    name === "nexus_open_apps";
   if (needMaster && !bag.isMaster && !bag.isAdminConsole) {
     return { error: "无权限，需要主人" };
   }
 
   if (name === "nexus_status") {
     return { lines: bag.statusLines() };
+  }
+  if (name === "nexus_open_apps") {
+    return listOpenDesktopApps({ limit: Number(args.limit) || 20 });
   }
   if (name === "nexus_list_plugins") {
     return {

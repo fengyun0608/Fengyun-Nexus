@@ -98,6 +98,7 @@ import {
 import { makePluginCtx, setPluginRuntime, setPluginChannelBag, setPluginOneBot } from "./plugin-ctx.js";
 import { loadAgentSkills, skillsPromptBlock } from "./agent-skills.js";
 import { buildAgentToolDefs, runAgentTool } from "./agent-tools.js";
+import { listOpenDesktopApps } from "./desktop-inspect.js";
 import { isJunkAiText, splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
@@ -712,6 +713,11 @@ async function bootstrap(): Promise<void> {
     name: "nexus.workflows",
     description: "List workflows",
     handler: () => workflows.list().map((w) => ({ id: w.id, name: w.name })),
+  });
+  mcp.register({
+    name: "nexus.open_apps",
+    description: "List open desktop apps / window titles on this machine",
+    handler: async (args) => listOpenDesktopApps({ limit: Number(args?.limit) || 20 }),
   });
 
   workflows.setHandlers({
