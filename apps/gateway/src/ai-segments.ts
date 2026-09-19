@@ -266,7 +266,15 @@ function explodeBySections(block: string): string[] {
   }
   if (buf.some((x) => x.trim())) chunks.push(buf.join("\n").trim());
 
-  if (chunks.length >= 2) return chunks;
+  if (chunks.length >= 2) {
+    const last = chunks[chunks.length - 1]!;
+    const q = last.match(/^([\s\S]+?)\n((?:需要|要不要|要我|请问).+[吗麼么][？?]?.*)$/);
+    if (q) {
+      chunks[chunks.length - 1] = q[1]!.trim();
+      chunks.push(q[2]!.trim());
+    }
+    return chunks.filter(Boolean);
+  }
 
   // 仍是一块：开场句单独一条，后面再切
   const m = block.match(/^([\s\S]{8,80}?[。！？~～])\s*\n([\s\S]+)$/);
