@@ -59,7 +59,7 @@ Fengyun Nexus 把 **控制台、消息通道、插件、工作流、多模型** 
 
 - 只想**先跑起来** → [开始使用](docs/product/start.md)
 - 想**看环境要装什么** → [环境要求](docs/product/environment.md)
-- 想**写插件 / 通道** → [插件生态](docs/ecosystem/plugins.md) · [通道插件](docs/ecosystem/channel-plugins.md)
+- 想**写插件 / 通道** → [插件生态](docs/ecosystem/plugins.md) · [通道插件](docs/ecosystem/channel-plugins.md) · [生态专仓](docs/ecosystem/hub.md)
 - 想**接 QQ** → [OneBot 11](docs/ecosystem/onebot11.md)
 - **文档中心** → [docs/README.md](docs/README.md)
 
