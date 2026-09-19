@@ -54,37 +54,10 @@ export function stripThinking(text: string): string {
 }
 
 function composeSpeak(reasoning: string, content: string): string {
-  const fromTags: string[] = [];
-  let body = String(content || "")
-    .replace(/<think>([\s\S]*?)<\/think>/gi, (_, inner: string) => {
-      const t = String(inner || "").trim();
-      if (t) fromTags.push(t);
-      return "\n";
-    })
-    .replace(/<thinking>([\s\S]*?)<\/thinking>/gi, (_, inner: string) => {
-      const t = String(inner || "").trim();
-      if (t) fromTags.push(t);
-      return "\n";
-    })
-    .replace(/<\/?think(?:ing)?>/gi, "");
-  body = stripToolMarkup(body);
-  const think = [String(reasoning || "").trim(), ...fromTags].filter(Boolean).join("\n\n").trim();
-  if (think && body) {
-    // 正文若又抄了一遍思考，去掉开头重复，避免转发后再冒一条同样的
-    const head = think.slice(0, Math.min(24, think.length));
-    if (head && body.replace(/\s/g, "").includes(think.replace(/\s/g, "").slice(0, 40))) {
-      const paras = body.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
-      const cleaned = paras.filter((p) => {
-        const compact = p.replace(/\s/g, "");
-        const thinkCompact = think.replace(/\s/g, "");
-        return !thinkCompact.includes(compact.slice(0, 30)) && !compact.includes(thinkCompact.slice(0, 30));
-      });
-      body = cleaned.join("\n\n").trim();
-    }
-  }
-  if (think && body) return `思考：\n${think}\n\n${body}`;
-  if (think) return `思考：\n${think}`;
-  return body;
+  const body = stripToolMarkup(String(content || ""));
+  const apiThink = String(reasoning || "").trim();
+  const tagged = apiThink ? `<think>\n${apiThink}\n</think>` : "";
+  return [tagged, body].filter(Boolean).join("\n\n").trim();
 }
 
 function stripToolMarkup(text: string): string {
@@ -232,7 +205,7 @@ export class LlmRouter {
     }
     history.push({
       role: "user",
-      content: "工具已经执行完。用人话告诉用户结果；可以带上简短思考。不要再调用工具，也不要把工具调用写进正文。",
+      content: "工具已经执行完。给人看的话写在 <think> 外面。思考只能写在 <think></think> 里。不要再调用工具，也不要把工具调用写进正文。",
     });
     let last = opts?.onDelta
       ? await this.chatTurnStream(history, undefined, opts.onDelta)
@@ -268,7 +241,7 @@ export class LlmRouter {
       }
       history.push({
         role: "user",
-        content: "好了。用人话回复用户。可以带思考。禁止再写工具调用。",
+        content: "好了。给人看的话写在标签外。思考只放 <think></think>。禁止再写工具调用。",
       });
       last = opts?.onDelta
         ? await this.chatTurnStream(history, undefined, opts.onDelta)

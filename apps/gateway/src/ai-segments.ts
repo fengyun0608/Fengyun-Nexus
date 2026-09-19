@@ -12,58 +12,9 @@ export function isJunkAiText(text: string): boolean {
   return JUNK_ONLY.test(String(text || "").trim());
 }
 
-/** 模型偶发写进正文的「怎么回」提纲，不是给人看的话。 */
-function isMetaPlanning(para: string): boolean {
-  const t = String(para || "").trim();
-  if (!t || t.length > 160) return false;
-  if (/^思考[：:]/.test(t)) return true;
-  return /^(用.+?(语气|口吻)|不需要调用工具|不要调用工具|只用人话|简短自然|一两句即可|无需工具|不调用工具)/.test(
-    t,
-  );
-}
-
-/** 英文内心独白（The user / I should / no tools）也是思考，不要当普通气泡。 */
-function englishReasoning(para: string): boolean {
-  const t = String(para || "").trim();
-  const en = (t.match(/[A-Za-z]/g) || []).length;
-  const zh = (t.match(/[\u4e00-\u9fff]/g) || []).length;
-  if (en < 36 || zh > en) return false;
-  return /the user|i should|i need to|no tools|respond in character|casual chat|this is a|let me /i.test(t);
-}
-
-/** 大段内心独白 / 翻文档过程：应进合并转发，不要当普通气泡。短句一律当回话。 */
-function looksLikeThinking(para: string): boolean {
-  const t = String(para || "").trim();
-  if (!t) return false;
-  if (isMetaPlanning(t) || englishReasoning(t)) return true;
-  // 「哈喽～」「喵呜~ 是主人来啦」这种短回话不是思考
-  if (t.length < 48 && !/^(我先|让我|接下来|先看|先读|文档找到|已经掌握)/.test(t)) return false;
-  if (
-    /我先看|让我看|让我读|接下来我|文档找到了|已经掌握|先列出|我来看|我去看|看一下|读一下|检查一下|再看一眼|继续看|先读|工具结果|技能里|framework-helper|agent-code/.test(
-      t,
-    )
-  ) {
-    return true;
-  }
-  if (t.length < 36) return false;
-  return /系统设定|系统说|根据系统|所以我要|身份上要|可以融合|不需要调用工具|当前通道的人设|问[「"]你是谁|用户想查看|用户只是|我想确认|应该用.+语气/.test(
-    t,
-  );
-}
-
-export function stripMetaPlanning(text: string): string {
-  return String(text || "")
-    .replace(/\r\n/g, "\n")
-    .split(/\n{2,}/)
-    .map((s) => s.trim())
-    .filter((s) => s && !isJunkAiText(s) && !isMetaPlanning(s))
-    .join("\n\n")
-    .trim();
-}
-
 /**
- * 拆开「思考：」与给人看的正文。
- * 思考交给合并转发；正文再按空行拆成多条气泡。
+ * 只按标签拆：<think> / <thinking> 进合并转发，标签外才是回话。
+ * 不靠句子猜测。
  */
 export function splitThinkingAndSpeak(text: string): {
   thinkingNodes: string[];
@@ -72,45 +23,28 @@ export function splitThinkingAndSpeak(text: string): {
   let raw = String(text || "").replace(/\r\n/g, "\n").trim();
   if (!raw) return { thinkingNodes: [], speak: "" };
 
-  const tagThink: string[] = [];
+  const chunks: string[] = [];
+  const pull = (re: RegExp) => {
+    raw = raw.replace(re, (_, inner: string) => {
+      const t = String(inner || "").trim();
+      if (t) chunks.push(t);
+      return "\n\n";
+    });
+  };
+  pull(/<think>([\s\S]*?)<\/think>/gi);
+  pull(/<thinking>([\s\S]*?)<\/thinking>/gi);
   raw = raw
-    .replace(/<think>([\s\S]*?)<\/think>/gi, (_, inner: string) => {
-      const t = String(inner || "").trim();
-      if (t) tagThink.push(t);
-      return "\n\n";
-    })
-    .replace(/<thinking>([\s\S]*?)<\/thinking>/gi, (_, inner: string) => {
-      const t = String(inner || "").trim();
-      if (t) tagThink.push(t);
-      return "\n\n";
-    })
     .replace(/<\/?think(?:ing)?>/gi, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  let thinking = tagThink.join("\n\n").trim();
-  let body = raw;
-
-  // 「思考：」只是标记，后面整段按空行分类；不要只截第一段，否则多段过程会漏进普通气泡
-  if (/^思考[：:]/.test(body)) {
-    body = body.replace(/^思考[：:]\s*/, "").trim();
-  }
-
-  const speakParas = String(body || "")
+  const speak = raw
     .split(/\n{2,}/)
     .map((s) => s.trim())
-    .filter((s) => s && !isJunkAiText(s));
-  const kept: string[] = [];
-  for (const p of speakParas) {
-    if (looksLikeThinking(p) || isMetaPlanning(p)) {
-      thinking = [thinking, p].filter(Boolean).join("\n\n").trim();
-      continue;
-    }
-    kept.push(p);
-  }
-  const speak = kept.join("\n\n").trim();
-  const thinkingNodes = packForwardNodes(thinking);
-  return { thinkingNodes, speak };
+    .filter((s) => s && !isJunkAiText(s))
+    .join("\n\n")
+    .trim();
+  return { thinkingNodes: packForwardNodes(chunks.join("\n\n")), speak };
 }
 
 function packForwardNodes(thinking: string): string[] {

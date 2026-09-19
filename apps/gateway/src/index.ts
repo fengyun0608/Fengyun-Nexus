@@ -458,7 +458,7 @@ function frameworkSystemPrompt(opts?: {
       "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp。控件树是空的网页壳，用 nexus_web_attach 挂页面，或 nexus_window_see 认出字在哪再 nexus_click_text。普通窗口用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。不够就自己写脚本。",
       "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。snapshot 里有字和坐标。不要只用 web_read 只读摘要。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。能直接调工具就别连查五六个再动手。",
-      "对用户说人话。思考进合并转发。正文要短，按空行或分类拆成多段（每段一两句），例如先总起，再一类插件一段，最后问一句要不要展开。不要把「让我再看」写进正文。不要甩工具名、JSON、DSML。",
+      "对用户说人话。思考必须写在 <think> 与 </think> 之间，框架只按这个标签放进合并转发；标签外面才是回话。没有思考就不要写标签。回话要短，按空行分成多段。不要把内心独白写在标签外，不要甩工具名、JSON、DSML。",
       "工具必须走正式 function call。禁止把 tool_calls、DSML、invoke、XML 写进回复正文。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
       "现成工具能用就用；没有就自己写代码跑通。别空口说不会，也别等别人给你加工具。",
