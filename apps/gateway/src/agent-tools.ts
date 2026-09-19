@@ -22,6 +22,7 @@ import {
 } from "./agent-workspace.js";
 import { textToSpeechFile } from "./tts-stt.js";
 import { runHostShell } from "./host-shell.js";
+import { captureDesktop } from "./screen-capture.js";
 import type { OneBot11Bridge } from "./onebot11-bridge.js";
 import type { OneBotConfig } from "./onebot11-bridge.js";
 import { queryLogEntries } from "./log.js";
@@ -76,6 +77,7 @@ const MASTER_TOOLS = new Set([
   "nexus_qq_send_image",
   "nexus_qq_send_file",
   "nexus_qq_send_voice",
+  "nexus_screen",
   "nexus_shot",
   "nexus_workspace_list",
   "nexus_workspace_read",
@@ -252,8 +254,13 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
       ["text"],
     ),
     tool(
+      "nexus_screen",
+      "截本机电脑屏幕（真实桌面画面）并可直接发到当前 QQ。有人说截图、截屏、截个图发群里，必须用这个。不要用 nexus_shot 渲状态卡片充数。Windows、macOS、Linux 桌面、Termux 可用；没有显示器的服务器会说明截不了。",
+      { send: { type: "boolean", description: "是否发到当前 QQ，默认 true" } },
+    ),
+    tool(
       "nexus_shot",
-      "用系统截图渲一张菜单或简单 HTML 图，并可直接发到当前 QQ 会话。",
+      "渲一张菜单或 HTML 状态图。这不是电脑屏幕。电脑截图用 nexus_screen。",
       {
         title: { type: "string", description: "标题" },
         lines: { type: "array", items: { type: "string" }, description: "行文案" },
@@ -292,7 +299,7 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     ),
     tool(
       "nexus_shell",
-      "在本机服务器执行系统命令。Windows 是 PowerShell，Linux 是 bash。查日志文件、列目录、看进程、改本机都可以。框架日志文件是 data/logs/gateway.log。这是系统命令，不是框架内部 # 指令。整台服务器都可以操作。问报错时直接读这个日志文件，不要说没有工具。",
+      "在本机执行系统命令。Windows 用 PowerShell，macOS / Linux 服务器用 bash 或 sh，Termux 用自带 bash。查日志、列目录、看进程都可以。框架日志文件是 data/logs/gateway.log。这是系统命令，不是框架内部 # 指令。",
       {
         command: { type: "string", description: "系统命令正文" },
         cwd: { type: "string", description: "工作目录，默认框架根，也可写绝对路径" },
@@ -512,6 +519,23 @@ export async function runAgentTool(
     if (!tts.ok || !tts.path) return { ok: false, message: tts.message };
     const ok = await bag.onebot.sendRecord(tts.path, ctx);
     return { ok, message: ok ? "已发语音" : `合成成功但发送失败：${tts.path}` };
+  }
+  if (name === "nexus_screen") {
+    const shot = await captureDesktop(join(bag.repoRoot, "data", "shots"));
+    if (!shot.ok || !shot.path) return { ok: false, platform: shot.platform, message: shot.message };
+    const send = args.send !== false;
+    if (send && bag.onebot && bag.messageCtx?.channel === "onebot11") {
+      const ctx = resolveSendCtx(bag, args);
+      if (!ctx) return { ok: false, path: shot.path, message: "当前不在 QQ 会话" };
+      const ok = await bag.onebot.sendImage(shot.path, ctx);
+      return {
+        ok,
+        path: shot.path,
+        platform: shot.platform,
+        message: ok ? "已把电脑屏幕截图发到群里" : "截到了屏幕，但发送失败",
+      };
+    }
+    return { ok: true, path: shot.path, platform: shot.platform, message: shot.message, sent: false };
   }
   if (name === "nexus_shot") {
     const outDir = join(bag.repoRoot, "data", "shots");
