@@ -24,6 +24,12 @@ export interface NexusMessage {
     atQqs?: string[];
     /** 是否 @ 了机器人自己 */
     atSelf?: boolean;
+    /** 通道原文，如 OneBot raw_message */
+    rawMessage?: string;
+    /** 发送者昵称 */
+    senderName?: string;
+    /** 入站事件源码（已截断） */
+    source?: string;
   };
   createdAt: string;
 }

@@ -14,6 +14,7 @@ type FeedMsg = {
   content: string;
   createdAt: string;
   accountId?: string;
+  raw?: string;
 };
 
 const auth = useAuthStore();
@@ -49,6 +50,25 @@ const messageGroups = computed(() => {
   }
   return [...map.values()];
 });
+
+function prettyRaw(raw?: string): string {
+  if (!raw) return "";
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
+function rawLine(raw?: string): string {
+  if (!raw) return "";
+  try {
+    const j = JSON.parse(raw) as { rawMessage?: string };
+    return String(j.rawMessage || "");
+  } catch {
+    return "";
+  }
+}
 
 onMounted(() => {
   void load();
@@ -88,7 +108,14 @@ onUnmounted(() => {
               <div v-for="m in g.items" :key="m.id" class="log-row">
                 <n-tag size="tiny">{{ m.channel }}</n-tag>
                 <span class="at">{{ m.createdAt }}</span>
-                <span>{{ m.role }}/{{ m.userId }}: {{ m.content }}</span>
+                <span>
+                  {{ m.role }}/{{ m.userId }}: {{ m.content }}
+                  <p v-if="rawLine(m.raw) && rawLine(m.raw) !== m.content" class="raw-line">原文 {{ rawLine(m.raw) }}</p>
+                  <details v-if="m.raw" class="msg-src">
+                    <summary>消息源码</summary>
+                    <pre>{{ prettyRaw(m.raw) }}</pre>
+                  </details>
+                </span>
               </div>
             </section>
             <p v-if="!messages.length" class="muted">暂无消息</p>
@@ -113,5 +140,23 @@ onUnmounted(() => {
 .at {
   color: var(--muted);
   white-space: nowrap;
+}
+.raw-line {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.msg-src summary {
+  cursor: pointer;
+  color: var(--amber);
+  font-size: 0.75rem;
+}
+.msg-src pre {
+  margin: 6px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.72rem;
 }
 </style>

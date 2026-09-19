@@ -1,5 +1,14 @@
 import { newId, nowIso, type NexusMessage } from "@fengyun/nexus-shared";
 
+function clipSource(raw: unknown): string {
+  try {
+    const s = JSON.stringify(raw ?? {});
+    return s.length > 8000 ? `${s.slice(0, 8000)}…` : s;
+  } catch {
+    return "";
+  }
+}
+
 export interface ChannelAdapter {
   id: string;
   /** Optional human label for console. */
@@ -26,6 +35,11 @@ export class WebChannel implements ChannelAdapter {
       userId: String(body.userId ?? "web-user"),
       type: "text",
       content: String(body.content ?? ""),
+      meta: {
+        rawMessage: String(body.content ?? ""),
+        senderName: body.nickname != null ? String(body.nickname) : undefined,
+        source: clipSource(body),
+      },
       createdAt: nowIso(),
     };
   }
@@ -53,6 +67,11 @@ export class WebhookChannel implements ChannelAdapter {
       userId: String(body.userId ?? body.from ?? "webhook-user"),
       type: "text",
       content: String(body.content ?? body.text ?? ""),
+      meta: {
+        rawMessage: String(body.raw_message ?? body.content ?? body.text ?? ""),
+        senderName: body.nickname != null ? String(body.nickname) : undefined,
+        source: clipSource(body),
+      },
       createdAt: nowIso(),
     };
   }

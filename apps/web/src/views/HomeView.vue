@@ -40,6 +40,7 @@ type FeedMsg = {
   content: string;
   createdAt: string;
   accountId?: string;
+  raw?: string;
 };
 
 const auth = useAuthStore();
@@ -145,6 +146,37 @@ const feedGroups = computed(() => {
 
 function fmtTime(iso: string): string {
   return String(iso || "").replace("T", " ").slice(0, 19) || "—";
+}
+
+function parsedRaw(raw?: string): {
+  rawMessage?: string;
+  source?: string;
+  senderName?: string;
+  userId?: string;
+  capabilityMode?: boolean;
+} | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as {
+      rawMessage?: string;
+      source?: string;
+      senderName?: string;
+      userId?: string;
+      capabilityMode?: boolean;
+    };
+  } catch {
+    return null;
+  }
+}
+
+function rawLine(row: FeedMsg): string {
+  return String(parsedRaw(row.raw)?.rawMessage || "");
+}
+
+function prettyRaw(raw?: string): string {
+  const parsed = parsedRaw(raw);
+  if (!parsed) return raw || "";
+  return JSON.stringify(parsed, null, 2);
 }
 
 async function loadAll(opts?: { soft?: boolean }) {
@@ -288,7 +320,16 @@ onUnmounted(() => {
                   <span class="muted">{{ fmtTime(row.createdAt) }}</span>
                   <span class="lvl">{{ row.channel }}</span>
                   <span class="muted who">{{ row.role }}:{{ row.userId }}</span>
-                  <span class="content">{{ row.content }}</span>
+                  <span class="content">
+                    <span>{{ row.content }}</span>
+                    <p v-if="rawLine(row) && rawLine(row) !== row.content" class="raw-line">
+                      原文 {{ rawLine(row) }}
+                    </p>
+                    <details v-if="row.raw" class="msg-src">
+                      <summary>消息源码</summary>
+                      <pre>{{ prettyRaw(row.raw) }}</pre>
+                    </details>
+                  </span>
                 </div>
               </section>
             </div>
@@ -452,6 +493,30 @@ onUnmounted(() => {
 }
 .content {
   word-break: break-word;
+  display: grid;
+  gap: 4px;
+}
+.raw-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.msg-src {
+  margin-top: 2px;
+}
+.msg-src summary {
+  cursor: pointer;
+  color: var(--amber);
+  font-size: 0.75rem;
+}
+.msg-src pre {
+  margin: 6px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.72rem;
+  line-height: 1.4;
 }
 .raw-page {
   max-height: min(70vh, 640px);

@@ -51,6 +51,36 @@ export function extractOb11AtQqs(
   return [...new Set(out.filter(Boolean))];
 }
 
+function clipText(value: unknown, max = 500): unknown {
+  if (typeof value !== "string") return value;
+  if (value.length <= max) return value;
+  return `${value.slice(0, 80)}…(${value.length})`;
+}
+
+/** 入站事件源码：去掉超长字段，避免图片 base64 撑爆记录。 */
+export function compactOb11Source(ev: Ob11MessageEvent): string {
+  const message = Array.isArray(ev.message)
+    ? ev.message.map((seg) => {
+        const data: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(seg.data || {})) data[k] = clipText(v);
+        return { type: seg.type, data };
+      })
+    : clipText(ev.message, 2000);
+  const blob = JSON.stringify({
+    post_type: ev.post_type,
+    message_type: ev.message_type,
+    sub_type: ev.sub_type,
+    message_id: ev.message_id,
+    user_id: ev.user_id,
+    group_id: ev.group_id,
+    self_id: ev.self_id,
+    raw_message: clipText(ev.raw_message, 4000),
+    sender: ev.sender,
+    message,
+  });
+  return blob.length > 8000 ? `${blob.slice(0, 8000)}…` : blob;
+}
+
 /**
  * Built-in OneBot 11 adapter (NapCat / go-cqhttp compatible).
  * @see https://napneko.github.io
@@ -82,6 +112,9 @@ export class OneBot11Channel {
         selfId,
         atQqs,
         atSelf: Boolean(selfId && atQqs.includes(selfId)),
+        rawMessage: String(ev.raw_message || text),
+        senderName: ev.sender?.nickname != null ? String(ev.sender.nickname) : undefined,
+        source: compactOb11Source(ev),
       },
       createdAt: nowIso(),
     };

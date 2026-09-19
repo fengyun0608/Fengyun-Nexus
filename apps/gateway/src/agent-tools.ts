@@ -19,6 +19,14 @@ export type AgentToolBag = {
   userId: string;
   isMaster: boolean;
   isAdminConsole?: boolean;
+  /** 主人调用群内插件能力时，回复文本会追加发出 */
+  capSink?: string[];
+  invokeCapability?: (text: string) => Promise<string[]>;
+  setPluginEnabled?: (id: string, enabled: boolean) => { ok: boolean; message: string };
+  reloadPlugins?: () => Promise<{ ok: boolean; message: string }>;
+  installPack?: (id: string) => Promise<{ ok: boolean; message: string }>;
+  installRuntime?: (runtime: string) => { ok: boolean; message: string };
+  listRuntimes?: () => unknown;
 };
 
 function tool(
@@ -74,6 +82,41 @@ export function buildAgentToolDefs(mcp: McpHost): LlmToolDef[] {
         },
       },
     ),
+    tool("nexus_list_caps", "列出已加载插件的群内能力（指令与说明）。调用前先看这份清单，不要编造没有的能力。", {}),
+    tool(
+      "nexus_call_cap",
+      "调用一条群内插件能力。传入要执行的指令文本，例如 #菜单。静妍这类已装进框架的群能力也走这里。",
+      { text: { type: "string", description: "要执行的指令或匹配插件规则的文本" } },
+      ["text"],
+    ),
+    tool(
+      "nexus_plugin_switch",
+      "启用或停用一个已加载插件（主人或控制台）",
+      {
+        id: { type: "string", description: "插件 id" },
+        enabled: { type: "boolean", description: "true 启用，false 停用" },
+      },
+      ["id", "enabled"],
+    ),
+    tool("nexus_plugin_reload", "热重载全部插件（主人或控制台）", {}),
+    tool(
+      "nexus_install_pack",
+      "从生态专仓安装一份收录（主人或控制台）。先确认收录 id，再安装。",
+      { id: { type: "string", description: "生态收录 id" } },
+      ["id"],
+    ),
+    tool("nexus_list_runtimes", "查看可安装的运行环境（Go / Python / 浏览器 / NapCat）", {}),
+    tool(
+      "nexus_install_runtime",
+      "把 Go、Python、浏览器或 NapCat 加入安装队列并开始安装（主人或控制台）",
+      {
+        runtime: {
+          type: "string",
+          description: "go、python、browser、napcat 四选一",
+        },
+      },
+      ["runtime"],
+    ),
   ];
   for (const t of mcp.list()) {
     if (defs.some((d) => d.function.name === t.name)) continue;
@@ -89,7 +132,14 @@ export async function runAgentTool(
   const needMaster =
     name === "nexus_run_workflow" ||
     name === "nexus_call_mcp" ||
-    name === "nexus_open_apps";
+    name === "nexus_open_apps" ||
+    name === "nexus_list_caps" ||
+    name === "nexus_call_cap" ||
+    name === "nexus_plugin_switch" ||
+    name === "nexus_plugin_reload" ||
+    name === "nexus_install_pack" ||
+    name === "nexus_list_runtimes" ||
+    name === "nexus_install_runtime";
   if (needMaster && !bag.isMaster && !bag.isAdminConsole) {
     return { error: "无权限，需要主人" };
   }
@@ -139,6 +189,66 @@ export async function runAgentTool(
         ? (args.args as Record<string, unknown>)
         : {};
     return bag.mcp.call(toolName, callArgs);
+  }
+  if (name === "nexus_list_caps") {
+    const items: Array<{
+      pluginId: string;
+      name: string;
+      command: string;
+      describe: string;
+      permission: string;
+    }> = [];
+    for (const p of bag.plugins.values()) {
+      const rules = (p as { rule?: Array<{ reg?: unknown; describe?: string; permission?: string }> }).rule;
+      if (!Array.isArray(rules)) continue;
+      for (const r of rules) {
+        items.push({
+          pluginId: p.manifest.id,
+          name: p.manifest.name,
+          command: String(r.reg ?? ""),
+          describe: String(r.describe || ""),
+          permission: r.permission || "all",
+        });
+      }
+    }
+    return { items };
+  }
+  if (name === "nexus_call_cap") {
+    const text = String(args.text || "").trim();
+    if (!text) return { error: "缺少要调用的指令" };
+    if (!bag.invokeCapability) return { error: "当前不能调用群内能力" };
+    const replies = await bag.invokeCapability(text);
+    if (bag.capSink) bag.capSink.push(...replies.filter((x) => x.trim()));
+    return {
+      ok: replies.length > 0,
+      replies,
+      note: replies.length ? "框架会另发这些回复，不要整段照抄" : "没有插件接住这条指令",
+    };
+  }
+  if (name === "nexus_plugin_switch") {
+    const id = String(args.id || "").trim();
+    if (!id) return { error: "缺少插件 id" };
+    if (!bag.setPluginEnabled) return { error: "当前不能操控插件" };
+    return bag.setPluginEnabled(id, Boolean(args.enabled));
+  }
+  if (name === "nexus_plugin_reload") {
+    if (!bag.reloadPlugins) return { error: "当前不能重载插件" };
+    return bag.reloadPlugins();
+  }
+  if (name === "nexus_install_pack") {
+    const id = String(args.id || "").trim();
+    if (!id) return { error: "缺少收录 id" };
+    if (!bag.installPack) return { error: "当前不能安装" };
+    return bag.installPack(id);
+  }
+  if (name === "nexus_list_runtimes") {
+    return { items: bag.listRuntimes?.() ?? [] };
+  }
+  if (name === "nexus_install_runtime") {
+    const runtime = String(args.runtime || "").trim();
+    if (!runtime) return { error: "缺少运行环境" };
+    if (!bag.installRuntime) return { error: "当前不能安装" };
+    return bag.installRuntime(runtime);
   }
   /** 直接透传 MCP 同名工具 */
   const mcpNames = new Set(bag.mcp.list().map((t) => t.name));

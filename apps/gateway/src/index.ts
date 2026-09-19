@@ -394,14 +394,43 @@ function validatePassword(password: string): string | null {
 }
 
 /** 每次问 AI 都先带上。通道人设写在后面，不把这句盖掉。 */
-function frameworkSystemPrompt(): string {
-  return [
+function frameworkSystemPrompt(opts?: {
+  capability?: boolean;
+  userId?: string;
+  senderName?: string;
+}): string {
+  const who = [opts?.senderName, opts?.userId].filter(Boolean).join(" / ");
+  const lines = [
     "你在 Fengyun Nexus 里运作，你就是 Fengyun Nexus。",
     "有人问你是谁、是什么模型、谁做的，只说 Fengyun Nexus，不要报中文产品名或出品方。",
     "不要说自己是别的模型，也不要说自己是别的产品。",
     "这个通道如果另外写了人设，就在 Fengyun Nexus 这个身份上按那个人设说话。",
-    "需要查框架状态、插件、工作流或 MCP 时，使用提供的工具，不要编造。",
-  ].join("\n");
+  ];
+  if (opts?.capability) {
+    lines.push(
+      who ? `当前说话的人是主人（${who}），已开启能力调用。` : "当前说话的人是主人，已开启能力调用。",
+      "可以查看并调用已加载的群内插件能力，也可以安装生态收录、排队安装 Go / Python / 浏览器 / NapCat，以及启用、停用、重载插件。",
+      "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
+    );
+  } else if (opts?.userId) {
+    lines.push(
+      `当前说话的人不是主人（${who || opts.userId}）。禁止调用任何能力、工具、安装和操控。`,
+      "只做普通对话。需要说明来源时，直接说这条消息是谁发的。",
+    );
+  }
+  return lines.join("\n");
+}
+
+function archiveRaw(msg: NexusMessage, capabilityMode: boolean): string {
+  const pack = {
+    rawMessage: msg.meta?.rawMessage || msg.content,
+    senderName: msg.meta?.senderName || "",
+    userId: msg.userId,
+    capabilityMode,
+    source: msg.meta?.source || "",
+  };
+  const s = JSON.stringify(pack);
+  return s.length > 12000 ? `${s.slice(0, 12000)}…` : s;
 }
 
 async function bootstrap(): Promise<void> {
@@ -909,10 +938,12 @@ async function bootstrap(): Promise<void> {
       content: string;
       createdAt: string;
       accountId?: string;
+      raw?: string;
     }) => db.insertMessage({ ...row, accountId: row.accountId || accountId });
     const chSettings = getChannelSettings(channelCfg, msg.channel);
     const isMaster = isChannelMaster(chSettings, msg.userId);
     const isAdminConsole = Boolean(opts?.isAdminConsole);
+    const capabilityMode = isMaster || isAdminConsole;
     const trimmedRaw = msg.content.trim();
     const trimmed = stripWakePrefix(trimmedRaw, botCfg);
     const isHash = trimmed.startsWith("#") || trimmed.startsWith(botCfg.commandPrefix || "#");
@@ -1057,6 +1088,7 @@ async function bootstrap(): Promise<void> {
           role: "user",
           content: msg.content,
           createdAt: msg.createdAt,
+          raw: archiveRaw(msg, capabilityMode),
         });
 
         if (cmd.systemUpdate) {
@@ -1167,6 +1199,7 @@ async function bootstrap(): Promise<void> {
         role: "user",
         content: trimmed,
         createdAt: msg.createdAt,
+        raw: archiveRaw(msg, capabilityMode),
       });
       const texts = pluginReplies.map((r) => {
         if (r.type === "image") {
@@ -1224,7 +1257,14 @@ async function bootstrap(): Promise<void> {
     }
 
     const history: Array<{ role: "user" | "assistant" | "system"; content: string }> = [
-      { role: "system", content: frameworkSystemPrompt() },
+      {
+        role: "system",
+        content: frameworkSystemPrompt({
+          capability: capabilityMode,
+          userId: msg.userId,
+          senderName: msg.meta?.senderName,
+        }),
+      },
     ];
     const skillBlock = skillsPromptBlock(agentSkills);
     if (skillBlock) history.push({ role: "system", content: skillBlock });
@@ -1246,6 +1286,7 @@ async function bootstrap(): Promise<void> {
       role: "user",
       content: userAsk,
       createdAt: msg.createdAt,
+      raw: archiveRaw(msg, capabilityMode),
     });
 
     history.push(
@@ -1255,6 +1296,10 @@ async function bootstrap(): Promise<void> {
       })),
     );
 
+    const who = msg.meta?.senderName ? `${msg.meta.senderName}/${msg.userId}` : msg.userId;
+    log.info(capabilityMode ? `对话鉴权 主人·能力模式  ${who}` : `对话鉴权 非主人·禁止能力  ${who}`);
+
+    const capSink: string[] = [];
     const toolBag = {
       mcp,
       workflows,
@@ -1264,12 +1309,116 @@ async function bootstrap(): Promise<void> {
       userId: msg.userId,
       isMaster,
       isAdminConsole,
+      capSink,
+      invokeCapability: async (text: string) => {
+        const fake: NexusMessage = {
+          ...msg,
+          id: newId("msg"),
+          content: text.trim(),
+          createdAt: nowIso(),
+        };
+        const replies = await Promise.race([
+          plugins.onMessage(
+            fake,
+            (id) =>
+              makePluginCtx(id, (m) => log.plugin(id, m), {
+                channelId: msg.channel,
+                eventUserId: msg.userId,
+              }),
+            async (id) => {
+              const assign = getChannelPluginAssign(ROOT, msg.channel, id);
+              if (msg.channel === "onebot11" && assign.accounts.length) {
+                if (!accountId || !assign.accounts.includes(accountId)) return false;
+              }
+              const plug = plugins.get(id);
+              if (plug?.setConfig) {
+                const base = loadPluginConfigMap(ROOT)[id] || {};
+                const own = accountId ? assign.byAccount[accountId] : undefined;
+                const merged = own ? { ...base, ...own } : base;
+                if (Object.keys(merged).length) await plug.setConfig(merged);
+              }
+              return true;
+            },
+          ),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error("能力调用超时")), 20_000);
+          }),
+        ]).catch((e) => {
+          const tip = e instanceof Error ? e.message : String(e);
+          return [
+            {
+              id: newId("msg"),
+              channel: msg.channel,
+              chatId: msg.chatId,
+              userId: "nexus",
+              type: "text" as const,
+              content: tip.includes("超时") ? "能力调用超时" : `能力调用失败：${tip}`,
+              createdAt: nowIso(),
+            },
+          ];
+        });
+        return replies
+          .map((r) => {
+            if (r.type === "image") {
+              const url = r.attachments?.[0]?.url;
+              if (url) return `[CQ:image,file=${url}]`;
+            }
+            return r.content;
+          })
+          .filter(Boolean);
+      },
+      setPluginEnabled: (id: string, enabled: boolean) => {
+        const p = plugins.get(id);
+        if (!p) return { ok: false, message: "插件未找到" };
+        plugins.setEnabled(id, enabled);
+        db.upsertPlugin({
+          id: p.manifest.id,
+          name: p.manifest.name,
+          version: p.manifest.version,
+          enabled,
+          loadedAt: nowIso(),
+        });
+        const message = enabled ? `已启用 ${p.manifest.name}` : `已停用 ${p.manifest.name}`;
+        log.info(message);
+        return { ok: true, message };
+      },
+      reloadPlugins: async () => {
+        const result = await reloadPlugins(pluginHotDeps);
+        return { ok: result.ok, message: result.message };
+      },
+      installPack: async (id: string) => {
+        const ecoUrl = String(registry.ecosystemRepo?.url || "").trim();
+        const result = installEcosystemPack(ROOT, id, {
+          ecosystemRepoUrl: ecoUrl || undefined,
+          ecosystemRepoBranch: registry.ecosystemRepo?.branch || "main",
+        });
+        if (result.ok && result.applied.length) {
+          const reload = await reloadPlugins(pluginHotDeps);
+          return {
+            ok: result.ok,
+            message: `${result.message}；${reload.ok ? "已热重载" : reload.message}`,
+          };
+        }
+        return { ok: result.ok, message: result.message };
+      },
+      installRuntime: (runtime: string) => {
+        try {
+          const task = createInstallTask({ runtime: runtime as EnvRuntimeId });
+          return { ok: true, message: `已加入安装队列：${task.runtime} ${task.version}` };
+        } catch (e) {
+          return { ok: false, message: e instanceof Error ? e.message : String(e) };
+        }
+      },
+      listRuntimes: () => listRuntimes(),
     };
-    const tools = buildAgentToolDefs(mcp);
 
     const assistant = (
       await Promise.race([
-        llm.chatWithTools(history, tools, (name, args) => runAgentTool(name, args, toolBag)),
+        capabilityMode
+          ? llm.chatWithTools(history, buildAgentToolDefs(mcp), (name, args) =>
+              runAgentTool(name, args, toolBag),
+            )
+          : llm.chat(history),
         new Promise<string>((_, reject) => {
           setTimeout(() => reject(new Error("AI 响应超时")), 50_000);
         }),
@@ -1279,10 +1428,13 @@ async function bootstrap(): Promise<void> {
         return tip.includes("超时") ? "AI 响应超时" : `AI 异常：${tip}`;
       })
     ).trim();
-    if (!assistant) return [];
 
-    const parts = splitAiSegments(assistant);
-    const storeAs = parts.join("\n\n");
+    const parts = assistant ? splitAiSegments(assistant) : [];
+    const extra = capSink.map((x) => x.trim()).filter(Boolean);
+    const all = [...parts, ...extra];
+    if (!all.length) return [];
+
+    const storeAs = all.join("\n\n");
     sessions.append(session, "assistant", storeAs);
     writeMsg({
       id: newId("msg"),
@@ -1293,7 +1445,7 @@ async function bootstrap(): Promise<void> {
       content: storeAs,
       createdAt: nowIso(),
     });
-    return parts.length ? parts : [assistant];
+    return all;
   }
 
   function tokenIsAdmin(req: express.Request): boolean {

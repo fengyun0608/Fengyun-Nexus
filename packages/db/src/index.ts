@@ -16,6 +16,8 @@ export interface DbMessageRow {
   createdAt: string;
   /** 哪个机器人号收到的。旧记录可能没有 */
   accountId?: string;
+  /** 原文与入站源码 JSON。旧记录可能没有 */
+  raw?: string;
 }
 
 export interface DbPluginRow {
@@ -190,6 +192,9 @@ export class NexusDatabase {
       if (!cols.some((c) => c.name === "accountId")) {
         this.sqlite.exec(`ALTER TABLE messages ADD COLUMN accountId TEXT`);
       }
+      if (!cols.some((c) => c.name === "raw")) {
+        this.sqlite.exec(`ALTER TABLE messages ADD COLUMN raw TEXT`);
+      }
       return;
     }
 
@@ -232,8 +237,8 @@ export class NexusDatabase {
     if (this.sqlite) {
       this.sqlite
         .prepare(
-          `INSERT OR REPLACE INTO messages (id,channel,chatId,userId,role,content,createdAt,accountId)
-           VALUES (?,?,?,?,?,?,?,?)`,
+          `INSERT OR REPLACE INTO messages (id,channel,chatId,userId,role,content,createdAt,accountId,raw)
+           VALUES (?,?,?,?,?,?,?,?,?)`,
         )
         .run(
           row.id,
@@ -244,6 +249,7 @@ export class NexusDatabase {
           row.content,
           row.createdAt,
           row.accountId || "",
+          row.raw || "",
         );
       return;
     }
@@ -258,7 +264,7 @@ export class NexusDatabase {
     if (this.sqlite) {
       return this.sqlite
         .prepare(
-          `SELECT id,channel,chatId,userId,role,content,createdAt,accountId FROM messages
+          `SELECT id,channel,chatId,userId,role,content,createdAt,accountId,raw FROM messages
            WHERE chatId=? ORDER BY createdAt DESC LIMIT ?`,
         )
         .all(chatId, limit)
@@ -272,7 +278,7 @@ export class NexusDatabase {
     if (this.sqlite) {
       return this.sqlite
         .prepare(
-          `SELECT id,channel,chatId,userId,role,content,createdAt,accountId FROM messages
+          `SELECT id,channel,chatId,userId,role,content,createdAt,accountId,raw FROM messages
            ORDER BY createdAt DESC LIMIT ?`,
         )
         .all(limit) as unknown as DbMessageRow[];
