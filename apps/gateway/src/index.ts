@@ -125,7 +125,7 @@ import {
   watchPluginConfigFile,
 } from "./plugin-config-store.js";
 import { getChannelPluginAssign, saveChannelPluginAssign } from "./channel-plugin-assign.js";
-import { getLogEntries, log, queryLogEntries } from "./log.js";
+import { getLogEntries, log, queryLogEntries, setLogFile } from "./log.js";
 import { renderHtmlShot } from "./menu-shot.js";
 import {
   activeProvider,
@@ -138,6 +138,7 @@ import { OneBot11Bridge, type OneBotConfig } from "./onebot11-bridge.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = findRepoRoot(resolve(__dirname, "../../.."));
+setLogFile(join(ROOT, "data", "logs", "gateway.log"));
 const ADMIN_LOCAL = join(ROOT, "configs/admin.local.json");
 const RUNTIME_LOCAL = join(ROOT, "configs/runtime.local.json");
 const ONEBOT_LOCAL = join(ROOT, "configs/onebot.local.json");
@@ -417,10 +418,10 @@ function frameworkSystemPrompt(opts?: {
       "主人要打开或启动本机软件时，调用 nexus_launch_app，只传软件名。不要说没有启动工具，也不要改口教对方自己去点。",
       "问电脑开了多久、开机时间，调用 nexus_host_uptime。那是整台电脑的开机时长，不是框架自己跑了多久。不要说没有这个工具，也不要编数字。",
       "问内存、处理器、磁盘、系统版本或系统信息，调用 nexus_host_info。不要说还要去装这个能力。",
-      "问报错、错误日志、掉线、WARN、ERROR、最近框架日志：调用 nexus_logs。可传 levels=ERROR,WARN。不要说没有查日志的工具，也不要去翻 agent-workspace。",
+      "问报错、掉线、日志文件：调用 nexus_shell 用系统命令查 data/logs/gateway.log。Windows 例：Get-Content -Tail 80 data\\logs\\gateway.log | Select-String ERROR,WARN。这是本机系统命令，不是框架 # 指令。整台服务器都可以查、可以操作。不要说没有工具，也不要只翻沙箱。",
       "有人要搜网页、查资料、看某个网址，调用 nexus_web_search 或 nexus_web_read。不要说没有搜索。",
       "要发图、发文件、发语音到 QQ：用 nexus_qq_send_image / nexus_qq_send_file / nexus_qq_send_voice。要渲状态图用 nexus_shot。",
-      "写代码、跑白名单命令：用 nexus_workspace_* 和 nexus_run_safe，只在 data/agent-workspace 沙箱。",
+      "写代码仍可用沙箱。查文件、跑系统命令、动服务器用 nexus_shell，工作目录默认框架根，也可指定绝对路径。",
       "改通道人设/回复群或 OneBot 开关路径：用 nexus_channel_patch / nexus_onebot_patch。不要改密码。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",

@@ -2,7 +2,7 @@
  * 给 LLM 用的框架工具：状态 / 插件 / 主人 / 工作流 / MCP / QQ 多媒体 / 沙箱。
  * 敏感工具要求主人或控制台。
  */
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import type { LlmToolDef } from "@fengyun/nexus-llm";
 import type { McpHost } from "@fengyun/nexus-mcp-host";
 import type { WorkflowRunner } from "@fengyun/nexus-workflow";
@@ -21,6 +21,7 @@ import {
   workspaceWrite,
 } from "./agent-workspace.js";
 import { textToSpeechFile } from "./tts-stt.js";
+import { runHostShell } from "./host-shell.js";
 import type { OneBot11Bridge } from "./onebot11-bridge.js";
 import type { OneBotConfig } from "./onebot11-bridge.js";
 import { queryLogEntries } from "./log.js";
@@ -62,6 +63,7 @@ const MASTER_TOOLS = new Set([
   "nexus_host_uptime",
   "nexus_host_info",
   "nexus_logs",
+  "nexus_shell",
   "nexus_web_search",
   "nexus_web_read",
   "nexus_list_caps",
@@ -169,7 +171,7 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     tool("nexus_host_uptime", "查看这台电脑开机运行了多久", {}),
     tool(
       "nexus_logs",
-      "查看 Fengyun Nexus 框架最近运行日志。问报错、掉线、WARN/ERROR、后端日志时必须用这个，不要说没有工具，也不要去翻 agent-workspace。",
+      "框架内存日志环的快捷查看。查磁盘上的日志文件请用 nexus_shell 读 data/logs/gateway.log，不要改用框架 # 指令。",
       {
         limit: { type: "number", description: "条数，默认 60，最大 200" },
         levels: {
@@ -284,8 +286,17 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     ),
     tool(
       "nexus_run_safe",
-      "在沙箱里跑白名单命令：node / pnpm / npm / git status|diff|log / tsc。禁止任意 shell。",
+      "仅在 data/agent-workspace 沙箱跑白名单命令。查日志、看服务器、操作系统请用 nexus_shell。",
       { command: { type: "string" } },
+      ["command"],
+    ),
+    tool(
+      "nexus_shell",
+      "在本机服务器执行系统命令。Windows 是 PowerShell，Linux 是 bash。查日志文件、列目录、看进程、改本机都可以。框架日志文件是 data/logs/gateway.log。这是系统命令，不是框架内部 # 指令。整台服务器都可以操作。问报错时直接读这个日志文件，不要说没有工具。",
+      {
+        command: { type: "string", description: "系统命令正文" },
+        cwd: { type: "string", description: "工作目录，默认框架根，也可写绝对路径" },
+      },
       ["command"],
     ),
     tool("nexus_channel_get", "查看当前消息通道设置（主人、人设、回复群等）", {}),
@@ -537,6 +548,17 @@ export async function runAgentTool(
   }
   if (name === "nexus_run_safe") {
     return runSafeCommand(bag.repoRoot, String(args.command || ""));
+  }
+  if (name === "nexus_shell") {
+    const command = String(args.command || args.cmd || "").trim();
+    if (!command) return { error: "缺少命令" };
+    const rawCwd = String(args.cwd || "").trim();
+    const cwd = rawCwd ? (isAbsolute(rawCwd) ? rawCwd : join(bag.repoRoot, rawCwd)) : bag.repoRoot;
+    const result = await runHostShell(command, { cwd });
+    return {
+      ...result,
+      logFile: join(bag.repoRoot, "data", "logs", "gateway.log"),
+    };
   }
 
   if (name === "nexus_channel_get") {

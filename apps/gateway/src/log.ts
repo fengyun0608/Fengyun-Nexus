@@ -1,4 +1,6 @@
-/** Colored level-prefixed logger + in-memory ring for console. */
+/** Colored level-prefixed logger + in-memory ring + disk log file. */
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 const c = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
@@ -31,8 +33,34 @@ function push(level: LogLevel, msg: string): void {
   if (ring.length > RING_MAX) ring.splice(0, ring.length - RING_MAX);
 }
 
+let logFilePath: string | null = null;
+
+/** 网关启动时指定。之后每条日志追加到这个文件，方便系统命令查看。 */
+export function setLogFile(path: string): void {
+  logFilePath = path;
+  mkdirSync(dirname(path), { recursive: true });
+}
+
+export function gatewayLogFile(): string | null {
+  return logFilePath;
+}
+
+function appendLogFile(level: LogLevel, msg: string): void {
+  if (!logFilePath) return;
+  try {
+    if (existsSync(logFilePath) && statSync(logFilePath).size > 2_000_000) {
+      const tail = readFileSync(logFilePath);
+      writeFileSync(logFilePath, tail.subarray(Math.max(0, tail.length - 800_000)));
+    }
+    appendFileSync(logFilePath, `${stamp()} [${level}] ${msg.replace(/\r?\n/g, " ")}\n`, "utf8");
+  } catch {
+    /* 写文件失败不影响控制台 */
+  }
+}
+
 function line(level: LogLevel, color: string, msg: string, ...extra: unknown[]): void {
   push(level, msg);
+  appendLogFile(level, msg);
   const head = `${c.gray}${stamp()}${c.reset} ${color}${c.bold}${level.padEnd(5)}${c.reset}`;
   if (extra.length) console.log(`${head} ${msg}`, ...extra);
   else console.log(`${head} ${msg}`);

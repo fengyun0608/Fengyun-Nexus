@@ -7,7 +7,8 @@ description: 主人能力模式：查状态、日志、搜网页、本机信息�
 
 查询：
 - `nexus_status` / `nexus_list_plugins` / `nexus_whoami`
-- `nexus_logs` 查框架最近日志；报错传 `levels=ERROR,WARN`。不要说没有工具，也不要翻 agent-workspace
+- 查日志文件、看服务器：`nexus_shell` 跑系统命令（Windows PowerShell / Linux bash）。日志在 `data/logs/gateway.log`。这不是框架 `#` 指令。整台机器都可以操作
+- `nexus_logs` 只是内存环快捷方式，查文件仍用 `nexus_shell`
 - `nexus_open_apps` / `nexus_launch_app` / `nexus_host_info` / `nexus_host_uptime`
 - `nexus_web_search` / `nexus_web_read`
 - `nexus_list_workflows` / `nexus_run_workflow`
