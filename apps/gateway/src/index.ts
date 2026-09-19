@@ -1765,7 +1765,15 @@ async function bootstrap(): Promise<void> {
     }
 
     const { thinkingNodes, speak } = splitThinkingAndSpeak(spoken);
-    const parts = speak ? splitAiSegments(speak) : [];
+    // QQ 已有合并转发时，回话只发一条，避免思考一条、回话再拆两条像刷屏
+    const parts =
+      msg.channel === "onebot11" && thinkingNodes.length
+        ? speak
+          ? [speak.replace(/\n{3,}/g, "\n\n").trim()].filter(Boolean)
+          : []
+        : speak
+          ? splitAiSegments(speak)
+          : [];
     const extra = capSink.map((x) => x.trim()).filter(Boolean);
     let thinkingForwarded = false;
 
@@ -1783,7 +1791,14 @@ async function bootstrap(): Promise<void> {
       }
     }
     if (thinkingNodes.length && !thinkingForwarded) {
+      // 失败时也只附一条，不跟回话拆成两条刷
       parts.unshift(`思考：\n${thinkingNodes.join("\n\n")}`);
+      if (parts.length > 2) {
+        const head = parts.shift()!;
+        const rest = parts.join("\n\n");
+        parts.length = 0;
+        parts.push(head, rest);
+      }
     }
 
     const all = [...parts, ...extra].filter((x) => x && !isJunkAiText(x));

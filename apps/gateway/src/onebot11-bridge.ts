@@ -724,16 +724,17 @@ export class OneBot11Bridge {
     }
 
     const mid = ev.message_id != null ? String(ev.message_id) : "";
-    if (mid) {
-      if (this.recentMsgIds.has(mid)) {
-        log.debug(`忽略重复消息 id=${mid}`);
-        return 0;
-      }
-      this.recentMsgIds.add(mid);
-      if (this.recentMsgIds.size > 400) {
-        const first = this.recentMsgIds.values().next().value;
-        if (first) this.recentMsgIds.delete(first);
-      }
+    const dedupeKey =
+      mid ||
+      `${ev.message_type || ""}:${ev.group_id || ""}:${ev.user_id || ""}:${String(ev.raw_message || ev.message || "").slice(0, 80)}:${Math.floor(Date.now() / 3000)}`;
+    if (this.recentMsgIds.has(dedupeKey)) {
+      log.debug(`忽略重复消息 id=${dedupeKey.slice(0, 60)}`);
+      return 0;
+    }
+    this.recentMsgIds.add(dedupeKey);
+    if (this.recentMsgIds.size > 400) {
+      const first = this.recentMsgIds.values().next().value;
+      if (first) this.recentMsgIds.delete(first);
     }
 
     let msg = this.channel.normalizeInbound(ev);

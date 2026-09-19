@@ -16,9 +16,20 @@ export function isJunkAiText(text: string): boolean {
 /** 模型偶发写进正文的「怎么回」提纲，不是给人看的话。 */
 function isMetaPlanning(para: string): boolean {
   const t = String(para || "").trim();
-  if (!t || t.length > 120) return false;
+  if (!t || t.length > 160) return false;
   if (/^思考[：:]/.test(t)) return true;
   return /^(用.+?(语气|口吻)|不需要调用工具|不要调用工具|只用人话|简短自然|一两句即可|无需工具|不调用工具)/.test(
+    t,
+  );
+}
+
+/** 大段内心独白：应进合并转发，不要当普通气泡。 */
+function looksLikeThinking(para: string): boolean {
+  const t = String(para || "").trim();
+  if (!t) return false;
+  if (isMetaPlanning(t)) return true;
+  if (t.length < 36) return false;
+  return /系统设定|系统说|根据系统|所以我要|身份上要|可以融合|不需要调用工具|当前通道的人设|问[「"]你是谁/.test(
     t,
   );
 }
@@ -76,7 +87,19 @@ export function splitThinkingAndSpeak(text: string): {
     }
   }
 
-  const speak = stripMetaPlanning(body);
+  const speakParas = String(body || "")
+    .split(/\n{2,}/)
+    .map((s) => s.trim())
+    .filter((s) => s && !isJunkAiText(s));
+  const kept: string[] = [];
+  for (const p of speakParas) {
+    if (looksLikeThinking(p) || isMetaPlanning(p)) {
+      thinking = [thinking, p].filter(Boolean).join("\n\n").trim();
+      continue;
+    }
+    kept.push(p);
+  }
+  const speak = kept.join("\n\n").trim();
   const thinkingNodes = packForwardNodes(thinking);
   return { thinkingNodes, speak };
 }

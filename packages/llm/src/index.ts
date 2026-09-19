@@ -54,8 +54,34 @@ export function stripThinking(text: string): string {
 }
 
 function composeSpeak(reasoning: string, content: string): string {
-  const body = stripToolMarkup(revealThinking(content));
-  const think = String(reasoning || "").trim();
+  const fromTags: string[] = [];
+  let body = String(content || "")
+    .replace(/<think>([\s\S]*?)<\/think>/gi, (_, inner: string) => {
+      const t = String(inner || "").trim();
+      if (t) fromTags.push(t);
+      return "\n";
+    })
+    .replace(/<thinking>([\s\S]*?)<\/thinking>/gi, (_, inner: string) => {
+      const t = String(inner || "").trim();
+      if (t) fromTags.push(t);
+      return "\n";
+    })
+    .replace(/<\/?think(?:ing)?>/gi, "");
+  body = stripToolMarkup(body);
+  const think = [String(reasoning || "").trim(), ...fromTags].filter(Boolean).join("\n\n").trim();
+  if (think && body) {
+    // 正文若又抄了一遍思考，去掉开头重复，避免转发后再冒一条同样的
+    const head = think.slice(0, Math.min(24, think.length));
+    if (head && body.replace(/\s/g, "").includes(think.replace(/\s/g, "").slice(0, 40))) {
+      const paras = body.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
+      const cleaned = paras.filter((p) => {
+        const compact = p.replace(/\s/g, "");
+        const thinkCompact = think.replace(/\s/g, "");
+        return !thinkCompact.includes(compact.slice(0, 30)) && !compact.includes(thinkCompact.slice(0, 30));
+      });
+      body = cleaned.join("\n\n").trim();
+    }
+  }
   if (think && body) return `思考：\n${think}\n\n${body}`;
   if (think) return `思考：\n${think}`;
   return body;
