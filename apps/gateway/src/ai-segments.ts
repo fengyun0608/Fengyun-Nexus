@@ -1,10 +1,9 @@
 /**
- * AI 回复：思考走合并转发；正文按空行分段，最多两条，避免刷屏。
- * 不按句号拆。单段特别长再切。
+ * AI 回复：思考走合并转发；正文按空行/分类拆成多条短气泡。
  */
 
-const HARD_MAX = 900;
-const MAX_PARTS = 2;
+const HARD_MAX = 420;
+const MAX_PARTS = 5;
 
 /** 单独发出毫无意义的符号（模型偶发、或截断残留） */
 const JUNK_ONLY = /^[\s丨|｜\-—_~～·.•…。、，,!！?？\u200b\u200c\u200d\ufeff]+$/u;
@@ -217,20 +216,63 @@ export function splitAiSegments(text: string): string[] {
   if (!raw) return [];
   if (isJunkAiText(raw)) return [];
 
-  const paras = raw
+  let paras = raw
     .split(/\n{2,}/)
     .map((s) => s.trim())
     .filter((s) => s && !isJunkAiText(s));
 
-  if (!paras.length) return [];
+  // 一大整块时，按「xx类」等小标题再拆，方便多段短气泡
+  if (paras.length === 1) {
+    paras = explodeBySections(paras[0]!);
+  } else {
+    paras = paras.flatMap((p) => (p.length > HARD_MAX || /^.+类/m.test(p) ? explodeBySections(p) : [p]));
+  }
 
   const parts: string[] = [];
   for (const p of paras) {
+    if (!p || isJunkAiText(p)) continue;
     if (p.length <= HARD_MAX) parts.push(p);
     else parts.push(...cutHard(p));
   }
 
   return capParts(parts, MAX_PARTS);
+}
+
+/** 按分类小标题拆开一整段列表回复。 */
+function explodeBySections(block: string): string[] {
+  const lines = String(block || "").split(/\n/);
+  if (lines.length < 2) return [block.trim()].filter(Boolean);
+
+  const isHead = (line: string) => {
+    const t = line.trim();
+    if (!t || t.length > 80) return false;
+    if (/^.+类[：:]/.test(t)) return true;
+    if (/^.+类[：:]?\s*$/.test(t)) return true;
+    if (/^[【\[]?.{1,12}[】\]]?[：:]\s*$/.test(t)) return true;
+    if (/^[一二三四五六七八九十\d]+[、.．]/.test(t)) return true;
+    if (/^\*\*[^*]{1,20}\*\*/.test(t)) return true;
+    return false;
+  };
+
+  const chunks: string[] = [];
+  let buf: string[] = [];
+  for (const line of lines) {
+    if (isHead(line) && buf.some((x) => x.trim())) {
+      chunks.push(buf.join("\n").trim());
+      buf = [line];
+    } else {
+      buf.push(line);
+    }
+  }
+  if (buf.some((x) => x.trim())) chunks.push(buf.join("\n").trim());
+
+  if (chunks.length >= 2) return chunks;
+
+  // 仍是一块：开场句单独一条，后面再切
+  const m = block.match(/^([\s\S]{8,80}?[。！？~～])\s*\n([\s\S]+)$/);
+  if (m) return [m[1]!.trim(), ...explodeBySections(m[2]!.trim())].filter(Boolean);
+
+  return [block.trim()].filter(Boolean);
 }
 
 function cutHard(s: string): string[] {
