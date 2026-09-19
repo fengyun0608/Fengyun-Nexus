@@ -66,7 +66,7 @@ import {
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
 import { applyFullUpdate } from "./full-update.js";
 import { ensureGatewayPortOpen } from "./open-port.js";
-import { buildRestartOkLines, buildRestartOkPanelHtml, buildStatusLines, buildStatusPanelHtml, probePublicReach, type StatusShotInput } from "./status-shot.js";
+import { buildStatusLines, buildStatusPanelHtml, probePublicReach, type StatusShotInput } from "./status-shot.js";
 import { addOnlineTotal, collectStatusAccounts, ONLINE_KV, readOnlineTotals } from "./status-accounts.js";
 import { execFileSync } from "node:child_process";
 import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
@@ -91,8 +91,6 @@ import {
   scaffoldWorkflowGuide,
   toWorkflowDef,
 } from "./workflow-files.js";
-import { pathToFileURL } from "node:url";
-import { renderHtmlShot } from "./menu-shot.js";
 import { makePluginCtx, setPluginRuntime, setPluginChannelBag, setPluginOneBot } from "./plugin-ctx.js";
 import { splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
@@ -2725,7 +2723,7 @@ async function bootstrap(): Promise<void> {
       }
     }
     void printBootSuccess();
-    void deliverRestartSuccessNotice();
+    dropStaleRestartNotice();
 
     // 后端终端输入（跑代码的那个窗口），不是网页
     startTerminalRepl({
@@ -2748,104 +2746,11 @@ async function bootstrap(): Promise<void> {
     });
   });
 
-  async function deliverRestartSuccessNotice(): Promise<void> {
-    const pending = peekRestartNotify(ROOT);
-    if (!pending) return;
-
-    const loaded = plugins
-      .listConsole()
-      .filter((p) => p.enabled !== false)
-      .map((p) => ({ id: p.id, name: p.name, version: p.version }));
-    const lines = buildRestartOkLines(loaded, {
-      previousUptime: pending.previousUptime,
-      version: readLocalVersion(ROOT),
-      commit: shortCommit() || undefined,
-      updateSummary: pending.updateSummary,
-    });
-    const text = lines.join("\n");
-
-    let sendPayload = text;
-    try {
-      const html = buildRestartOkPanelHtml(loaded, {
-        previousUptime: pending.previousUptime,
-        version: readLocalVersion(ROOT),
-        commit: shortCommit() || undefined,
-        updateSummary: pending.updateSummary,
-      });
-      const shot = await renderHtmlShot({
-        html,
-        selector: "#panel",
-        width: 820,
-        height: 1400,
-      });
-      if (shot.ok) {
-        sendPayload = `[CQ:image,file=${pathToFileURL(shot.pngPath).href}]`;
-      }
-    } catch (e) {
-      log.warn(`重启报告出图失败：${e instanceof Error ? e.message : String(e)}`);
-    }
-
-    db.insertMessage({
-      id: newId("msg"),
-      channel: pending.channel,
-      chatId: pending.chatId,
-      userId: "nexus",
-      role: "assistant",
-      content: text,
-      createdAt: nowIso(),
-    });
-
-    if (pending.channel === "onebot11") {
-      const gid =
-        pending.groupId ||
-        (pending.chatId.startsWith("group:") ? pending.chatId.slice(6) : undefined);
-      const mt = pending.messageType || (gid ? "group" : "private");
-      const ctx = {
-        id: newId("msg"),
-        channel: "onebot11" as const,
-        chatId: gid ? `group:${gid}` : pending.chatId,
-        userId: pending.userId,
-        type: "text" as const,
-        content: sendPayload,
-        meta: {
-          messageType: mt,
-          groupId: gid,
-        },
-        createdAt: nowIso(),
-      };
-      let useImage = sendPayload !== text;
-      for (let i = 0; i < 45; i++) {
-        if (!onebot.status().connected) {
-          await new Promise((r) => setTimeout(r, 1000));
-          continue;
-        }
-        const payload = useImage ? sendPayload : text;
-        let ok = await onebot.sendText(payload, { ...ctx, content: payload });
-        if (!ok && gid) {
-          ok = await onebot.sendTextToGroup(gid, payload);
-        }
-        if (ok) {
-          log.ok(
-            `重启成功已发回原${mt === "group" ? `群 ${gid}` : "会话"}`,
-          );
-          clearRestartNotify(ROOT);
-          return;
-        }
-        if (useImage) {
-          log.warn("重启报告的图发不出去，改发文字");
-          useImage = false;
-          continue;
-        }
-        log.warn("已连接但发送失败，不再反复重试");
-        clearRestartNotify(ROOT);
-        return;
-      }
-      log.warn("重启成功通知未发出：OneBot 未连接，保留待发记录");
-      return;
-    }
-
+  /** 启动不再补发「重启完成」和回执图。上次没发完的记录直接丢掉。 */
+  function dropStaleRestartNotice(): void {
+    if (!peekRestartNotify(ROOT)) return;
     clearRestartNotify(ROOT);
-    log.ok("重启成功通知已写入消息流");
+    log.info("启动不再补发重启完成，已清掉上次留下的回执");
   }
 
   server.on("error", (err) => {

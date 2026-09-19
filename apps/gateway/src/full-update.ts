@@ -142,7 +142,6 @@ export function applyFullUpdate(
       [
         "下一步",
         "即将重启以加载新版本",
-        "重启成功后会再发一份加载报告",
       ].join("\n"),
     );
   } else {
