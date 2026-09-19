@@ -17,7 +17,7 @@
 | `plugins/z-like` | `#点赞菜单` `#赞我` | 点赞；触发词可不用 # |
 | `plugins/z-group-admin` | `#群管` `#群管菜单` | 踢 / 禁言 / 公告 / 文件 |
 | `plugins/z-group-notice` | `#进退群菜单` | 进退群通知 |
-| `plugins/z-master` | `#主人菜单` | 核心 / 新 / 普通主人 |
+| `plugins/z-master` | `#主人菜单` 说明 · `#主人列表` 只读 | 增减主人只在网页控制台通道设置 |
 
 ## 组合
 

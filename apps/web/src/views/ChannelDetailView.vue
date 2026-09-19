@@ -493,15 +493,15 @@ watch(showOnebot, (open) => {
       <label class="field">显示名 <n-input v-model:value="label" /></label>
       <label class="field">
         核心主人 QQ
-        <n-input v-model:value="coreMasters" placeholder="逗号分隔；控制台也可设" />
+        <n-input v-model:value="coreMasters" placeholder="逗号分隔；仅控制台可改" />
       </label>
       <label class="field">
         新主人 QQ
-        <n-input v-model:value="newMasters" placeholder="可加普通/新主人；删不了核心" />
+        <n-input v-model:value="newMasters" placeholder="逗号分隔；仅控制台可改" />
       </label>
       <label class="field">
         普通主人 QQ
-        <n-input v-model:value="normalMasters" placeholder="可加/删普通主人" />
+        <n-input v-model:value="normalMasters" placeholder="逗号分隔；仅控制台可改" />
       </label>
       <label class="field row-switch">仅主人可用管理指令 <n-switch v-model:value="onlyMasters" /></label>
       <label class="field">

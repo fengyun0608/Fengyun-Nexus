@@ -1,11 +1,11 @@
 {
   "id": "z.master",
   "name": "主人管理",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "main": "index.ts",
   "priority": 800,
   "hooks": ["onMessage", "onReady"],
-  "permissions": ["channel.send", "channel.master"],
+  "permissions": ["channel.send"],
   "category": "basic",
   "kind": "channel",
   "adapterScope": "channel",

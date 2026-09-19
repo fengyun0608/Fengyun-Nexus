@@ -203,7 +203,7 @@ export interface PluginContext {
       apiBase: string;
     }>;
   };
-  /** 主人管理（通道级） */
+  /** 主人查询（通道级）。增减只能在网页控制台通道设置里改。 */
   masters?: {
     list: (channelId?: string) => {
       core: string[];
@@ -211,20 +211,6 @@ export interface PluginContext {
       normal: string[];
       all: string[];
     };
-    /** 尚无主人时认主成为核心 */
-    claim: (opts?: { channelId?: string; actorId?: string }) => {
-      ok: boolean;
-      error?: string;
-    };
-    add: (
-      targetId: string,
-      level: MasterLevel,
-      opts?: { channelId?: string; actorId?: string },
-    ) => { ok: boolean; error?: string };
-    remove: (
-      targetId: string,
-      opts?: { channelId?: string; actorId?: string },
-    ) => { ok: boolean; error?: string };
   };
 }
 

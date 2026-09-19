@@ -175,13 +175,13 @@ const LEVEL_RANK: Record<MasterLevel, number> = {
 
 export type MasterMutateResult = { ok: true; settings: ChannelSettings } | { ok: false; error: string };
 
-/** 通道尚无主人时，第一个人可用 #认主 成为核心主人 */
+/** 通道尚无主人时，设第一位核心主人（仅供控制台侧逻辑复用，群指令不可用） */
 export function claimFirstMaster(
   settings: ChannelSettings,
   userId: string,
 ): MasterMutateResult {
   if (settings.masters.length || settings.coreMasters.length) {
-    return { ok: false, error: "已有主人，请用 #添加主人" };
+    return { ok: false, error: "已有主人，请在控制台通道设置里改" };
   }
   const target = String(userId).trim();
   if (!target) return { ok: false, error: "无法识别你的账号" };
