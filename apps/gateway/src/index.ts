@@ -26,7 +26,7 @@ import {
   type RegistryConfig,
 } from "@fengyun/nexus-shared";
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
-import { bootGroup, printBootBanner, printBootSuccess } from "./boot-banner.js";
+import { bootGroup, bootLine, printBootBanner, printBootSuccess, quietNodeSqliteWarning } from "./boot-banner.js";
 import { checkPluginUpdates, applyPluginUpdates, ensurePluginSdkLinks } from "./registry-check.js";
 import {
   getChannelSettings,
@@ -398,6 +398,7 @@ function frameworkSystemPrompt(): string {
 
 async function bootstrap(): Promise<void> {
   const startedAt = Date.now();
+  quietNodeSqliteWarning();
   printBootBanner();
   loadDotEnv();
 
@@ -406,23 +407,26 @@ async function bootstrap(): Promise<void> {
   let adminCfg = loadAdmin();
   adminCfg.sessionHours = adminCfg.sessionHours || 12;
   const registry = loadRegistry();
-  bootGroup("环境");
-  log.ok(profile.label || profile.id);
+  await bootGroup("环境");
+  await bootLine("开始确认运行环境");
+  await bootLine(`环境已就绪：${profile.label || profile.id}`);
 
   function currentPassword(): string {
     return process.env[adminCfg.passwordEnv] || adminCfg.defaultPassword;
   }
 
-  bootGroup("数据库");
+  await bootGroup("数据库");
+  await bootLine("开始打开数据库");
   let dbCfg = loadDbConfig(ROOT);
   const dbOpen = resolveDbOpenOpts(ROOT, dbCfg);
   let db = new NexusDatabase({ driver: dbOpen.driver, filePath: dbOpen.filePath });
   await db.open();
-  log.ok(dbOpen.driver);
+  await bootLine(`数据库已打开：${dbOpen.driver}`);
   const sessions = new SessionManager();
   const router = new MessageRouter();
 
-  bootGroup("通道");
+  await bootGroup("通道");
+  await bootLine("开始挂载消息通道");
   const channels = new ChannelRegistry();
   channels.register(new WebChannel());
   channels.register(new WebhookChannel());
@@ -460,11 +464,11 @@ async function bootstrap(): Promise<void> {
     }
   }
   channels.register(onebot.channel);
-  log.ok(
-    channels
+  await bootLine(
+    `通道已挂载：${channels
       .list()
-      .map((c) => c.id)
-      .join("、"),
+      .map((c) => c.label || c.id)
+      .join("、")}`,
   );
 
   setNapCatWireProvider(() => {
@@ -512,22 +516,24 @@ async function bootstrap(): Promise<void> {
     log.ok(`已写入 ${label} 的 QQ ${sid}`);
   });
 
-  bootGroup("AI");
+  await bootGroup("AI");
+  await bootLine("开始接通模型");
   let llmStore = loadProvidersFile(ROOT);
   const llm = new LlmRouter();
   applyProviderToLlm(llm, activeProvider(llmStore));
   const ap = activeProvider(llmStore);
-  log.ok(
+  await bootLine(
     ap?.apiKey || process.env.NEXUS_LLM_API_KEY
-      ? `${ap?.name ?? ap?.id}  ${ap?.model || "default"}`
-      : "未配置密钥",
+      ? `AI 已接通：${ap?.name ?? ap?.id} · ${ap?.model || "default"}`
+      : "AI 未配置密钥",
   );
 
   const plugins = new PluginHost();
-  bootGroup("插件");
+  await bootGroup("插件");
+  await bootLine("开始加载插件");
   try {
     const linked = ensurePluginSdkLinks(ROOT);
-    if (linked.length) log.ok(`SDK ${linked.join("、")}`);
+    if (linked.length) await bootLine(`插件 SDK 已接上：${linked.join("、")}`);
   } catch {
     /* ignore */
   }
@@ -546,7 +552,7 @@ async function bootstrap(): Promise<void> {
           dirs: missing,
         });
         if (pulled.applied.length) {
-          log.ok(pulled.applied.join("、"));
+          await bootLine(`已补装系统插件：${pulled.applied.join("、")}`);
           ensurePluginSdkLinks(ROOT, pulled.applied);
         }
       }
@@ -571,7 +577,7 @@ async function bootstrap(): Promise<void> {
       enabled,
       loadedAt: nowIso(),
     });
-    if (enabled) log.ok(p.manifest.name || p.manifest.id);
+    if (enabled) await bootLine(`已加载：${p.manifest.name || p.manifest.id}`);
   }
 
   const quietBoot = {
@@ -630,7 +636,8 @@ async function bootstrap(): Promise<void> {
     save: () => saveChannelsConfig(ROOT, channelCfg),
   });
   const appliedCfg = await applyStoredPluginConfigs(ROOT, plugins.values());
-  if (appliedCfg) log.ok(`配置 ${appliedCfg}`);
+  if (appliedCfg) await bootLine(`插件配置已读入：${appliedCfg} 份`);
+  if (!hotOff) await bootLine("插件热更新已打开");
   watchPluginConfigFile(ROOT, () => {
     void applyStoredPluginConfigs(ROOT, plugins.values()).then((n) => {
       if (n) log.info(`配置 ${n}`);
@@ -642,12 +649,13 @@ async function bootstrap(): Promise<void> {
       log.plugin(id, m);
     }),
   );
-  log.ok(`${plugins.list().length} 个`);
+  await bootLine(`插件加载完成：共 ${plugins.list().length} 个`);
 
   /** Soft power-off: ignore normal chat until #开机. #重启 calls system restart executable. */
   let powerOff = false;
 
-  bootGroup("工作流");
+  await bootGroup("工作流");
+  await bootLine("开始装载工作流");
   const workflows = new WorkflowRunner();
   workflows.register({
     id: "starter",
@@ -664,7 +672,7 @@ async function bootstrap(): Promise<void> {
   for (const w of listLocalWorkflows(ROOT)) {
     workflows.register(toWorkflowDef(w));
   }
-  log.ok(`${workflows.list().length} 个`);
+  await bootLine(`工作流已就绪：${workflows.list().length} 个`);
 
   const mcp = new McpHost();
   mcp.register({
@@ -2679,14 +2687,15 @@ async function bootstrap(): Promise<void> {
   const urls = consoleUrls(port, host);
   const publicIp = host === "0.0.0.0" || host === "::" ? await lookupPublicIpv4() : "";
   if (publicIp) urls.unshift(`http://${publicIp}:${port}/`);
-  const server = app.listen(port, host, () => {
+  const server = app.listen(port, host, async () => {
     onebot.attach(server);
-    bootGroup("网关");
-    log.ok(`${host}:${port}`);
+    await bootGroup("网关");
+    await bootLine("开始启动网关");
+    await bootLine(`网关已监听：${host}:${port}`);
     const primary = urls.find((u) => !u.includes("127.0.0.1"));
     const local = urls.find((u) => u.includes("127.0.0.1"));
-    if (primary) log.ok(primary);
-    if (local && local !== primary) log.ok(local);
+    if (primary) await bootLine(`控制台已打开：${primary}`);
+    if (local && local !== primary) await bootLine(`本机控制台：${local}`);
     if (onebot.getConfig().enabled) {
       const cfg = onebot.getConfig();
       const wsPath = cfg.reverseWsPath || "/onebot/v11/ws";
@@ -2697,7 +2706,8 @@ async function bootstrap(): Promise<void> {
         const p = Math.floor(Number(b.listenPort) || 0);
         if (p > 0 && p < 65536) ports.add(p);
       }
-      bootGroup("OneBot");
+      await bootGroup("OneBot");
+      await bootLine("开始准备反向连接");
       for (const p of ports) {
         const names = (cfg.bots || [])
           .filter((b) => {
@@ -2707,7 +2717,7 @@ async function bootstrap(): Promise<void> {
           .map((b) => b.label || b.selfId || "")
           .filter(Boolean);
         const tag = names.length ? names.join("、") : p === port ? "网关" : "独立端口";
-        log.ok(`${tag}  ws://${show}:${p}${wsPath}`);
+        await bootLine(`反向地址已列出：${tag}  ws://${show}:${p}${wsPath}`);
       }
     }
     void printBootSuccess();

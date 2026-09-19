@@ -364,7 +364,7 @@ export class OneBot11Bridge {
         this.extra.delete(port);
       });
       server.listen(port, "0.0.0.0", () => {
-        log.ok(`反向端口已打开 ${port}  ws://0.0.0.0:${port}${path}`);
+        /* 地址在启动收尾的 OneBot 一段里写，避免插在别的模块中间 */
       });
       this.extra.set(port, { server, wss });
     }

@@ -15,8 +15,29 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** 启动时按模块分一块。一块结束再写下一块。 */
-export function bootGroup(name: string): void {
+export async function bootGroup(name: string): Promise<void> {
+  console.log("");
   log.info(`[${name}]`);
+  await bootPace();
+}
+
+/** 启动过程里的一行。带短停顿，让日志往下走，而不是一坨砸出来。 */
+export async function bootLine(msg: string): Promise<void> {
+  log.ok(msg);
+  await bootPace();
+}
+
+async function bootPace(): Promise<void> {
+  if (process.env.NEXUS_BOOT_FAST === "1") return;
+  await sleep(80);
+}
+
+/** node:sqlite 的实验警告会插进启动日志中间，这里收掉。 */
+export function quietNodeSqliteWarning(): void {
+  process.on("warning", (w) => {
+    if (w.name === "ExperimentalWarning" && /SQLite/i.test(w.message)) return;
+    console.warn(w.stack || `${w.name}: ${w.message}`);
+  });
 }
 
 /** 旧闪屏步进。新启动不再逐行停顿。 */
