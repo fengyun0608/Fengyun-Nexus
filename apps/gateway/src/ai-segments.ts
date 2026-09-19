@@ -23,15 +23,34 @@ function isMetaPlanning(para: string): boolean {
   );
 }
 
-/** 大段内心独白：应进合并转发，不要当普通气泡。 */
+/** 大段内心独白 / 翻文档过程：应进合并转发，不要当普通气泡。 */
 function looksLikeThinking(para: string): boolean {
   const t = String(para || "").trim();
   if (!t) return false;
   if (isMetaPlanning(t)) return true;
+  if (
+    /我先看|让我|接下来|文档找到了|已经掌握|先列出|我来看|我去看|看一下|读一下|检查一下|再看|继续看|先读|工具结果|技能里|framework-helper|agent-code/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
   if (t.length < 36) return false;
-  return /系统设定|系统说|根据系统|所以我要|身份上要|可以融合|不需要调用工具|当前通道的人设|问[「"]你是谁/.test(
+  return /系统设定|系统说|根据系统|所以我要|身份上要|可以融合|不需要调用工具|当前通道的人设|问[「"]你是谁|用户想查看|我想确认/.test(
     t,
   );
+}
+
+/** 真正给人看的收尾回话（不是翻文件过程）。 */
+function looksLikeFinalSpeak(para: string): boolean {
+  const t = String(para || "").trim();
+  if (!t) return false;
+  if (/^(让我|我先|接下来|文档找到|已经掌握|先列出)/.test(t)) return false;
+  if (/^(喵|主人|好的|好啦|好了|简单说|文档在|插件写法|可以这样写)/.test(t)) return true;
+  if (/docs\/[^\s]+|plugins\/templates|nexus\.plugin\.json/.test(t) && !/让我|我先看|再看/.test(t)) {
+    return true;
+  }
+  return false;
 }
 
 export function stripMetaPlanning(text: string): string {
@@ -74,17 +93,9 @@ export function splitThinkingAndSpeak(text: string): {
   let thinking = tagThink.join("\n\n").trim();
   let body = raw;
 
+  // 「思考：」只是标记，后面整段按空行分类；不要只截第一段，否则多段过程会漏进普通气泡
   if (/^思考[：:]/.test(body)) {
-    const rest = body.replace(/^思考[：:]\s*/, "");
-    const sep = rest.search(/\n\n+/);
-    if (sep >= 0) {
-      const head = rest.slice(0, sep).trim();
-      body = rest.slice(sep).replace(/^\n+/, "").trim();
-      thinking = [thinking, head].filter(Boolean).join("\n\n").trim();
-    } else {
-      // 没有空行时不当成整段思考，避免把回话吞掉
-      body = rest;
-    }
+    body = body.replace(/^思考[：:]\s*/, "").trim();
   }
 
   const speakParas = String(body || "")
@@ -97,7 +108,23 @@ export function splitThinkingAndSpeak(text: string): {
       thinking = [thinking, p].filter(Boolean).join("\n\n").trim();
       continue;
     }
+    if (looksLikeFinalSpeak(p)) {
+      kept.push(p);
+      continue;
+    }
+    // 还没出现过收尾回话时，默认当过程，进多段转发
+    if (!kept.length) {
+      thinking = [thinking, p].filter(Boolean).join("\n\n").trim();
+      continue;
+    }
     kept.push(p);
+  }
+  if (
+    kept.length &&
+    kept.every((p) => looksLikeThinking(p) || /让我|我先|接下来|看一下|读一下/.test(p))
+  ) {
+    thinking = [thinking, ...kept].filter(Boolean).join("\n\n").trim();
+    kept.length = 0;
   }
   const speak = kept.join("\n\n").trim();
   const thinkingNodes = packForwardNodes(thinking);
