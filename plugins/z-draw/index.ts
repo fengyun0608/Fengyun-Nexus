@@ -54,9 +54,7 @@ export class ZDrawPlugin extends Plugin {
     };
   }
 
-  async onReady(ctx: PluginContext) {
-    ctx.log("生图插件就绪：系统截图");
-  }
+  async onReady(_ctx: PluginContext) {}
 
   async draw(e: NexusEvent, ctx: PluginContext) {
     if (this.cfg.enabled === false) return;

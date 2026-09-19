@@ -50,9 +50,7 @@ export class ZEchoPlugin extends Plugin {
     };
   }
 
-  async onReady(ctx: PluginContext) {
-    ctx.log("Z Echo ready");
-  }
+  async onReady(_ctx: PluginContext) {}
 
   async echo(e: NexusEvent) {
     if (this.cfg.enabled === false) return;

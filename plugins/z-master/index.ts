@@ -52,9 +52,7 @@ export class ZMasterPlugin extends Plugin {
     },
   ];
 
-  async onReady(ctx: PluginContext) {
-    ctx.log("主人管理插件就绪");
-  }
+  async onReady(_ctx: PluginContext) {}
 
   async listMasters(e: NexusEvent, ctx: PluginContext) {
     const list = ctx.masters?.list(e.channel);

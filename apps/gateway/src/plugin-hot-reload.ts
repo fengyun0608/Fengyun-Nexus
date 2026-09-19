@@ -74,7 +74,10 @@ export async function reloadPlugins(deps: PluginReloadDeps): Promise<{
       if (applied) log.info(`插件配置已套用 ${applied} 项`);
     }
 
-    await host.emitReady((id) => makePluginCtx(id, (m) => log.info(`[${id}] ${m}`)));
+    await host.emitReady(
+      (id) => makePluginCtx(id, (m) => log.info(`[${id}] ${m}`)),
+      (line) => log.info(line),
+    );
 
     if (deps.remountChannels) {
       await deps.remountChannels();

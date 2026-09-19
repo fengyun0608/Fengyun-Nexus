@@ -643,11 +643,12 @@ async function bootstrap(): Promise<void> {
       if (n) log.info(`配置 ${n}`);
     });
   });
-  await plugins.emitReady((id) =>
-    makePluginCtx(id, (m) => {
-      if (/就绪|ready/i.test(m)) return;
-      log.plugin(id, m);
-    }),
+  await plugins.emitReady(
+    (id) =>
+      makePluginCtx(id, (m) => {
+        log.ok(m);
+      }),
+    (line) => log.ok(line),
   );
   await bootLine(`插件加载完成：共 ${plugins.list().length} 个`);
 

@@ -139,9 +139,7 @@ export class ZGroupAdminPlugin extends Plugin {
     };
   }
 
-  async onReady(ctx: PluginContext) {
-    ctx.log("群管插件就绪");
-  }
+  async onReady(_ctx: PluginContext) {}
 
   async onNotice(ev: Record<string, unknown>, ctx: PluginContext): Promise<string[] | void> {
     if (!this.cfg.teaseMasters) return;

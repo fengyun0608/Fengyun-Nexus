@@ -333,7 +333,8 @@ export class ${className} extends Plugin {
   ];
 
   async onReady(ctx: PluginContext) {
-    ctx.log(${JSON.stringify(`${name} 就绪`)});
+    // 自定义加载文案：ctx.log 多行，或 return ["行1","行2"]；框架「已加载」文案不变
+    ctx.log(${JSON.stringify(`${name} 已装上`)});
   }
 
   async hello(e: NexusEvent) {

@@ -22,9 +22,7 @@ export class ZOnebotHiPlugin extends Plugin {
     },
   ];
 
-  async onReady(ctx: PluginContext) {
-    ctx.log("QQ 通道插件就绪");
-  }
+  async onReady(_ctx: PluginContext) {}
 
   async hi(e: NexusEvent) {
     if (e.channel !== "onebot11") return;

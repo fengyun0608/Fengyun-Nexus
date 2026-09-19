@@ -239,7 +239,14 @@ export interface NexusPlugin {
   configSchema?: PluginConfigField[];
   getConfig?(): Record<string, unknown> | Promise<Record<string, unknown>>;
   setConfig?(cfg: Record<string, unknown>): void | Promise<void>;
-  onReady?(ctx: PluginContext): Promise<void> | void;
+  /**
+   * 插件加载完成时调用。
+   * 可用 ctx.log 打自定义加载文案，多行、图案都行；也可 return 字符串或字符串数组。
+   * 框架自己的「已加载：xxx」不会被这里改掉。
+   */
+  onReady?(
+    ctx: PluginContext,
+  ): Promise<void | string | string[]> | void | string | string[];
   onMessage?(msg: NexusMessage, ctx: PluginContext): Promise<NexusMessage | null> | NexusMessage | null;
   /** OneBot notice 等非消息事件（如群禁言） */
   onNotice?(ev: Record<string, unknown>, ctx: PluginContext): Promise<string[] | void> | string[] | void;
@@ -253,7 +260,13 @@ export abstract class Plugin implements NexusPlugin {
   priority = 5000;
   configSchema?: PluginConfigField[];
 
-  onReady?(ctx: PluginContext): Promise<void> | void;
+  /**
+   * 插件加载完成时调用。
+   * 可用 ctx.log 打自定义加载文案，多行、图案都行；也可 return 字符串或字符串数组。
+   */
+  onReady?(
+    ctx: PluginContext,
+  ): Promise<void | string | string[]> | void | string | string[];
   onMessage?(msg: NexusMessage, ctx: PluginContext): Promise<NexusMessage | null> | NexusMessage | null;
   onNotice?(ev: Record<string, unknown>, ctx: PluginContext): Promise<string[] | void> | string[] | void;
   getConfig?(): Record<string, unknown> | Promise<Record<string, unknown>>;
@@ -361,10 +374,19 @@ export class PluginHost {
     );
   }
 
-  async emitReady(makeCtx: (id: string) => PluginContext): Promise<void> {
+  async emitReady(
+    makeCtx: (id: string) => PluginContext,
+    print?: (line: string) => void | Promise<void>,
+  ): Promise<void> {
     for (const p of this.values()) {
       if (!this.isEnabled(p.manifest.id)) continue;
-      await p.onReady?.(makeCtx(p.manifest.id));
+      const r = await p.onReady?.(makeCtx(p.manifest.id));
+      const lines = Array.isArray(r) ? r : typeof r === "string" && r.trim() ? [r] : [];
+      for (const line of lines) {
+        const t = String(line ?? "");
+        if (!t) continue;
+        await print?.(t);
+      }
     }
   }
 

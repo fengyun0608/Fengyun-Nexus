@@ -39,9 +39,7 @@ export class ZMenuPlugin extends Plugin {
     { reg: "^#help$", fnc: "menu", describe: "功能菜单" },
   ];
 
-  async onReady(ctx: PluginContext) {
-    ctx.log("菜单插件就绪");
-  }
+  async onReady(_ctx: PluginContext) {}
 
   async menu(e: NexusEvent, ctx: PluginContext) {
     const shot = await ctx.shot.renderMenu({

@@ -25,9 +25,7 @@ export class ZStatusPlugin extends Plugin {
     },
   ];
 
-  async onReady(ctx: PluginContext) {
-    ctx.log("状态插件就绪：面板出图");
-  }
+  async onReady(_ctx: PluginContext) {}
 
   async status(e: NexusEvent, ctx: PluginContext) {
     const html = await ctx.runtime.statusHtml();

@@ -101,9 +101,7 @@ export class ZGroupNoticePlugin extends Plugin {
     };
   }
 
-  async onReady(ctx: PluginContext) {
-    ctx.log("进退群通知就绪");
-  }
+  async onReady(_ctx: PluginContext) {}
 
   async onNotice(ev: Record<string, unknown>): Promise<string[] | void> {
     if (!this.cfg.enabled) return;

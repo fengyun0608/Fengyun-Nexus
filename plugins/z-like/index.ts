@@ -303,9 +303,7 @@ export class ZLikePlugin extends Plugin {
     };
   }
 
-  async onReady(ctx: PluginContext) {
-    ctx.log("点赞插件就绪");
-  }
+  async onReady(_ctx: PluginContext) {}
 
   async accept(e: NexusEvent, ctx: PluginContext): Promise<boolean | void> {
     if (await super.accept(e, ctx)) return true;
