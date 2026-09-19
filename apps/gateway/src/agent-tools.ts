@@ -1,15 +1,28 @@
 /**
- * 给 LLM 用的框架工具：状态 / 插件 / 主人 / 工作流 / MCP。
- * 敏感工具要求主人；公开查询谁都可以。
+ * 给 LLM 用的框架工具：状态 / 插件 / 主人 / 工作流 / MCP / QQ 多媒体 / 沙箱。
+ * 敏感工具要求主人或控制台。
  */
+import { join } from "node:path";
 import type { LlmToolDef } from "@fengyun/nexus-llm";
 import type { McpHost } from "@fengyun/nexus-mcp-host";
 import type { WorkflowRunner } from "@fengyun/nexus-workflow";
 import type { PluginHost } from "@fengyun/nexus-plugin-sdk";
+import type { NexusMessage } from "@fengyun/nexus-shared";
+import { renderHtmlShot, renderMenuShot } from "@fengyun/browser-shot";
 import type { ChannelSettings } from "./channel-settings.js";
 import { isChannelMaster, masterLevelOf } from "./channel-settings.js";
 import { hostInfo, hostUptime, launchDesktopApp, listOpenDesktopApps } from "./desktop-inspect.js";
 import { webRead, webSearch } from "./web-lookup.js";
+import {
+  runSafeCommand,
+  workspaceDelete,
+  workspaceList,
+  workspaceRead,
+  workspaceWrite,
+} from "./agent-workspace.js";
+import { textToSpeechFile } from "./tts-stt.js";
+import type { OneBot11Bridge } from "./onebot11-bridge.js";
+import type { OneBotConfig } from "./onebot11-bridge.js";
 
 export type AgentToolBag = {
   mcp: McpHost;
@@ -20,7 +33,10 @@ export type AgentToolBag = {
   userId: string;
   isMaster: boolean;
   isAdminConsole?: boolean;
-  /** 主人调用群内插件能力时，回复文本会追加发出 */
+  repoRoot: string;
+  /** 当前入站消息上下文，供 QQ 出站 */
+  messageCtx?: NexusMessage;
+  onebot?: OneBot11Bridge;
   capSink?: string[];
   invokeCapability?: (text: string) => Promise<string[]>;
   setPluginEnabled?: (id: string, enabled: boolean) => { ok: boolean; message: string };
@@ -28,7 +44,45 @@ export type AgentToolBag = {
   installPack?: (id: string) => Promise<{ ok: boolean; message: string }>;
   installRuntime?: (runtime: string) => { ok: boolean; message: string };
   listRuntimes?: () => unknown;
+  patchChannelSettings?: (
+    patch: Record<string, unknown>,
+  ) => { ok: boolean; message: string };
+  patchOneBotConfig?: (
+    patch: Record<string, unknown>,
+  ) => { ok: boolean; message: string; config?: OneBotConfig };
+  getOneBotSnapshot?: () => unknown;
 };
+
+const MASTER_TOOLS = new Set([
+  "nexus_run_workflow",
+  "nexus_call_mcp",
+  "nexus_open_apps",
+  "nexus_launch_app",
+  "nexus_host_uptime",
+  "nexus_host_info",
+  "nexus_web_search",
+  "nexus_web_read",
+  "nexus_list_caps",
+  "nexus_call_cap",
+  "nexus_plugin_switch",
+  "nexus_plugin_reload",
+  "nexus_install_pack",
+  "nexus_list_runtimes",
+  "nexus_install_runtime",
+  "nexus_qq_send_image",
+  "nexus_qq_send_file",
+  "nexus_qq_send_voice",
+  "nexus_shot",
+  "nexus_workspace_list",
+  "nexus_workspace_read",
+  "nexus_workspace_write",
+  "nexus_workspace_delete",
+  "nexus_run_safe",
+  "nexus_channel_get",
+  "nexus_channel_patch",
+  "nexus_onebot_get",
+  "nexus_onebot_patch",
+]);
 
 function tool(
   name: string,
@@ -51,8 +105,32 @@ function tool(
   };
 }
 
-export function buildAgentToolDefs(mcp: McpHost): LlmToolDef[] {
-  const defs: LlmToolDef[] = [
+function resolveSendCtx(bag: AgentToolBag, args: Record<string, unknown>): NexusMessage | null {
+  const base = bag.messageCtx;
+  if (!base) return null;
+  const groupId = String(args.group_id || args.groupId || "").trim();
+  const userId = String(args.user_id || args.userId || "").trim();
+  if (groupId) {
+    return {
+      ...base,
+      chatId: `group:${groupId}`,
+      userId: base.userId,
+      meta: { ...base.meta, messageType: "group", groupId },
+    };
+  }
+  if (userId) {
+    return {
+      ...base,
+      chatId: `private:${userId}`,
+      userId,
+      meta: { ...base.meta, messageType: "private", groupId: undefined },
+    };
+  }
+  return base;
+}
+
+export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
+  return [
     tool("nexus_status", "查看 Fengyun Nexus 运行状态摘要", {}),
     tool("nexus_list_plugins", "列出已加载插件 id 与名称", {}),
     tool("nexus_whoami", "查看当前用户是否主人及级别", {}),
@@ -75,82 +153,150 @@ export function buildAgentToolDefs(mcp: McpHost): LlmToolDef[] {
     ),
     tool(
       "nexus_web_search",
-      "搜索公开网页。有人说搜、查一下、网上看看时必须用这个，不要说没有搜索。只传搜索词。",
+      "搜索公开网页。有人说搜、查一下、网上看看时必须用这个。",
       { query: { type: "string", description: "搜索词" } },
       ["query"],
     ),
     tool(
       "nexus_web_read",
-      "读取一个公开网页的标题和正文摘要（主人或控制台）。只传 http 或 https 网址，不读本机和内网。",
+      "读取一个公开网页的标题和正文摘要。只传 http/https。",
       { url: { type: "string", description: "公开网址" } },
       ["url"],
     ),
-    tool(
-      "nexus_host_info",
-      "查看本机系统信息：系统版本、处理器、内存、磁盘，以及开机时长。有人问配置、内存、CPU、磁盘、系统信息时必须用这个，不要说没装这个能力，也不要编数字。",
-      {},
-    ),
-    tool(
-      "nexus_host_uptime",
-      "查看这台电脑自开机起运行了多久。有人问电脑开了多久、运行时长、开机时间时必须用这个。这是整台电脑的时长，不是 Fengyun Nexus 进程时长。不要说没有这个工具，也不要编数字。",
-      {},
-    ),
+    tool("nexus_host_info", "查看本机系统信息：系统、处理器、内存、磁盘、开机时长", {}),
+    tool("nexus_host_uptime", "查看这台电脑开机运行了多久", {}),
     tool(
       "nexus_launch_app",
-      "在本机启动一个已安装的软件（主人或控制台）。有人说打开、启动某个软件时必须用这个，不要说没有启动工具。只传软件名，不要传命令。",
-      { name: { type: "string", description: "软件名，例如 ToDesk、微信" } },
+      "在本机启动已安装软件。只传软件名。",
+      { name: { type: "string", description: "软件名" } },
       ["name"],
     ),
-    tool(
-      "nexus_open_apps",
-      "查看本机当前打开的带窗口软件/应用（主人或控制台）。回答「开了什么软件」时用这个。",
-      {
-        limit: {
-          type: "number",
-          description: "最多返回几条，默认 20，最大 40",
-        },
-      },
-    ),
-    tool("nexus_list_caps", "列出已加载插件的群内能力（指令与说明）。调用前先看这份清单，不要编造没有的能力。", {}),
+    tool("nexus_open_apps", "查看本机当前打开的带窗口软件", {
+      limit: { type: "number", description: "最多条数" },
+    }),
+    tool("nexus_list_caps", "列出已加载插件的群内能力", {}),
     tool(
       "nexus_call_cap",
-      "调用一条群内插件能力。传入要执行的指令文本，例如 #菜单。静妍这类已装进框架的群能力也走这里。",
-      { text: { type: "string", description: "要执行的指令或匹配插件规则的文本" } },
+      "调用一条群内插件能力，例如 #菜单",
+      { text: { type: "string", description: "指令文本" } },
       ["text"],
     ),
     tool(
       "nexus_plugin_switch",
-      "启用或停用一个已加载插件（主人或控制台）",
+      "启用或停用插件",
       {
-        id: { type: "string", description: "插件 id" },
-        enabled: { type: "boolean", description: "true 启用，false 停用" },
+        id: { type: "string" },
+        enabled: { type: "boolean" },
       },
       ["id", "enabled"],
     ),
-    tool("nexus_plugin_reload", "热重载全部插件（主人或控制台）", {}),
+    tool("nexus_plugin_reload", "热重载全部插件", {}),
     tool(
       "nexus_install_pack",
-      "从生态专仓安装一份收录（主人或控制台）。先确认收录 id，再安装。",
-      { id: { type: "string", description: "生态收录 id" } },
+      "从生态专仓安装收录",
+      { id: { type: "string" } },
       ["id"],
     ),
-    tool("nexus_list_runtimes", "查看可安装的运行环境（Go / Python / 浏览器 / NapCat）", {}),
+    tool("nexus_list_runtimes", "查看可安装运行环境", {}),
     tool(
       "nexus_install_runtime",
-      "把 Go、Python、浏览器或 NapCat 加入安装队列并开始安装（主人或控制台）",
-      {
-        runtime: {
-          type: "string",
-          description: "go、python、browser、napcat 四选一",
-        },
-      },
+      "排队安装 go/python/browser/napcat",
+      { runtime: { type: "string" } },
       ["runtime"],
     ),
+    tool(
+      "nexus_qq_send_image",
+      "向当前 QQ 会话发本地图片。path 为本地图片路径。可选 group_id / user_id 改目标。",
+      {
+        path: { type: "string", description: "本地图片路径" },
+        group_id: { type: "string" },
+        user_id: { type: "string" },
+      },
+      ["path"],
+    ),
+    tool(
+      "nexus_qq_send_file",
+      "向当前 QQ 会话发本地文件。",
+      {
+        path: { type: "string" },
+        name: { type: "string", description: "显示文件名" },
+        group_id: { type: "string" },
+        user_id: { type: "string" },
+      },
+      ["path"],
+    ),
+    tool(
+      "nexus_qq_send_voice",
+      "把文字合成语音气泡发到当前 QQ 会话。不要说没有发语音能力。",
+      {
+        text: { type: "string", description: "要朗读的文字" },
+        group_id: { type: "string" },
+        user_id: { type: "string" },
+      },
+      ["text"],
+    ),
+    tool(
+      "nexus_shot",
+      "用系统截图渲一张菜单或简单 HTML 图，并可直接发到当前 QQ 会话。",
+      {
+        title: { type: "string", description: "标题" },
+        lines: { type: "array", items: { type: "string" }, description: "行文案" },
+        html: { type: "string", description: "可选完整 HTML，优先于 title/lines" },
+        send: { type: "boolean", description: "是否发到当前 QQ，默认 true" },
+      },
+    ),
+    tool(
+      "nexus_workspace_list",
+      "列出 data/agent-workspace 沙箱目录",
+      { path: { type: "string", description: "相对路径，默认 ." } },
+    ),
+    tool(
+      "nexus_workspace_read",
+      "读取沙箱内文件",
+      { path: { type: "string" } },
+      ["path"],
+    ),
+    tool(
+      "nexus_workspace_write",
+      "写入沙箱内文件",
+      { path: { type: "string" }, content: { type: "string" } },
+      ["path", "content"],
+    ),
+    tool(
+      "nexus_workspace_delete",
+      "删除沙箱内文件或目录",
+      { path: { type: "string" } },
+      ["path"],
+    ),
+    tool(
+      "nexus_run_safe",
+      "在沙箱里跑白名单命令：node / pnpm / npm / git status|diff|log / tsc。禁止任意 shell。",
+      { command: { type: "string" } },
+      ["command"],
+    ),
+    tool("nexus_channel_get", "查看当前消息通道设置（主人、人设、回复群等）", {}),
+    tool(
+      "nexus_channel_patch",
+      "修改当前通道设置。可改 label、systemPrompt、replyGroupIds、onlyMasters、note。不能改密码。",
+      {
+        label: { type: "string" },
+        systemPrompt: { type: "string" },
+        replyGroupIds: { type: "string", description: "逗号分隔群号" },
+        onlyMasters: { type: "boolean" },
+        note: { type: "string" },
+      },
+    ),
+    tool("nexus_onebot_get", "查看 OneBot 连接摘要（不含密码明文）", {}),
+    tool(
+      "nexus_onebot_patch",
+      "修改 OneBot：enabled、reverseWsPath、httpPath。不改 accessToken 明文。",
+      {
+        enabled: { type: "boolean" },
+        reverseWsPath: { type: "string" },
+        httpPath: { type: "string" },
+      },
+    ),
   ];
-  for (const t of mcp.list()) {
-    if (defs.some((d) => d.function.name === t.name)) continue;
-  }
-  return defs;
 }
 
 export async function runAgentTool(
@@ -158,43 +304,19 @@ export async function runAgentTool(
   args: Record<string, unknown>,
   bag: AgentToolBag,
 ): Promise<unknown> {
-  const needMaster =
-    name === "nexus_run_workflow" ||
-    name === "nexus_call_mcp" ||
-    name === "nexus_open_apps" ||
-    name === "nexus_launch_app" ||
-    name === "nexus_host_uptime" ||
-    name === "nexus_host_info" ||
-    name === "nexus_web_search" ||
-    name === "nexus_web_read" ||
-    name === "nexus_list_caps" ||
-    name === "nexus_call_cap" ||
-    name === "nexus_plugin_switch" ||
-    name === "nexus_plugin_reload" ||
-    name === "nexus_install_pack" ||
-    name === "nexus_list_runtimes" ||
-    name === "nexus_install_runtime";
-  if (needMaster && !bag.isMaster && !bag.isAdminConsole) {
+  if (MASTER_TOOLS.has(name) && !bag.isMaster && !bag.isAdminConsole) {
     return { error: "无权限，需要主人" };
   }
 
-  if (name === "nexus_status") {
-    return { lines: bag.statusLines() };
-  }
-  if (name === "nexus_open_apps") {
-    return listOpenDesktopApps({ limit: Number(args.limit) || 20 });
-  }
+  if (name === "nexus_status") return { lines: bag.statusLines() };
+  if (name === "nexus_open_apps") return listOpenDesktopApps({ limit: Number(args.limit) || 20 });
   if (name === "nexus_launch_app") {
     const appName = String(args.name || "").trim();
     if (!appName) return { error: "缺少软件名" };
     return launchDesktopApp(appName);
   }
-  if (name === "nexus_host_uptime") {
-    return hostUptime();
-  }
-  if (name === "nexus_host_info") {
-    return hostInfo();
-  }
+  if (name === "nexus_host_uptime") return hostUptime();
+  if (name === "nexus_host_info") return hostInfo();
   if (name === "nexus_web_search") {
     const query = String(args.query || args.q || "").trim();
     if (!query) return { error: "缺少搜索词" };
@@ -224,18 +346,14 @@ export async function runAgentTool(
     };
   }
   if (name === "nexus_list_workflows") {
-    return {
-      items: bag.workflows.list().map((w) => ({ id: w.id, name: w.name })),
-    };
+    return { items: bag.workflows.list().map((w) => ({ id: w.id, name: w.name })) };
   }
   if (name === "nexus_run_workflow") {
     const id = String(args.id || "").trim();
     if (!id) return { error: "缺少工作流 id" };
     return bag.workflows.run(id, { ...(args.payload as object), triggeredBy: bag.userId });
   }
-  if (name === "nexus_list_mcp") {
-    return { items: bag.mcp.list() };
-  }
+  if (name === "nexus_list_mcp") return { items: bag.mcp.list() };
   if (name === "nexus_call_mcp") {
     const toolName = String(args.name || "").trim();
     if (!toolName) return { error: "缺少工具名" };
@@ -296,16 +414,115 @@ export async function runAgentTool(
     if (!bag.installPack) return { error: "当前不能安装" };
     return bag.installPack(id);
   }
-  if (name === "nexus_list_runtimes") {
-    return { items: bag.listRuntimes?.() ?? [] };
-  }
+  if (name === "nexus_list_runtimes") return { items: bag.listRuntimes?.() ?? [] };
   if (name === "nexus_install_runtime") {
     const runtime = String(args.runtime || "").trim();
     if (!runtime) return { error: "缺少运行环境" };
     if (!bag.installRuntime) return { error: "当前不能安装" };
     return bag.installRuntime(runtime);
   }
-  /** 直接透传 MCP 同名工具 */
+
+  if (name === "nexus_qq_send_image") {
+    if (!bag.onebot) return { error: "OneBot 未就绪" };
+    const ctx = resolveSendCtx(bag, args);
+    if (!ctx || ctx.channel !== "onebot11") return { error: "当前不在 QQ 会话" };
+    const path = String(args.path || "").trim();
+    if (!path) return { error: "缺少图片路径" };
+    const ok = await bag.onebot.sendImage(path, ctx);
+    return { ok, message: ok ? "已发图" : "发图失败" };
+  }
+  if (name === "nexus_qq_send_file") {
+    if (!bag.onebot) return { error: "OneBot 未就绪" };
+    const ctx = resolveSendCtx(bag, args);
+    if (!ctx || ctx.channel !== "onebot11") return { error: "当前不在 QQ 会话" };
+    const path = String(args.path || "").trim();
+    if (!path) return { error: "缺少文件路径" };
+    return bag.onebot.sendFile(path, ctx, { name: String(args.name || "") || undefined });
+  }
+  if (name === "nexus_qq_send_voice") {
+    if (!bag.onebot) return { error: "OneBot 未就绪" };
+    const ctx = resolveSendCtx(bag, args);
+    if (!ctx || ctx.channel !== "onebot11") return { error: "当前不在 QQ 会话" };
+    const text = String(args.text || "").trim();
+    if (!text) return { error: "缺少要朗读的文字" };
+    const tts = await textToSpeechFile(bag.repoRoot, text);
+    if (!tts.ok || !tts.path) return { ok: false, message: tts.message };
+    const ok = await bag.onebot.sendRecord(tts.path, ctx);
+    return { ok, message: ok ? "已发语音" : `合成成功但发送失败：${tts.path}` };
+  }
+  if (name === "nexus_shot") {
+    const outDir = join(bag.repoRoot, "data", "shots");
+    const html = String(args.html || "").trim();
+    const shot = html
+      ? await renderHtmlShot({ html, outDir })
+      : await renderMenuShot({
+          title: String(args.title || "Fengyun Nexus"),
+          lines: Array.isArray(args.lines) ? args.lines.map((x) => String(x)) : ["状态图"],
+          outDir,
+        });
+    if (!shot.ok || !shot.pngPath) {
+      return { ok: false, message: "message" in shot ? shot.message : "截图失败", htmlPath: shot.htmlPath };
+    }
+    const send = args.send !== false;
+    if (send && bag.onebot && bag.messageCtx?.channel === "onebot11") {
+      const ok = await bag.onebot.sendImage(shot.pngPath, bag.messageCtx);
+      return { ok, path: shot.pngPath, message: ok ? "已截图并发出" : "截图成功但发送失败" };
+    }
+    return { ok: true, path: shot.pngPath, message: "已截图", sent: false };
+  }
+
+  if (name === "nexus_workspace_list") {
+    return workspaceList(bag.repoRoot, String(args.path || "."));
+  }
+  if (name === "nexus_workspace_read") {
+    return workspaceRead(bag.repoRoot, String(args.path || ""));
+  }
+  if (name === "nexus_workspace_write") {
+    return workspaceWrite(bag.repoRoot, String(args.path || ""), String(args.content ?? ""));
+  }
+  if (name === "nexus_workspace_delete") {
+    return workspaceDelete(bag.repoRoot, String(args.path || ""));
+  }
+  if (name === "nexus_run_safe") {
+    return runSafeCommand(bag.repoRoot, String(args.command || ""));
+  }
+
+  if (name === "nexus_channel_get") {
+    const s = bag.channelSettings();
+    return {
+      label: s.label,
+      onlyMasters: s.onlyMasters,
+      replyGroupIds: s.replyGroupIds,
+      systemPrompt: s.systemPrompt,
+      note: s.note,
+      masters: s.masters,
+      coreMasters: s.coreMasters,
+      newMasters: s.newMasters,
+      normalMasters: s.normalMasters,
+    };
+  }
+  if (name === "nexus_channel_patch") {
+    if (!bag.patchChannelSettings) return { error: "当前不能改通道" };
+    const patch: Record<string, unknown> = {};
+    for (const k of ["label", "systemPrompt", "replyGroupIds", "onlyMasters", "note"] as const) {
+      if (args[k] !== undefined) patch[k] = args[k];
+    }
+    if (!Object.keys(patch).length) return { error: "没有可改的字段" };
+    return bag.patchChannelSettings(patch);
+  }
+  if (name === "nexus_onebot_get") {
+    return bag.getOneBotSnapshot?.() ?? { error: "没有 OneBot 快照" };
+  }
+  if (name === "nexus_onebot_patch") {
+    if (!bag.patchOneBotConfig) return { error: "当前不能改 OneBot" };
+    const patch: Record<string, unknown> = {};
+    for (const k of ["enabled", "reverseWsPath", "httpPath"] as const) {
+      if (args[k] !== undefined) patch[k] = args[k];
+    }
+    if (!Object.keys(patch).length) return { error: "没有可改的字段" };
+    return bag.patchOneBotConfig(patch);
+  }
+
   const mcpNames = new Set(bag.mcp.list().map((t) => t.name));
   if (mcpNames.has(name)) {
     if (!bag.isMaster && !bag.isAdminConsole) return { error: "无权限，需要主人" };

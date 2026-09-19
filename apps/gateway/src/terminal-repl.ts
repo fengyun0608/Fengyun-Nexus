@@ -28,6 +28,7 @@ export function startTerminalRepl(opts: {
     if (!busy) rl.prompt(true);
   };
 
+  opts.logTip?.("后端终端已就绪。可发 #帮助，或自然语言（按管理控制台能力模式）");
   rl.prompt();
 
   rl.on("line", (raw) => {

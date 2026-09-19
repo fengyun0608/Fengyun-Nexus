@@ -25,12 +25,37 @@ export function extractOb11Text(message: string | Ob11Segment[] | undefined, raw
       .map((seg) => {
         if (seg.type === "text") return String(seg.data?.text ?? "");
         if (seg.type === "at") return `@${seg.data?.qq ?? ""}`;
+        if (seg.type === "record") return "[语音]";
         return "";
       })
       .join("")
       .trim();
   }
   return String(raw ?? "").trim();
+}
+
+/** 入站语音段：file / url，供下载听写 */
+export function extractOb11Records(
+  message: string | Ob11Segment[] | undefined,
+  raw?: string,
+): Array<{ file: string; url?: string }> {
+  const out: Array<{ file: string; url?: string }> = [];
+  if (Array.isArray(message)) {
+    for (const seg of message) {
+      if (seg.type !== "record") continue;
+      const file = String(seg.data?.file || seg.data?.file_id || "").trim();
+      const url = seg.data?.url != null ? String(seg.data.url) : undefined;
+      if (file || url) out.push({ file: file || url || "", url });
+    }
+  }
+  const blob = `${typeof message === "string" ? message : ""} ${raw ?? ""}`;
+  for (const m of blob.matchAll(/\[CQ:record,([^\]]+)\]/gi)) {
+    const body = m[1] || "";
+    const file = body.match(/file=([^,\]]+)/i)?.[1]?.trim() || "";
+    const url = body.match(/url=([^,\]]+)/i)?.[1]?.trim();
+    if (file || url) out.push({ file: file || url || "", url });
+  }
+  return out;
 }
 
 /** 消息里被 @ 的 QQ 号（含 CQ 字符串） */

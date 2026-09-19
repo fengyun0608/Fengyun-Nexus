@@ -84,6 +84,7 @@ export class WebhookChannel implements ChannelAdapter {
 export {
   OneBot11Channel,
   extractOb11Text,
+  extractOb11Records,
   type Ob11MessageEvent,
   type Ob11Segment,
 } from "./onebot11.js";

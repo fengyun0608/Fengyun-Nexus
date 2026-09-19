@@ -1,10 +1,10 @@
 import { createServer, type Server } from "node:http";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
-import { OneBot11Channel, type Ob11MessageEvent } from "@fengyun/nexus-channel";
+import { OneBot11Channel, extractOb11Records, type Ob11MessageEvent } from "@fengyun/nexus-channel";
 import type { NexusMessage } from "@fengyun/nexus-shared";
 import { log } from "./log.js";
 import { publishLocalImage, setOb11MediaPort } from "./ob11-media.js";
@@ -63,6 +63,44 @@ function warnSendFail(action: string, retcode: number, message?: string): void {
     return;
   }
   log.warn(`OneBot ${action} 失败 ret=${retcode} ${raw.slice(0, 180)}`);
+}
+
+function localMediaForNapCat(filePath: string): string {
+  try {
+    const size = statSync(filePath).size;
+    if (size <= 2_000_000) {
+      return `base64://${readFileSync(filePath).toString("base64")}`;
+    }
+  } catch {
+    /* http */
+  }
+  const http = publishLocalImage(filePath);
+  if (http) return http;
+  try {
+    return `base64://${readFileSync(filePath).toString("base64")}`;
+  } catch {
+    return pathToFileURL(filePath).href;
+  }
+}
+
+function rewriteCqRecordsForOneBot(text: string): string {
+  return text.replace(/\[CQ:record,file=([^\]]+)\]/gi, (_all, raw: string) => {
+    const src = String(raw || "").trim();
+    if (!src) return "[CQ:record,file=]";
+    if (/^(base64|https?):\/\//i.test(src)) return `[CQ:record,file=${src}]`;
+    let filePath = src;
+    try {
+      if (/^file:/i.test(src)) filePath = fileURLToPath(src);
+    } catch {
+      return "（语音路径无效）";
+    }
+    if (!existsSync(filePath)) return "（语音文件不存在）";
+    try {
+      return `[CQ:record,file=${localMediaForNapCat(filePath)}]`;
+    } catch {
+      return "（读语音失败）";
+    }
+  });
 }
 
 /** NapCat 不认 SVG；本地图放到英文临时路径，避免中文路径和超大 base64 */
@@ -157,6 +195,7 @@ export type Ob11NoticeEvent = Record<string, unknown> & {
 
 type InboundHandler = (msg: NexusMessage) => Promise<string[]>;
 type NoticeHandler = (ev: Ob11NoticeEvent) => Promise<string[]>;
+type EnrichInbound = (msg: NexusMessage, ev: Ob11MessageEvent) => Promise<NexusMessage>;
 
 type Pending = {
   resolve: (r: Ob11CallResult) => void;
@@ -184,6 +223,7 @@ export class OneBot11Bridge {
   private pending = new Map<string, Pending>();
   private onInbound?: InboundHandler;
   private onNotice?: NoticeHandler;
+  private onEnrichInbound?: EnrichInbound;
   private onSelfId?: (selfId: string, listenPort?: number) => void;
   private onOffline?: (selfId: string, sessionMs: number) => void;
   private onlineAt = new Map<string, number>();
@@ -193,6 +233,10 @@ export class OneBot11Bridge {
 
   setInboundHandler(fn: InboundHandler): void {
     this.onInbound = fn;
+  }
+
+  setEnrichInbound(fn: EnrichInbound): void {
+    this.onEnrichInbound = fn;
   }
 
   setNoticeHandler(fn: NoticeHandler): void {
@@ -692,7 +736,14 @@ export class OneBot11Bridge {
       }
     }
 
-    const msg = this.channel.normalizeInbound(ev);
+    let msg = this.channel.normalizeInbound(ev);
+    if (this.onEnrichInbound) {
+      try {
+        msg = await this.onEnrichInbound(msg, ev);
+      } catch (e) {
+        log.warn(`入站增强失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     if (!msg.content.trim()) return 0;
     if (!this.onInbound) return 0;
     if (sid) {
@@ -738,7 +789,7 @@ export class OneBot11Bridge {
   }
 
   async sendText(text: string, ctx: NexusMessage, prefer?: WebSocket): Promise<boolean> {
-    const payload = rewriteCqImagesForOneBot(text);
+    const payload = rewriteCqRecordsForOneBot(rewriteCqImagesForOneBot(text));
     const params = this.channel.toSendParams({
       ...ctx,
       content: payload,
@@ -749,6 +800,114 @@ export class OneBot11Bridge {
       botId: botId || undefined,
       prefer,
     });
+  }
+
+  /** 发本地图片（png/jpg 等） */
+  async sendImage(filePath: string, ctx: NexusMessage, prefer?: WebSocket): Promise<boolean> {
+    const path = String(filePath || "").trim();
+    if (!path || !existsSync(path)) return false;
+    return this.sendText(`[CQ:image,file=${path}]`, ctx, prefer);
+  }
+
+  /** 发本地语音气泡 */
+  async sendRecord(filePath: string, ctx: NexusMessage, prefer?: WebSocket): Promise<boolean> {
+    const path = String(filePath || "").trim();
+    if (!path || !existsSync(path)) return false;
+    return this.sendText(`[CQ:record,file=${path}]`, ctx, prefer);
+  }
+
+  /**
+   * 发文件。群聊走 upload_group_file；私聊尽量 upload_private_file，不行再发文字路径提示。
+   */
+  async sendFile(
+    filePath: string,
+    ctx: NexusMessage,
+    opts?: { name?: string; prefer?: WebSocket },
+  ): Promise<{ ok: boolean; message: string }> {
+    const path = String(filePath || "").trim();
+    if (!path || !existsSync(path)) return { ok: false, message: "文件不存在" };
+    const name = String(opts?.name || path.split(/[/\\]/).pop() || "file").slice(0, 120);
+    const botId = String(ctx.meta?.botId || ctx.meta?.selfId || "");
+    const mt = (ctx.meta?.messageType as string | undefined) ?? "private";
+    let fileRef = path;
+    try {
+      if (statSync(path).size <= 2_000_000) fileRef = localMediaForNapCat(path);
+    } catch {
+      /* keep path */
+    }
+    if (mt === "group") {
+      const gid = Number(ctx.meta?.groupId ?? String(ctx.chatId).replace(/^group:/, ""));
+      const ok = await this.callSend(
+        "upload_group_file",
+        { group_id: gid, file: fileRef, name },
+        { botId: botId || undefined, prefer: opts?.prefer, timeoutMs: 60_000 },
+      );
+      return { ok, message: ok ? `已发文件 ${name}` : "群文件发送失败" };
+    }
+    const uid = Number(ctx.userId) || 0;
+    const ok = await this.callSend(
+      "upload_private_file",
+      { user_id: uid, file: fileRef, name },
+      { botId: botId || undefined, prefer: opts?.prefer, timeoutMs: 60_000 },
+    );
+    if (ok) return { ok: true, message: `已发文件 ${name}` };
+    return { ok: false, message: "私聊文件发送失败（当前协议可能不支持）" };
+  }
+
+  /** 下载入站语音到本地路径（base64 或 url） */
+  async downloadRecordFile(
+    rec: { file: string; url?: string },
+    destDir: string,
+  ): Promise<{ ok: boolean; path?: string; message: string }> {
+    mkdirSync(destDir, { recursive: true });
+    const botId = this.selfId || undefined;
+    if (rec.url && /^https?:\/\//i.test(rec.url)) {
+      try {
+        const res = await fetch(rec.url, { signal: AbortSignal.timeout(20_000) });
+        if (!res.ok) return { ok: false, message: `下载语音失败 ${res.status}` };
+        const buf = Buffer.from(await res.arrayBuffer());
+        const ext = /\.wav$/i.test(rec.url) ? ".wav" : /\.mp3$/i.test(rec.url) ? ".mp3" : ".silk";
+        const path = join(destDir, `rec-${Date.now()}${ext}`);
+        writeFileSync(path, buf);
+        return { ok: true, path, message: "已下载语音" };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+    }
+    const file = String(rec.file || "").trim();
+    if (!file) return { ok: false, message: "没有语音文件标识" };
+    if (/^base64:\/\//i.test(file)) {
+      const b64 = file.replace(/^base64:\/\//i, "");
+      const path = join(destDir, `rec-${Date.now()}.wav`);
+      writeFileSync(path, Buffer.from(b64, "base64"));
+      return { ok: true, path, message: "已解码语音" };
+    }
+    if (existsSync(file)) return { ok: true, path: file, message: "本地语音" };
+    const r = await this.callAction("get_file", { file }, { botId, timeoutMs: 20_000 });
+    if (!r.ok) {
+      const r2 = await this.callAction("get_record", { file, out_format: "wav" }, { botId, timeoutMs: 20_000 });
+      if (!r2.ok) return { ok: false, message: r.message || r2.message || "拉取语音失败" };
+      const data = (r2.data || {}) as Record<string, unknown>;
+      const local = String(data.file || data.path || "");
+      if (local && existsSync(local)) return { ok: true, path: local, message: "已转写语音文件" };
+      const b64 = String(data.base64 || "");
+      if (b64) {
+        const path = join(destDir, `rec-${Date.now()}.wav`);
+        writeFileSync(path, Buffer.from(b64, "base64"));
+        return { ok: true, path, message: "已转写语音" };
+      }
+      return { ok: false, message: "语音接口无文件" };
+    }
+    const data = (r.data || {}) as Record<string, unknown>;
+    const local = String(data.file || data.path || "");
+    if (local && existsSync(local)) return { ok: true, path: local, message: "已拉取语音" };
+    const b64 = String(data.base64 || "");
+    if (b64) {
+      const path = join(destDir, `rec-${Date.now()}.bin`);
+      writeFileSync(path, Buffer.from(b64, "base64"));
+      return { ok: true, path, message: "已拉取语音" };
+    }
+    return { ok: false, message: "语音接口无文件" };
   }
 
   /**

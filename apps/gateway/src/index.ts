@@ -9,6 +9,7 @@ import {
   ChannelRegistry,
   WebChannel,
   WebhookChannel,
+  extractOb11Records,
 } from "@fengyun/nexus-channel";
 import { MessageRouter, SessionManager } from "@fengyun/nexus-core";
 import { NexusDatabase } from "@fengyun/nexus-db";
@@ -98,8 +99,10 @@ import {
 import { makePluginCtx, setPluginRuntime, setPluginChannelBag, setPluginOneBot } from "./plugin-ctx.js";
 import { loadAgentSkills, skillsPromptBlock } from "./agent-skills.js";
 import { buildAgentToolDefs, runAgentTool } from "./agent-tools.js";
-import { listOpenDesktopApps } from "./desktop-inspect.js";
+import { listOpenDesktopApps, hostInfo, hostUptime } from "./desktop-inspect.js";
 import { webRead, webSearch } from "./web-lookup.js";
+import { speechFileToText } from "./tts-stt.js";
+import { agentWorkspaceRoot, workspaceList } from "./agent-workspace.js";
 import { isJunkAiText, splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
@@ -415,7 +418,10 @@ function frameworkSystemPrompt(opts?: {
       "问电脑开了多久、开机时间，调用 nexus_host_uptime。那是整台电脑的开机时长，不是框架自己跑了多久。不要说没有这个工具，也不要编数字。",
       "问内存、处理器、磁盘、系统版本或系统信息，调用 nexus_host_info。不要说还要去装这个能力。",
       "有人要搜网页、查资料、看某个网址，调用 nexus_web_search 或 nexus_web_read。不要说没有搜索。",
-      "平常问答用一两段说完，不要空行拆成很多条。",
+      "要发图、发文件、发语音到 QQ：用 nexus_qq_send_image / nexus_qq_send_file / nexus_qq_send_voice。要渲状态图用 nexus_shot。",
+      "写代码、跑白名单命令：用 nexus_workspace_* 和 nexus_run_safe，只在 data/agent-workspace 沙箱。",
+      "改通道人设/回复群或 OneBot 开关路径：用 nexus_channel_patch / nexus_onebot_patch。不要改密码。",
+      "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
     );
   } else if (opts?.userId) {
@@ -764,6 +770,23 @@ async function bootstrap(): Promise<void> {
     description: "读取一个公开网页的正文摘要",
     handler: async (args) => webRead(String(args?.url || "")),
   });
+  mcp.register({
+    name: "nexus.host_info",
+    description: "本机系统信息：处理器、内存、磁盘、开机时长",
+    handler: () => hostInfo(),
+  });
+  mcp.register({
+    name: "nexus.host_uptime",
+    description: "本机开机运行时长",
+    handler: () => hostUptime(),
+  });
+  mcp.register({
+    name: "nexus.workspace_list",
+    description: "列出 data/agent-workspace 沙箱目录（只读）",
+    handler: (args) => workspaceList(ROOT, String(args?.path || ".")),
+  });
+
+  agentWorkspaceRoot(ROOT);
 
   workflows.setHandlers({
     llm: async (prompt) => {
@@ -1426,6 +1449,65 @@ async function bootstrap(): Promise<void> {
         }
       },
       listRuntimes: () => listRuntimes(),
+      repoRoot: ROOT,
+      messageCtx: msg,
+      onebot,
+      patchChannelSettings: (patch: Record<string, unknown>) => {
+        const prev = getChannelSettings(channelCfg, msg.channel);
+        const next: ChannelSettings = { ...prev };
+        if (typeof patch.label === "string") next.label = patch.label;
+        if (typeof patch.systemPrompt === "string") next.systemPrompt = patch.systemPrompt;
+        if (typeof patch.note === "string") next.note = patch.note;
+        if (typeof patch.onlyMasters === "boolean") next.onlyMasters = patch.onlyMasters;
+        if (typeof patch.replyGroupIds === "string") {
+          next.replyGroupIds = String(patch.replyGroupIds)
+            .split(/[,，\s]+/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        } else if (Array.isArray(patch.replyGroupIds)) {
+          next.replyGroupIds = patch.replyGroupIds.map((x) => String(x).trim()).filter(Boolean);
+        }
+        channelCfg = {
+          channels: { ...channelCfg.channels, [msg.channel]: next },
+        };
+        saveChannelsConfig(ROOT, channelCfg);
+        return { ok: true, message: "通道设置已保存" };
+      },
+      getOneBotSnapshot: () => {
+        const st = onebot.status();
+        return {
+          enabled: st.enabled,
+          connected: st.connected,
+          clients: st.clients,
+          reverseWsPath: st.reverseWsPath,
+          httpPath: st.httpPath,
+          bots: (st.bots || []).map((b) => ({
+            selfId: b.selfId,
+            label: b.label,
+            connected: b.connected,
+            apiBase: b.apiBase,
+            listenPort: b.listenPort,
+          })),
+        };
+      },
+      patchOneBotConfig: (patch: Record<string, unknown>) => {
+        const prev = onebot.getConfig();
+        const next: OneBotConfig = {
+          ...prev,
+          enabled: typeof patch.enabled === "boolean" ? patch.enabled : prev.enabled,
+          reverseWsPath:
+            typeof patch.reverseWsPath === "string" && patch.reverseWsPath
+              ? String(patch.reverseWsPath)
+              : prev.reverseWsPath,
+          httpPath:
+            typeof patch.httpPath === "string" && patch.httpPath
+              ? String(patch.httpPath)
+              : prev.httpPath,
+        };
+        persistOneBotConfig(next);
+        onebot.updateConfig(next);
+        return { ok: true, message: "OneBot 配置已保存", config: { ...next, accessToken: "" } };
+      },
     };
 
     const assistant = (
@@ -1507,6 +1589,32 @@ async function bootstrap(): Promise<void> {
     return { replies, assistant };
   }
 
+  onebot.setEnrichInbound(async (msg, ev) => {
+    const records = extractOb11Records(ev.message, ev.raw_message);
+    if (!records.length) return msg;
+    const dest = join(ROOT, "data", "agent-media");
+    const texts: string[] = [];
+    for (const rec of records.slice(0, 2)) {
+      const dl = await onebot.downloadRecordFile(rec, dest);
+      if (!dl.ok || !dl.path) {
+        texts.push("（收到语音，下载失败）");
+        continue;
+      }
+      const stt = await speechFileToText(dl.path);
+      if (stt.ok && stt.text) texts.push(stt.text);
+      else texts.push(`（收到语音，未能听写：${stt.message}）`);
+    }
+    const voiceText = texts.filter(Boolean).join(" ").trim();
+    const merged = [msg.content.replace(/\[语音\]/g, "").trim(), voiceText]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    return {
+      ...msg,
+      content: merged || voiceText || "（语音消息）",
+      meta: { ...msg.meta, rawMessage: msg.meta?.rawMessage || ev.raw_message },
+    };
+  });
   onebot.setInboundHandler(async (msg) => processInbound(msg));
   onebot.setNoticeHandler(async (ev) => {
     const channelId = "onebot11";
