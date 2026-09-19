@@ -313,6 +313,16 @@ export function loadEcosystemCatalog(
     }
     const plugs = pluginsInRef(root, remoteRef, packRel);
     const st = statusOf(pluginsRoot, plugs.map((p) => p.name), String(e.version || ""));
+    if ((st.status === "installed" || st.status === "update") && st.pluginDirs?.length) {
+      rememberInstall(root, {
+        id: e.id,
+        name: e.name,
+        version: e.version,
+        description: e.description,
+        repoUrl,
+        dirs: st.pluginDirs,
+      });
+    }
     items.push({ ...base, ...st, heat: Number(e.heat || 0) });
   }
   stampHeat(root, items);
