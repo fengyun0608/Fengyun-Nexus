@@ -8,7 +8,7 @@ import type { WorkflowRunner } from "@fengyun/nexus-workflow";
 import type { PluginHost } from "@fengyun/nexus-plugin-sdk";
 import type { ChannelSettings } from "./channel-settings.js";
 import { isChannelMaster, masterLevelOf } from "./channel-settings.js";
-import { hostUptime, launchDesktopApp, listOpenDesktopApps } from "./desktop-inspect.js";
+import { hostInfo, hostUptime, launchDesktopApp, listOpenDesktopApps } from "./desktop-inspect.js";
 
 export type AgentToolBag = {
   mcp: McpHost;
@@ -71,6 +71,11 @@ export function buildAgentToolDefs(mcp: McpHost): LlmToolDef[] {
         args: { type: "object", description: "参数对象" },
       },
       ["name"],
+    ),
+    tool(
+      "nexus_host_info",
+      "查看本机系统信息：系统版本、处理器、内存、磁盘，以及开机时长。有人问配置、内存、CPU、磁盘、系统信息时必须用这个，不要说没装这个能力，也不要编数字。",
+      {},
     ),
     tool(
       "nexus_host_uptime",
@@ -146,6 +151,7 @@ export async function runAgentTool(
     name === "nexus_open_apps" ||
     name === "nexus_launch_app" ||
     name === "nexus_host_uptime" ||
+    name === "nexus_host_info" ||
     name === "nexus_list_caps" ||
     name === "nexus_call_cap" ||
     name === "nexus_plugin_switch" ||
@@ -170,6 +176,9 @@ export async function runAgentTool(
   }
   if (name === "nexus_host_uptime") {
     return hostUptime();
+  }
+  if (name === "nexus_host_info") {
+    return hostInfo();
   }
   if (name === "nexus_list_plugins") {
     return {

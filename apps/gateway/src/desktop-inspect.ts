@@ -3,7 +3,17 @@
  * Windows 优先读有窗口标题的进程；其它平台退回常见进程名列表。
  */
 import { execFile } from "node:child_process";
-import { hostname, platform as osPlatform, uptime as osUptime } from "node:os";
+import { statfsSync } from "node:fs";
+import {
+  arch,
+  cpus,
+  freemem,
+  hostname,
+  platform as osPlatform,
+  release,
+  totalmem,
+  uptime as osUptime,
+} from "node:os";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -158,6 +168,73 @@ export function hostUptime(): {
     uptimeSeconds,
     bootAt,
     message: `这台电脑已运行 ${formatDuration(uptimeSeconds)}，大约 ${bootAt} 开机`,
+  };
+}
+
+function gb(bytes: number): string {
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function diskLines(): string[] {
+  const roots = process.platform === "win32" ? ["C:\\", "D:\\", "E:\\", "F:\\"] : ["/"];
+  const out: string[] = [];
+  for (const root of roots) {
+    try {
+      const stat = statfsSync(root);
+      const total = Number(stat.blocks) * Number(stat.bsize);
+      const free = Number(stat.bavail) * Number(stat.bsize);
+      if (!Number.isFinite(total) || total <= 0) continue;
+      const label = root.replace(/[\\/]+$/, "") || root;
+      out.push(`${label} 共 ${gb(total)}，剩余 ${gb(free)}`);
+    } catch {
+      /* 没有这块盘 */
+    }
+  }
+  return out;
+}
+
+/** 本机系统概况：开机时长、系统、处理器、内存、磁盘。 */
+export function hostInfo(): {
+  ok: boolean;
+  hostname: string;
+  platform: string;
+  release: string;
+  arch: string;
+  cpu: string;
+  threads: number;
+  memoryTotal: string;
+  memoryFree: string;
+  disks: string[];
+  uptime: string;
+  message: string;
+} {
+  const up = hostUptime();
+  const cores = cpus();
+  const cpu = cores[0]?.model.replace(/\s+/g, " ").trim() || "未知";
+  const disks = diskLines();
+  const memoryTotal = gb(totalmem());
+  const memoryFree = gb(freemem());
+  const sys = `${osPlatform()} ${release()} ${arch()}`;
+  const message = [
+    up.message,
+    `系统 ${sys}`,
+    `处理器 ${cpu}，${cores.length} 线程`,
+    `内存共 ${memoryTotal}，可用 ${memoryFree}`,
+    disks.length ? disks.join("；") : "磁盘未读到",
+  ].join("。");
+  return {
+    ok: true,
+    hostname: hostname(),
+    platform: osPlatform(),
+    release: release(),
+    arch: arch(),
+    cpu,
+    threads: cores.length,
+    memoryTotal,
+    memoryFree,
+    disks,
+    uptime: up.message,
+    message,
   };
 }
 
