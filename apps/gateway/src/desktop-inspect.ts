@@ -3,6 +3,7 @@
  * Windows 优先读有窗口标题的进程；其它平台退回常见进程名列表。
  */
 import { execFile } from "node:child_process";
+import { hostname, platform as osPlatform, uptime as osUptime } from "node:os";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -120,6 +121,44 @@ export async function listOpenDesktopApps(
       message: e instanceof Error ? e.message : String(e),
     };
   }
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function formatDuration(totalSec: number): string {
+  const sec = Math.max(0, Math.floor(totalSec));
+  const days = Math.floor(sec / 86400);
+  const hours = Math.floor((sec % 86400) / 3600);
+  const minutes = Math.floor((sec % 3600) / 60);
+  const parts: string[] = [];
+  if (days) parts.push(`${days} 天`);
+  if (hours || days) parts.push(`${hours} 小时`);
+  parts.push(`${minutes} 分钟`);
+  return parts.join(" ");
+}
+
+/** 整台电脑自开机起的时长，不是框架进程时长。 */
+export function hostUptime(): {
+  ok: boolean;
+  platform: string;
+  hostname: string;
+  uptimeSeconds: number;
+  bootAt: string;
+  message: string;
+} {
+  const uptimeSeconds = Math.max(0, Math.floor(osUptime()));
+  const boot = new Date(Date.now() - uptimeSeconds * 1000);
+  const bootAt = `${boot.getFullYear()}-${pad2(boot.getMonth() + 1)}-${pad2(boot.getDate())} ${pad2(boot.getHours())}:${pad2(boot.getMinutes())}`;
+  return {
+    ok: true,
+    platform: osPlatform(),
+    hostname: hostname(),
+    uptimeSeconds,
+    bootAt,
+    message: `这台电脑已运行 ${formatDuration(uptimeSeconds)}，大约 ${bootAt} 开机`,
+  };
 }
 
 function safeAppName(raw: string): string | null {

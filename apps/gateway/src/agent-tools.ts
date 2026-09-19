@@ -8,7 +8,7 @@ import type { WorkflowRunner } from "@fengyun/nexus-workflow";
 import type { PluginHost } from "@fengyun/nexus-plugin-sdk";
 import type { ChannelSettings } from "./channel-settings.js";
 import { isChannelMaster, masterLevelOf } from "./channel-settings.js";
-import { launchDesktopApp, listOpenDesktopApps } from "./desktop-inspect.js";
+import { hostUptime, launchDesktopApp, listOpenDesktopApps } from "./desktop-inspect.js";
 
 export type AgentToolBag = {
   mcp: McpHost;
@@ -71,6 +71,11 @@ export function buildAgentToolDefs(mcp: McpHost): LlmToolDef[] {
         args: { type: "object", description: "参数对象" },
       },
       ["name"],
+    ),
+    tool(
+      "nexus_host_uptime",
+      "查看这台电脑自开机起运行了多久。有人问电脑开了多久、运行时长、开机时间时必须用这个。这是整台电脑的时长，不是 Fengyun Nexus 进程时长。不要说没有这个工具，也不要编数字。",
+      {},
     ),
     tool(
       "nexus_launch_app",
@@ -140,6 +145,7 @@ export async function runAgentTool(
     name === "nexus_call_mcp" ||
     name === "nexus_open_apps" ||
     name === "nexus_launch_app" ||
+    name === "nexus_host_uptime" ||
     name === "nexus_list_caps" ||
     name === "nexus_call_cap" ||
     name === "nexus_plugin_switch" ||
@@ -161,6 +167,9 @@ export async function runAgentTool(
     const appName = String(args.name || "").trim();
     if (!appName) return { error: "缺少软件名" };
     return launchDesktopApp(appName);
+  }
+  if (name === "nexus_host_uptime") {
+    return hostUptime();
   }
   if (name === "nexus_list_plugins") {
     return {
