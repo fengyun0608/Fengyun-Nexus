@@ -127,6 +127,7 @@ import {
   extractLeakedToolCalls,
   isJunkAiText,
   splitAiSegments,
+  splitThinkingAndSpeak,
   stripLeakedToolMarkup,
 } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
@@ -457,7 +458,7 @@ function frameworkSystemPrompt(opts?: {
       "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp。控件树是空的网页壳，用 nexus_web_attach 挂页面，或 nexus_window_see 认出字在哪再 nexus_click_text。普通窗口用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。不够就自己写脚本。",
       "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。snapshot 里有字和坐标。不要只用 web_read 只读摘要。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。能直接调工具就别连查五六个再动手。",
-      "对用户说人话。可以带上思考过程（会标成「思考：」）。发现应用没开可以说正在帮你启动，做完再说一声好了。不要把工具名、JSON、DSML 甩出去，也不要每做一小步就刷很多条。",
+      "对用户说人话。思考过程可以写，框架会用合并转发发出；正文按空行拆成最多两条气泡。不要把「用某某语气」「不需要调用工具」这类提纲写进正文。不要把工具名、JSON、DSML 甩出去。",
       "工具必须走正式 function call。禁止把 tool_calls、DSML、invoke、XML 写进回复正文。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
       "现成工具能用就用；没有就自己写代码跑通。别空口说不会，也别等别人给你加工具。",
@@ -1763,22 +1764,49 @@ async function bootstrap(): Promise<void> {
       log.warn("能力模式结束后没有可发正文，已改发一句提示");
     }
 
-    const parts = spoken ? splitAiSegments(spoken) : [];
+    const { thinkingNodes, speak } = splitThinkingAndSpeak(spoken);
+    const parts = speak ? splitAiSegments(speak) : [];
     const extra = capSink.map((x) => x.trim()).filter(Boolean);
-    const all = [...parts, ...extra];
-    if (!all.length) return [];
+    let thinkingForwarded = false;
 
-    const storeAs = all.join("\n\n");
-    sessions.append(session, "assistant", storeAs);
-    writeMsg({
-      id: newId("msg"),
-      channel: msg.channel,
-      chatId: msg.chatId,
-      userId: "nexus",
-      role: "assistant",
-      content: storeAs,
-      createdAt: nowIso(),
-    });
+    // QQ：思考用合并转发；控制台等通道仍把思考当普通文本段
+    if (msg.channel === "onebot11" && thinkingNodes.length) {
+      try {
+        thinkingForwarded = await onebot.sendForward(thinkingNodes, msg, {
+          nickname: "思考",
+          userId: String(msg.meta?.selfId || msg.meta?.botId || "80000000"),
+        });
+        if (thinkingForwarded) log.info(`思考已合并转发  ${thinkingNodes.length} 段`);
+        else log.warn("思考合并转发失败，改并入正文");
+      } catch (e) {
+        log.warn(`思考转发异常：${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (thinkingNodes.length && !thinkingForwarded) {
+      parts.unshift(`思考：\n${thinkingNodes.join("\n\n")}`);
+    }
+
+    const all = [...parts, ...extra].filter((x) => x && !isJunkAiText(x));
+    if (!all.length && !thinkingForwarded) return [];
+    if (!all.length && thinkingForwarded) return [];
+
+    const replyJoined = all.join("\n\n");
+    const storeAs =
+      thinkingNodes.length && thinkingForwarded
+        ? `思考：\n${thinkingNodes.join("\n\n")}${replyJoined ? `\n\n${replyJoined}` : ""}`
+        : replyJoined;
+    if (storeAs) {
+      sessions.append(session, "assistant", storeAs);
+      writeMsg({
+        id: newId("msg"),
+        channel: msg.channel,
+        chatId: msg.chatId,
+        userId: "nexus",
+        role: "assistant",
+        content: storeAs,
+        createdAt: nowIso(),
+      });
+    }
     return all;
   }
 
