@@ -2827,10 +2827,7 @@ async function bootstrap(): Promise<void> {
           continue;
         }
         const payload = useImage ? sendPayload : text;
-        let ok = await onebot.sendText(payload, { ...ctx, content: payload });
-        if (!ok && gid) {
-          ok = await onebot.sendTextToGroup(gid, payload);
-        }
+        const ok = await onebot.sendText(payload, { ...ctx, content: payload });
         if (ok) {
           log.ok(`重启成功已发回原${mt === "group" ? `群 ${gid}` : "会话"}`);
           return;

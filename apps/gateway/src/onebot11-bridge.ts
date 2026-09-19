@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -8,14 +8,35 @@ import { OneBot11Channel, type Ob11MessageEvent } from "@fengyun/nexus-channel";
 import type { NexusMessage } from "@fengyun/nexus-shared";
 import { log } from "./log.js";
 
-/** 中文路径的 file:// NapCat 读不稳；巨大 base64 又会被 QQ 拒成富媒体。拷到英文临时目录再发。 */
+/**
+ * NapCat 在 Windows 上会把 file:///C:/ 当成 pathname /C:/ 去 open，直接 ENOENT。
+ * 拷到英文临时目录后，Windows 给盘符路径，其它系统仍用 file://。
+ */
+function napCatLocalFile(absPath: string): string {
+  let p = absPath;
+  try {
+    p = realpathSync(absPath);
+  } catch {
+    /* 保持原路径 */
+  }
+  const slash = p.replace(/\\/g, "/");
+  if (process.platform === "win32") return slash;
+  return pathToFileURL(p).href;
+}
+
 function localImageForNapCat(filePath: string): string {
   const dir = join(tmpdir(), "fengyun-nexus-shot");
   mkdirSync(dir, { recursive: true });
   const ext = (filePath.match(/\.(png|jpe?g|gif|webp|bmp)$/i)?.[0] || ".png").toLowerCase();
   const dest = join(dir, `s-${Date.now()}-${Math.floor(Math.random() * 1000)}${ext}`);
   copyFileSync(filePath, dest);
-  return pathToFileURL(dest).href;
+  return napCatLocalFile(dest);
+}
+
+function transientSendFail(message?: string): boolean {
+  return /网络连接异常|调用超时|超时|timeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang|EAI_AGAIN/i.test(
+    String(message || ""),
+  );
 }
 
 let lastRichMediaWarn = 0;
@@ -674,10 +695,29 @@ export class OneBot11Bridge {
       const text = texts[i];
       if (!text.trim()) continue;
       if (i > 0) await sleep(380 + Math.floor(Math.random() * 320));
-      await this.sendText(text, msg, prefer);
+      const ok = await this.sendText(text, msg, prefer);
+      if (!ok && /\[CQ:image/i.test(text)) {
+        log.warn("发图失败，改发文字");
+        await this.sendText("（图片未能发给 QQ）", msg, prefer);
+      }
       n += 1;
     }
     return n;
+  }
+
+  /** 瞬时断连重试几次；路径错误、富媒体被拒不再重试。 */
+  private async callSend(
+    action: string,
+    params: Record<string, unknown>,
+    opts?: { botId?: string; timeoutMs?: number; prefer?: WebSocket },
+  ): Promise<boolean> {
+    for (let i = 0; i < 3; i++) {
+      const r = await this.callAction(action, params, opts);
+      if (r.ok) return true;
+      if (!transientSendFail(r.message) || i === 2) return false;
+      await sleep(800 * (i + 1));
+    }
+    return false;
   }
 
   async sendText(text: string, ctx: NexusMessage, prefer?: WebSocket): Promise<boolean> {
@@ -688,11 +728,10 @@ export class OneBot11Bridge {
       userId: ctx.userId,
     });
     const botId = String(ctx.meta?.botId || ctx.meta?.selfId || "");
-    const r = await this.callAction("send_msg", params as Record<string, unknown>, {
+    return this.callSend("send_msg", params as Record<string, unknown>, {
       botId: botId || undefined,
       prefer,
     });
-    return r.ok;
   }
 
   /**
@@ -732,11 +771,10 @@ export class OneBot11Bridge {
     }
 
     const botId = String(ctx.meta?.botId || ctx.meta?.selfId || "");
-    const r = await this.callAction(action, params, {
+    return this.callSend(action, params, {
       botId: botId || undefined,
       prefer: opts?.prefer,
     });
-    return r.ok;
   }
 
   async sendForwardToGroup(groupId: string, nodes: string[]): Promise<boolean> {
