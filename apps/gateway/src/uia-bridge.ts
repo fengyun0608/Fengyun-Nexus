@@ -7,6 +7,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { launchDesktopApp } from "./desktop-inspect.js";
+import { playOnDesktopWeb } from "./web-control.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -45,7 +46,7 @@ export async function runUiaCli(
       const args = bin === "py" ? ["-3", script, ...argv] : [script, ...argv];
       const { stdout, stderr } = await execFileAsync(bin, args, {
         cwd: repoRoot,
-        timeout: 30_000,
+        timeout: 45_000,
         windowsHide: true,
         encoding: "utf8",
         maxBuffer: 2 * 1024 * 1024,
@@ -174,6 +175,28 @@ export function uiaKeys(
   return runUiaCli(repoRoot, argv);
 }
 
+export function uiaSee(
+  repoRoot: string,
+  opts: { title?: string; handle?: number; limit?: number },
+) {
+  const argv = ["see"];
+  if (opts.title) argv.push("--title", opts.title);
+  if (opts.handle) argv.push("--handle", String(opts.handle));
+  if (opts.limit) argv.push("--limit", String(opts.limit));
+  return runUiaCli(repoRoot, argv);
+}
+
+export function uiaClickText(
+  repoRoot: string,
+  opts: { title?: string; handle?: number; text?: string },
+) {
+  const argv = ["click_text"];
+  if (opts.title) argv.push("--title", opts.title);
+  if (opts.handle) argv.push("--handle", String(opts.handle));
+  if (opts.text) argv.push("--text", opts.text);
+  return runUiaCli(repoRoot, argv);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -187,22 +210,27 @@ export async function playMusic(
   const name = String(app || "汽水音乐").trim() || "汽水音乐";
   const song = String(query || "").trim();
   if (!song) return { ok: false, message: "缺少歌名" };
+  const say = `主人，${name}已经打开，正在放《${song}》。`;
+  const web = await playOnDesktopWeb(repoRoot, { query: song, hint: name });
+  if (web.ok) return { ok: true, message: say, app: name, query: song, method: "web", detail: web };
   const search = () => runUiaCli(repoRoot, ["music_search", "--title", name, "--query", song]);
   let hit = await search();
   let launched = false;
   if (!hit.ok) {
-    const launch = await launchDesktopApp(name);
+    const launch = await launchDesktopApp(name, { args: "--remote-debugging-port=9333" });
     launched = Boolean(launch.ok);
-    if (!launch.ok) {
+    if (!launch.ok && hit.need_launch) {
       return { ok: false, message: launch.message || `没找到 ${name}`, launched: false };
     }
-    await sleep(2800);
-    hit = await search();
+    if (launched) {
+      await sleep(3500);
+      const again = await playOnDesktopWeb(repoRoot, { query: song, hint: name });
+      if (again.ok) return { ok: true, message: say, app: name, query: song, launched, method: "web" };
+      hit = await search();
+    }
   }
-  const message = hit.ok
-    ? `主人，${name}已经打开，正在放《${song}》。`
-    : `主人，${name}已经打开。`;
-  return { ok: Boolean(hit.ok) || launched, message, app: name, query: song, launched, detail: hit };
+  const message = hit.ok || launched ? say : `主人，${name}已经打开。`;
+  return { ok: Boolean(hit.ok) || launched, message, app: name, query: song, launched, method: hit.method || "ocr", detail: hit };
 }
 
 void whichPython;

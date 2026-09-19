@@ -18,6 +18,8 @@ description: 主人能力模式：查状态、日志、电脑截屏、搜网页�
 - `nexus_open_apps` / `nexus_launch_app` / `nexus_host_info` / `nexus_host_uptime`
 - 听歌：只调 `nexus_music_play`（app + 歌名），把返回的那一句原样说。不要截图、不要扫窗口、不要让用户自己搜
 - 只打开软件：`nexus_launch_app`
+- 戳一戳：只调 `nexus_qq_poke`，不要翻技能、不要 shell、不要写 MCP
+- 网页壳认字：`nexus_window_see` / `nexus_click_text`；能挂调试口用 `nexus_web_attach`
 
 截图：
 - 电脑屏幕发群：`nexus_screen`。有人说截图发群必须用这个，不要用 `nexus_shot` 渲状态卡片充数

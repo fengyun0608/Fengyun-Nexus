@@ -328,7 +328,23 @@ if ($q) {
         $arg = 'shell:AppsFolder\\' + [string]$best.Path
         Start-Process -FilePath (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList $arg
       } else {
-        Start-Process -FilePath ([string]$best.Path)
+        $target = [string]$best.Path
+        $argLine = ([string]$env:NEXUS_LAUNCH_ARGS).Trim()
+        if ($target.ToLowerInvariant().EndsWith('.lnk')) {
+          try {
+            $sh = New-Object -ComObject WScript.Shell
+            $sc = $sh.CreateShortcut($target)
+            if ($sc.TargetPath) { $target = [string]$sc.TargetPath }
+            $old = ([string]$sc.Arguments).Trim()
+            if ($old -and $argLine) { $argLine = $old + ' ' + $argLine }
+            elseif ($old) { $argLine = $old }
+          } catch {}
+        }
+        if ($argLine) {
+          Start-Process -FilePath $target -ArgumentList $argLine
+        } else {
+          Start-Process -FilePath $target
+        }
       }
       $result.ok = $true
       $result.name = [string]$best.Name
@@ -372,7 +388,7 @@ function decodeLaunch(stdout: string): { ok: boolean; message: string; name?: st
 /** 按软件名启动已安装应用。只接受名字，不接受命令行。 */
 export async function launchDesktopApp(
   rawName: string,
-  opts?: { dry?: boolean },
+  opts?: { dry?: boolean; args?: string },
 ): Promise<{ ok: boolean; message: string; name?: string; path?: string }> {
   const name = safeAppName(rawName);
   if (!name) return { ok: false, message: "软件名不合法，只写应用名，例如 ToDesk" };
@@ -392,6 +408,7 @@ export async function launchDesktopApp(
           ...process.env,
           NEXUS_LAUNCH_NAME: name,
           NEXUS_LAUNCH_DRY: opts?.dry ? "1" : "",
+          NEXUS_LAUNCH_ARGS: String(opts?.args || ""),
         },
       },
     );

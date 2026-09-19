@@ -27,13 +27,16 @@ import { findAgentSkill, loadAgentSkills } from "./agent-skills.js";
 import {
   playMusic,
   uiaClick,
+  uiaClickText,
   uiaFocus,
   uiaKeys,
+  uiaSee,
   uiaSetText,
   uiaTree,
   uiaWindows,
 } from "./uia-bridge.js";
 import {
+  webAttach,
   webClick,
   webClose,
   webKeys,
@@ -93,7 +96,10 @@ const MASTER_TOOLS = new Set([
   "nexus_uia_click",
   "nexus_uia_set_text",
   "nexus_uia_keys",
+  "nexus_window_see",
+  "nexus_click_text",
   "nexus_web_open",
+  "nexus_web_attach",
   "nexus_web_snapshot",
   "nexus_web_click",
   "nexus_web_type",
@@ -112,6 +118,7 @@ const MASTER_TOOLS = new Set([
   "nexus_qq_send_image",
   "nexus_qq_send_file",
   "nexus_qq_send_voice",
+  "nexus_qq_poke",
   "nexus_screen",
   "nexus_shot",
   "nexus_workspace_list",
@@ -305,6 +312,14 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
       ["text"],
     ),
     tool(
+      "nexus_qq_poke",
+      "真的 QQ 戳一戳。主人说「戳我一下」就调这个，默认戳当前说话的人。不要翻技能、不要 shell、不要自己写 MCP。成功后最多回一句，例如「戳到啦」。",
+      {
+        user_id: { type: "string", description: "被戳的 QQ 号；默认当前说话的人" },
+        group_id: { type: "string", description: "群号；群聊默认当前群" },
+      },
+    ),
+    tool(
       "nexus_screen",
       "截本机电脑屏幕（真实桌面画面）并可直接发到当前 QQ。有人说截图、截屏、截个图发群里，必须用这个。不要用 nexus_shot 渲状态卡片充数。Windows、macOS、Linux 桌面、Termux 可用；没有显示器的服务器会说明截不了。",
       { send: { type: "boolean", description: "是否发到当前 QQ，默认 true" } },
@@ -409,6 +424,33 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
         keys: { type: "string" },
       },
       ["keys"],
+    ),
+    tool(
+      "nexus_window_see",
+      "认出窗口里的文字在哪、控件在哪。网页壳没有控件树时用这个。返回每段字的坐标。",
+      {
+        title: { type: "string", description: "窗口标题，如 汽水音乐" },
+        handle: { type: "number" },
+      },
+      ["title"],
+    ),
+    tool(
+      "nexus_click_text",
+      "按窗口上看见的文字点击。先 nexus_window_see，再用这里的 text 点。",
+      {
+        title: { type: "string" },
+        handle: { type: "number" },
+        text: { type: "string", description: "要点的字，如 搜索" },
+      },
+      ["title", "text"],
+    ),
+    tool(
+      "nexus_web_attach",
+      "挂上已经开着的网页壳（Electron，如汽水音乐）。读出页面上的字和控件位置。没开调试口就改用 nexus_window_see。",
+      {
+        port: { type: "number", description: "调试口，默认自动找 9333 / 9222" },
+        hint: { type: "string", description: "软件名，用来对上页面" },
+      },
     ),
     tool(
       "nexus_web_open",
@@ -691,6 +733,29 @@ export async function runAgentTool(
     const ok = await bag.onebot.sendRecord(tts.path, ctx);
     return { ok, message: ok ? "已发语音" : `合成成功但发送失败：${tts.path}` };
   }
+  if (name === "nexus_qq_poke") {
+    if (!bag.onebot) return { error: "OneBot 未就绪" };
+    const ctx = resolveSendCtx(bag, args);
+    if (!ctx || ctx.channel !== "onebot11") return { error: "当前不在 QQ 会话" };
+    const userId = String(args.user_id || args.userId || ctx.userId || "").trim();
+    const meta = (ctx.meta || {}) as { messageType?: string; groupId?: string };
+    const groupId =
+      String(args.group_id || args.groupId || "").trim() ||
+      (meta.messageType === "group" ? String(meta.groupId || "").trim() : "");
+    if (!userId) return { error: "缺少要戳的人" };
+    const botId = String((ctx.meta as { botId?: string } | undefined)?.botId || "").trim();
+    const r = await bag.onebot.sendPoke({
+      userId,
+      groupId: groupId || undefined,
+      botId: botId || undefined,
+    });
+    return {
+      ok: r.ok,
+      message: r.ok ? "戳到啦" : r.message || "戳失败",
+      user_id: userId,
+      group_id: groupId || undefined,
+    };
+  }
   if (name === "nexus_screen") {
     const shot = await captureDesktop(join(bag.repoRoot, "data", "shots"));
     if (!shot.ok || !shot.path) return { ok: false, platform: shot.platform, message: shot.message };
@@ -800,7 +865,25 @@ export async function runAgentTool(
       keys: String(args.keys || ""),
     });
   }
+  if (name === "nexus_window_see") {
+    const title = String(args.title || "").trim();
+    if (!title) return { error: "缺少窗口标题" };
+    return uiaSee(bag.repoRoot, { title, handle: Number(args.handle) || 0 });
+  }
+  if (name === "nexus_click_text") {
+    const title = String(args.title || "").trim();
+    const text = String(args.text || "").trim();
+    if (!title || !text) return { error: "缺少窗口标题或文字" };
+    return uiaClickText(bag.repoRoot, { title, handle: Number(args.handle) || 0, text });
+  }
 
+  if (name === "nexus_web_attach") {
+    return webAttach(bag.repoRoot, {
+      port: Number(args.port) || 0,
+      hint: String(args.hint || args.title || ""),
+      session: "desktop-web",
+    });
+  }
   if (name === "nexus_web_open") {
     return webOpen(bag.repoRoot, {
       url: String(args.url || ""),

@@ -802,6 +802,40 @@ export class OneBot11Bridge {
     });
   }
 
+  /**
+   * 戳一戳。群聊传 group_id + user_id；私聊只传 user_id。
+   * 优先 send_poke，失败再试 group_poke / friend_poke。
+   */
+  async sendPoke(
+    opts: { userId: string; groupId?: string; botId?: string; prefer?: WebSocket },
+  ): Promise<{ ok: boolean; message: string }> {
+    const userId = Number(String(opts.userId || "").trim());
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return { ok: false, message: "缺少要戳的人" };
+    }
+    const groupRaw = String(opts.groupId || "").trim();
+    const groupId = groupRaw ? Number(groupRaw) : 0;
+    const botId = opts.botId;
+    const prefer = opts.prefer;
+    const tryCall = async (action: string, params: Record<string, unknown>) =>
+      this.callAction(action, params, { botId, prefer });
+
+    if (groupId > 0) {
+      let r = await tryCall("send_poke", { user_id: userId, group_id: groupId });
+      if (!r.ok) r = await tryCall("group_poke", { user_id: userId, group_id: groupId });
+      return {
+        ok: r.ok,
+        message: r.ok ? "已戳" : r.message || "戳失败",
+      };
+    }
+    let r = await tryCall("send_poke", { user_id: userId });
+    if (!r.ok) r = await tryCall("friend_poke", { user_id: userId });
+    return {
+      ok: r.ok,
+      message: r.ok ? "已戳" : r.message || "戳失败",
+    };
+  }
+
   /** 发本地图片（png/jpg 等） */
   async sendImage(filePath: string, ctx: NexusMessage, prefer?: WebSocket): Promise<boolean> {
     const path = String(filePath || "").trim();

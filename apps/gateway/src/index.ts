@@ -105,13 +105,16 @@ import { speechFileToText } from "./tts-stt.js";
 import { agentWorkspaceRoot, workspaceList } from "./agent-workspace.js";
 import {
   uiaClick,
+  uiaClickText,
   uiaFocus,
   uiaKeys,
+  uiaSee,
   uiaSetText,
   uiaTree,
   uiaWindows,
 } from "./uia-bridge.js";
 import {
+  webAttach,
   webClick,
   webClose,
   webKeys,
@@ -445,12 +448,13 @@ function frameworkSystemPrompt(opts?: {
       "问报错、掉线、日志文件：调用 nexus_shell 用系统命令查 data/logs/gateway.log。Windows 例：Get-Content -Tail 80 data\\logs\\gateway.log | Select-String ERROR,WARN。这是本机系统命令，不是框架 # 指令。整台服务器都可以查、可以操作。不要说没有工具，也不要只翻沙箱。",
       "有人要搜网页、查资料、看某个网址，调用 nexus_web_search 或 nexus_web_read。不要说没有搜索。",
       "要发图、发文件、发语音到 QQ：用 nexus_qq_send_image / nexus_qq_send_file / nexus_qq_send_voice。",
+      "主人说戳我、戳一下、poke：只调用 nexus_qq_poke，默认戳当前说话的人。不要翻技能，不要 shell，不要写 MCP，不要说做不到或只能文字假装戳。成功后最多回一句「戳到啦」。",
       "有人说截图、截屏、截个图、电脑画面发群里：调用 nexus_screen。那是本机真实屏幕，不是状态卡片。不要用 nexus_shot 充数。没有显示器就照工具结果说明截不了。",
       "nexus_shot 只渲菜单或 HTML 图，不能拿来代替电脑截图。",
       "写代码仍可用沙箱。查文件、跑系统命令、动服务器用 nexus_shell，工作目录默认框架根，也可指定绝对路径。",
       "改通道人设/回复群或 OneBot 开关路径：用 nexus_channel_patch / nexus_onebot_patch。不要改密码。",
-      "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp，再用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。这是 Windows UIA，不是框架 # 指令。",
-      "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。不要只用 web_read 只读摘要。",
+      "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp。控件树是空的网页壳，用 nexus_web_attach 挂页面，或 nexus_window_see 认出字在哪再 nexus_click_text。普通窗口用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。",
+      "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。snapshot 里有字和坐标。不要只用 web_read 只读摘要。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。",
       "对用户只说人话正文。发现应用没开可以说正在帮你启动，做完再说一声好了。不要把思考过程、工具名、JSON、逐步内心独白甩出去，也不要每做一小步就刷很多条。",
       "工具必须走正式 function call。禁止把 tool_calls、DSML、invoke、XML 写进回复正文。",
@@ -901,8 +905,38 @@ async function bootstrap(): Promise<void> {
         keys: String(args?.keys || ""),
       }),
   });
+  mcp.register({
+    name: "nexus.window_see",
+    description: "认出窗口里文字和控件的位置。网页壳控件树为空时用",
+    handler: (args) =>
+      uiaSee(ROOT, {
+        title: String(args?.title || ""),
+        handle: Number(args?.handle) || 0,
+        limit: Number(args?.limit) || 40,
+      }),
+  });
+  mcp.register({
+    name: "nexus.click_text",
+    description: "按窗口上的文字点击",
+    handler: (args) =>
+      uiaClickText(ROOT, {
+        title: String(args?.title || ""),
+        handle: Number(args?.handle) || 0,
+        text: String(args?.text || ""),
+      }),
+  });
 
   // 网页控件（Playwright）
+  mcp.register({
+    name: "nexus.web_attach",
+    description: "挂上已开的 Electron/Chromium 调试口，读出页面文字与控件",
+    handler: (args) =>
+      webAttach(ROOT, {
+        port: Number(args?.port) || 0,
+        hint: String(args?.hint || args?.title || ""),
+        session: String(args?.session || "desktop-web"),
+      }),
+  });
   mcp.register({
     name: "nexus.web_open",
     description: "用 Playwright 打开网页会话，可点选填字按键",
