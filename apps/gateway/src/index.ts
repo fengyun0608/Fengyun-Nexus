@@ -125,7 +125,7 @@ import {
   watchPluginConfigFile,
 } from "./plugin-config-store.js";
 import { getChannelPluginAssign, saveChannelPluginAssign } from "./channel-plugin-assign.js";
-import { getLogEntries, log } from "./log.js";
+import { getLogEntries, log, queryLogEntries } from "./log.js";
 import { renderHtmlShot } from "./menu-shot.js";
 import {
   activeProvider,
@@ -417,6 +417,7 @@ function frameworkSystemPrompt(opts?: {
       "主人要打开或启动本机软件时，调用 nexus_launch_app，只传软件名。不要说没有启动工具，也不要改口教对方自己去点。",
       "问电脑开了多久、开机时间，调用 nexus_host_uptime。那是整台电脑的开机时长，不是框架自己跑了多久。不要说没有这个工具，也不要编数字。",
       "问内存、处理器、磁盘、系统版本或系统信息，调用 nexus_host_info。不要说还要去装这个能力。",
+      "问报错、错误日志、掉线、WARN、ERROR、最近框架日志：调用 nexus_logs。可传 levels=ERROR,WARN。不要说没有查日志的工具，也不要去翻 agent-workspace。",
       "有人要搜网页、查资料、看某个网址，调用 nexus_web_search 或 nexus_web_read。不要说没有搜索。",
       "要发图、发文件、发语音到 QQ：用 nexus_qq_send_image / nexus_qq_send_file / nexus_qq_send_voice。要渲状态图用 nexus_shot。",
       "写代码、跑白名单命令：用 nexus_workspace_* 和 nexus_run_safe，只在 data/agent-workspace 沙箱。",
@@ -784,6 +785,27 @@ async function bootstrap(): Promise<void> {
     name: "nexus.workspace_list",
     description: "列出 data/agent-workspace 沙箱目录（只读）",
     handler: (args) => workspaceList(ROOT, String(args?.path || ".")),
+  });
+  mcp.register({
+    name: "nexus.logs",
+    description: "查看 Fengyun Nexus 框架最近运行日志（内存环，可按级别/关键词过滤）",
+    handler: (args) => {
+      const levelsRaw = String(args?.levels || args?.level || "").trim();
+      const levels = levelsRaw
+        ? levelsRaw.split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean)
+        : [];
+      const q = queryLogEntries({
+        limit: Number(args?.limit) || 80,
+        levels: levels.length ? levels : undefined,
+        contains: String(args?.contains || args?.q || "").trim() || undefined,
+      });
+      return {
+        ...q,
+        lines: q.items.map(
+          (e) => `${e.at.replace("T", " ").slice(0, 19)} [${e.level}] ${e.message}`,
+        ),
+      };
+    },
   });
 
   agentWorkspaceRoot(ROOT);
@@ -2756,6 +2778,16 @@ async function bootstrap(): Promise<void> {
 
   app.get("/v1/logs", authMiddleware, (req, res) => {
     const limit = Number(req.query.limit ?? 120);
+    const levelsRaw = String(req.query.levels || req.query.level || "").trim();
+    const levels = levelsRaw
+      ? levelsRaw.split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean)
+      : [];
+    const contains = String(req.query.contains || req.query.q || "").trim();
+    if (levels.length || contains) {
+      const q = queryLogEntries({ limit, levels, contains: contains || undefined });
+      res.json({ ok: true, ...q });
+      return;
+    }
     res.json({ ok: true, items: getLogEntries(limit) });
   });
 

@@ -23,6 +23,7 @@ import {
 import { textToSpeechFile } from "./tts-stt.js";
 import type { OneBot11Bridge } from "./onebot11-bridge.js";
 import type { OneBotConfig } from "./onebot11-bridge.js";
+import { queryLogEntries } from "./log.js";
 
 export type AgentToolBag = {
   mcp: McpHost;
@@ -60,6 +61,7 @@ const MASTER_TOOLS = new Set([
   "nexus_launch_app",
   "nexus_host_uptime",
   "nexus_host_info",
+  "nexus_logs",
   "nexus_web_search",
   "nexus_web_read",
   "nexus_list_caps",
@@ -165,6 +167,18 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     ),
     tool("nexus_host_info", "查看本机系统信息：系统、处理器、内存、磁盘、开机时长", {}),
     tool("nexus_host_uptime", "查看这台电脑开机运行了多久", {}),
+    tool(
+      "nexus_logs",
+      "查看 Fengyun Nexus 框架最近运行日志。问报错、掉线、WARN/ERROR、后端日志时必须用这个，不要说没有工具，也不要去翻 agent-workspace。",
+      {
+        limit: { type: "number", description: "条数，默认 60，最大 200" },
+        levels: {
+          type: "string",
+          description: "级别过滤，逗号分隔，如 ERROR 或 ERROR,WARN。不传则全部",
+        },
+        contains: { type: "string", description: "消息关键词过滤" },
+      },
+    ),
     tool(
       "nexus_launch_app",
       "在本机启动已安装软件。只传软件名。",
@@ -317,6 +331,44 @@ export async function runAgentTool(
   }
   if (name === "nexus_host_uptime") return hostUptime();
   if (name === "nexus_host_info") return hostInfo();
+  if (name === "nexus_logs") {
+    const levelsRaw = String(args.levels || args.level || "").trim();
+    const levels = levelsRaw
+      ? levelsRaw.split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean)
+      : [];
+    const limit = Number(args.limit) || 60;
+    const contains = String(args.contains || args.q || "").trim() || undefined;
+    const q = queryLogEntries({
+      limit,
+      levels: levels.length ? levels : undefined,
+      contains,
+    });
+    // 未指定级别时，额外附上最近报错，避免 INFO 盖住 ERROR
+    const errors =
+      levels.length > 0
+        ? null
+        : queryLogEntries({ limit: Math.min(limit, 80), levels: ["ERROR", "WARN"], contains });
+    const lines = q.items.map(
+      (e) => `${e.at.replace("T", " ").slice(0, 19)} [${e.level}] ${e.message}`,
+    );
+    const errorLines =
+      errors?.items.map(
+        (e) => `${e.at.replace("T", " ").slice(0, 19)} [${e.level}] ${e.message}`,
+      ) ?? undefined;
+    return {
+      ok: true,
+      ringTotal: q.total,
+      matched: q.matched,
+      summary: q.summary,
+      errorWarnCount: errors?.summary ?? q.summary,
+      lines,
+      errorLines,
+      note:
+        q.matched === 0 && !(errorLines && errorLines.length)
+          ? "当前内存日志环里没有匹配项。重启后环会清空；更早的只在启动该网关的终端窗口里。"
+          : undefined,
+    };
+  }
   if (name === "nexus_web_search") {
     const query = String(args.query || args.q || "").trim();
     if (!query) return { error: "缺少搜索词" };

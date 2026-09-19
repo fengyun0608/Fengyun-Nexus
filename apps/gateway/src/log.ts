@@ -43,6 +43,47 @@ export function getLogEntries(limit = 120): LogEntry[] {
   return ring.slice(-n);
 }
 
+export type LogQuery = {
+  limit?: number;
+  /** 例如 ERROR / WARN；不传则全部 */
+  levels?: string[];
+  /** 消息包含关键词（不区分大小写） */
+  contains?: string;
+};
+
+/** 查框架内存日志环（控制台 / Agent / MCP 共用）。 */
+export function queryLogEntries(q: LogQuery = {}): {
+  total: number;
+  matched: number;
+  items: LogEntry[];
+  summary: { error: number; warn: number; other: number };
+} {
+  const limit = Math.min(Math.max(Number(q.limit) || 80, 1), RING_MAX);
+  const levels = (q.levels || [])
+    .map((x) => String(x || "").trim().toUpperCase())
+    .filter(Boolean);
+  const needle = String(q.contains || "").trim().toLowerCase();
+
+  let pool = ring.slice();
+  if (levels.length) {
+    const set = new Set(levels);
+    pool = pool.filter((e) => set.has(e.level));
+  }
+  if (needle) {
+    pool = pool.filter((e) => e.message.toLowerCase().includes(needle));
+  }
+
+  const summary = { error: 0, warn: 0, other: 0 };
+  for (const e of pool) {
+    if (e.level === "ERROR") summary.error += 1;
+    else if (e.level === "WARN") summary.warn += 1;
+    else summary.other += 1;
+  }
+
+  const items = pool.slice(-limit);
+  return { total: ring.length, matched: pool.length, items, summary };
+}
+
 export const log = {
   debug: (msg: string, ...extra: unknown[]) => line("DEBUG", c.blue, msg, ...extra),
   info: (msg: string, ...extra: unknown[]) => line("INFO", c.cyan, msg, ...extra),
