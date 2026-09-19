@@ -36,4 +36,5 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:端口/send_poke" -Content
 
 - 不要说「通道只能回消息所以戳不了」然后停手
 - 不要只说「我可以开始写插件了」却不写不跑
+- 不要只把过程写进 `<think>`，标签外一句不说
 - 不要为一次小事改框架 gateway 核心；优先脚本和插件

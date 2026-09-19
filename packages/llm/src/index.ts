@@ -53,6 +53,15 @@ export function stripThinking(text: string): string {
   return revealThinking(text);
 }
 
+function speakOutsideTags(text: string): string {
+  return String(text || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+    .replace(/<\/?think(?:ing)?>/gi, "")
+    .trim();
+}
+
+/** API 的 reasoning 也包进 think 标签，外面只留给人看的正文。 */
 function composeSpeak(reasoning: string, content: string): string {
   const body = stripToolMarkup(String(content || ""));
   const apiThink = String(reasoning || "").trim();
@@ -164,8 +173,9 @@ export class LlmRouter {
     if (!tools.length) return this.chat(messages, opts);
 
     const history = messages.map((m) => ({ ...m }));
-    const maxRounds = Math.min(Math.max(opts?.maxRounds ?? 6, 1), 8);
+    const maxRounds = Math.min(Math.max(opts?.maxRounds ?? 10, 1), 12);
     const thoughts: string[] = [];
+    let silentNudges = 0;
     for (let i = 0; i < maxRounds; i++) {
       const turn = await this.chatTurn(history, tools);
       if (turn.reasoning?.trim()) thoughts.push(turn.reasoning.trim());
@@ -173,8 +183,23 @@ export class LlmRouter {
       const calls = turn.tool_calls?.length ? turn.tool_calls : leaked;
       if (!calls.length) {
         const text = composeSpeak(thoughts.join("\n\n"), turn.content);
-        if (opts?.onDelta && text) await emitSoftDeltas(text, opts.onDelta);
-        return text;
+        if (speakOutsideTags(text)) {
+          if (opts?.onDelta && text) await emitSoftDeltas(text, opts.onDelta);
+          return text;
+        }
+        if (silentNudges < 1) {
+          silentNudges += 1;
+          history.push({ role: "assistant", content: turn.content || "" });
+          history.push({
+            role: "user",
+            content:
+              "还没完成。插件或文件没写就现在写到 plugins/ 并重载。然后在 <think> 外面用一两句说结果。禁止只有思考。",
+          });
+          continue;
+        }
+        const fallback = `${text}\n\n还没写完，我接着弄。`.trim();
+        if (opts?.onDelta) await emitSoftDeltas(fallback, opts.onDelta);
+        return fallback;
       }
 
       history.push({
@@ -249,7 +274,54 @@ export class LlmRouter {
       if (last.reasoning?.trim()) thoughts.push(last.reasoning.trim());
     }
     // 流式终稿已在 onDelta 里吐过正文；若还有多轮思考，补在返回值里
-    const text = composeSpeak(thoughts.join("\n\n"), last.content);
+    let text = composeSpeak(thoughts.join("\n\n"), last.content);
+    if (!speakOutsideTags(text)) {
+      history.push({
+        role: "user",
+        content:
+          "还没完成。插件或文件没写就现在写到 plugins/ 并重载。然后在 <think> 外面用一两句说结果。禁止只有思考。",
+      });
+      const again = await this.chatTurn(history, tools);
+      if (again.reasoning?.trim()) thoughts.push(again.reasoning.trim());
+      const againCalls = again.tool_calls?.length ? again.tool_calls : leakedToolCalls(again.content);
+      if (againCalls.length) {
+        history.push({
+          role: "assistant",
+          content: again.tool_calls?.length ? again.content || "" : "",
+          tool_calls: againCalls,
+        });
+        for (const call of againCalls) {
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
+          } catch {
+            args = {};
+          }
+          let result: unknown;
+          try {
+            result = await onTool(call.function.name, args);
+          } catch (e) {
+            result = { error: e instanceof Error ? e.message : String(e) };
+          }
+          history.push({
+            role: "tool",
+            tool_call_id: call.id,
+            name: call.function.name,
+            content: typeof result === "string" ? result : JSON.stringify(result).slice(0, 6000),
+          });
+        }
+        history.push({
+          role: "user",
+          content: "做完了。在 <think> 外面用一两句说结果。",
+        });
+        const spoken = await this.chatTurn(history);
+        if (spoken.reasoning?.trim()) thoughts.push(spoken.reasoning.trim());
+        text = composeSpeak(thoughts.join("\n\n"), spoken.content || "");
+      } else {
+        text = composeSpeak(thoughts.join("\n\n"), again.content || "");
+      }
+      if (!speakOutsideTags(text)) text = `${text}\n\n还没写完，我接着弄。`.trim();
+    }
     return text || "好了。";
   }
 
