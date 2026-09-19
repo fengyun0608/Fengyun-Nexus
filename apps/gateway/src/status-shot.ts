@@ -15,7 +15,7 @@ import {
   type,
   uptime as osUptime,
 } from "node:os";
-import { memoryUsage, pid, version as nodeVersion } from "node:process";
+import { memoryUsage, pid, resourceUsage, uptime as procUptime, version as nodeVersion } from "node:process";
 import { getHeapStatistics } from "node:v8";
 import {
   escapeShotHtml,
@@ -85,6 +85,125 @@ function localIpv4List(): string[] {
 function replyGroupCount(ids: string[]): string {
   if (!ids.length) return "不限";
   return `${ids.length} 个`;
+}
+
+function formatUsec(us: number): string {
+  if (!Number.isFinite(us) || us < 0) return "—";
+  const sec = us / 1e6;
+  if (sec < 1) return `${Math.round(us / 1000)} 毫秒`;
+  if (sec < 60) return `${sec.toFixed(1)} 秒`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  if (m < 60) return `${m} 分 ${s} 秒`;
+  const h = Math.floor(m / 60);
+  return `${h} 时 ${m % 60} 分`;
+}
+
+function formatProcUptime(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h) return `${h}时${m}分${s}秒`;
+  if (m) return `${m}分${s}秒`;
+  return `${s}秒`;
+}
+
+function formatMaxRss(raw: number): string {
+  if (!Number.isFinite(raw) || raw <= 0) return "—";
+  const asBytesFromKb = raw * 1024;
+  if (asBytesFromKb > totalmem() * 4) return formatBytes(raw);
+  return formatBytes(asBytesFromKb);
+}
+
+function sampleRange(key: "cpu" | "mem" | "node"): string {
+  if (!resourceSamples.length) return "还没有采样";
+  const vals = resourceSamples.map((p) => p[key]);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  return `${min}% – ${max}% · ${resourceSamples.length} 点`;
+}
+
+function nicNames(): string {
+  const names = Object.keys(networkInterfaces()).filter(Boolean);
+  if (!names.length) return "0 块";
+  const shown = names.slice(0, 3).join("、");
+  const more = names.length > 3 ? ` 等 ${names.length} 块` : ` · ${names.length} 块`;
+  return `${shown}${more}`;
+}
+
+function factRows(s: StatusShotInput, os: OsMetrics): Array<[string, string]> {
+  const mu = memoryUsage();
+  const heap = getHeapStatistics();
+  let ru: ReturnType<typeof resourceUsage> | null = null;
+  try {
+    ru = resourceUsage();
+  } catch {
+    ru = null;
+  }
+  const acc = s.accounts || [];
+  const groups = acc.map((a) => a.groups).filter((n): n is number => typeof n === "number");
+  const friends = acc.map((a) => a.friends).filter((n): n is number => typeof n === "number");
+  const groupSum = groups.length ? String(groups.reduce((a, b) => a + b, 0)) : "—";
+  const friendSum = friends.length ? String(friends.reduce((a, b) => a + b, 0)) : "—";
+  const disabled = (s.plugins || []).filter((p) => !p.enabled).length;
+  const la = loadavg();
+  const cpu0 = cpus()[0];
+  const speed = cpu0?.speed ? `${cpu0.speed} MHz` : "—";
+  const model = (cpu0?.model || os.cpuModel || "CPU").replace(/\s+/g, " ").trim();
+  const started = new Date(Date.now() - procUptime() * 1000).toLocaleString("zh-CN", { hour12: false });
+  const freePct = totalmem() ? Math.round((freemem() / totalmem()) * 100) : 0;
+  return [
+    ["进程已运行", formatProcUptime(procUptime())],
+    ["系统已运行", os.sysUptime],
+    ["进程启动", started],
+    ["Node", nodeVersion],
+    ["进程号", String(pid)],
+    ["架构", `${arch()} · ${platform()}`],
+    ["处理器", model.length > 42 ? `${model.slice(0, 40)}…` : model],
+    ["逻辑核 / 主频", `${os.cores} 核 · ${speed}`],
+    ["负载 1 分钟", Number.isFinite(la[0]) ? la[0].toFixed(2) : "—"],
+    ["负载 5 分钟", Number.isFinite(la[1]) ? la[1].toFixed(2) : "—"],
+    ["负载 15 分钟", Number.isFinite(la[2]) ? la[2].toFixed(2) : "—"],
+    ["用户态 CPU", ru ? formatUsec(ru.userCPUTime) : "—"],
+    ["系统态 CPU", ru ? formatUsec(ru.systemCPUTime) : "—"],
+    ["主动切换", ru ? String(ru.voluntaryContextSwitches) : "—"],
+    ["被动切换", ru ? String(ru.involuntaryContextSwitches) : "—"],
+    ["文件读", ru ? String(ru.fsRead) : "—"],
+    ["文件写", ru ? String(ru.fsWrite) : "—"],
+    ["常驻内存", formatBytes(mu.rss)],
+    ["最大驻留", ru ? formatMaxRss(ru.maxRSS) : "—"],
+    ["堆已用", formatBytes(mu.heapUsed)],
+    ["堆已扩", formatBytes(mu.heapTotal)],
+    ["堆上限", formatBytes(heap.heap_size_limit || 0)],
+    ["堆外内存", formatBytes(mu.external)],
+    ["缓冲内存", formatBytes(mu.arrayBuffers)],
+    ["本轮分配", formatBytes(heap.malloced_memory || 0)],
+    ["分配峰值", formatBytes(heap.peak_malloced_memory || 0)],
+    ["物理内存", os.memTotal],
+    ["空闲内存", `${formatBytes(freemem())} · ${freePct}%`],
+    ["网卡", nicNames()],
+    ["采样", `${resourceSamples.length} / 24`],
+    ["CPU 区间", sampleRange("cpu")],
+    ["内存区间", sampleRange("mem")],
+    ["Node 区间", sampleRange("node")],
+    ["消息入库", String(s.db.messages)],
+    ["插件记录", String(s.db.plugins)],
+    ["键值条数", String(s.db.kv)],
+    ["库驱动", s.db.driver],
+    ["插件启用", `${s.pluginsEnabled} / ${s.pluginsTotal}`],
+    ["插件停用", String(disabled)],
+    ["通道", String(s.channels.length)],
+    ["OneBot 连接", s.onebot.enabled ? `${s.onebot.clients} 路` : "未启用"],
+    ["群聊合计", groupSum],
+    ["好友合计", friendSum],
+    ["收到合计", String(acc.reduce((n, a) => n + a.msgIn, 0))],
+    ["发出合计", String(acc.reduce((n, a) => n + a.msgOut, 0))],
+    ["AI 回复群", replyGroupCount(s.replyGroupIds)],
+    ["姿态", `${s.envLabel}`],
+    ["框架", `v${s.version}`],
+    ["原生上下文", String(heap.number_of_native_contexts ?? "—")],
+    ["分离上下文", String(heap.number_of_detached_contexts ?? "—")],
+  ];
 }
 
 function formatBytes(n: number): string {
@@ -425,6 +544,11 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
 .curve-top b { font-size:22px; color:#1f7a56; }
 .curve svg { width:100%; height:78px; display:block; margin-top:4px; }
 .curve-sub { color:var(--muted); font-size:11px; line-height:1.35; min-height:2.6em; }
+.facts { display:grid; grid-template-columns:1fr 1fr; }
+.facts div { display:flex; justify-content:space-between; gap:10px; padding:7px 12px; border-bottom:1px solid var(--line); font-size:12px; }
+.facts div:nth-child(4n+1), .facts div:nth-child(4n+2) { background:#f6fbf8; }
+.facts b { font-weight:650; }
+.facts span { color:var(--muted); text-align:right; }
 </style>
 </head>
 <body>
@@ -464,10 +588,20 @@ export function buildStatusPanelHtml(s: StatusShotInput): string {
     <div class="card">
       <div class="sec">资源曲线</div>
       <div class="curves">
-        ${curveCard("CPU", resourceSamples.map((p) => p.cpu), last.cpu, `${os.cores} 核 · ${os.cpuModel}`, "#2f9b78", "fyCpu")}
-        ${curveCard("内存", resourceSamples.map((p) => p.mem), last.mem, `${os.memUsed} / ${os.memTotal}`, "#3a9aaa", "fyMem")}
-        ${curveCard("Node", resourceSamples.map((p) => p.node), last.node, `堆 ${os.nodeUsed} / 上限 ${os.nodeTotal}`, "#5b7fd6", "fyNode")}
+        ${curveCard("CPU", resourceSamples.map((p) => p.cpu), last.cpu, `${os.cores} 核 · ${os.cpuModel} · ${sampleRange("cpu")}`, "#2f9b78", "fyCpu")}
+        ${curveCard("内存", resourceSamples.map((p) => p.mem), last.mem, `${os.memUsed} / ${os.memTotal} · ${sampleRange("mem")}`, "#3a9aaa", "fyMem")}
+        ${curveCard("Node", resourceSamples.map((p) => p.node), last.node, `堆 ${os.nodeUsed} / 上限 ${os.nodeTotal} · ${sampleRange("node")}`, "#5b7fd6", "fyNode")}
       </div>
+    </div>
+
+    <div class="card">
+      <div class="sec">运行明细</div>
+      <div class="facts">${factRows(s, os)
+        .map(
+          ([k, v]) =>
+            `<div><b>${escapeShotHtml(k)}</b><span>${escapeShotHtml(v)}</span></div>`,
+        )
+        .join("")}</div>
     </div>
 
     <div class="card">
