@@ -1,12 +1,38 @@
 import { createServer, type Server } from "node:http";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { OneBot11Channel, type Ob11MessageEvent } from "@fengyun/nexus-channel";
 import type { NexusMessage } from "@fengyun/nexus-shared";
 import { log } from "./log.js";
 
-/** NapCat 吃不稳中文路径的 file://，也不认 SVG；本地图改 base64:// */
+/** 中文路径的 file:// NapCat 读不稳；巨大 base64 又会被 QQ 拒成富媒体。拷到英文临时目录再发。 */
+function localImageForNapCat(filePath: string): string {
+  const dir = join(tmpdir(), "fengyun-nexus-shot");
+  mkdirSync(dir, { recursive: true });
+  const ext = (filePath.match(/\.(png|jpe?g|gif|webp|bmp)$/i)?.[0] || ".png").toLowerCase();
+  const dest = join(dir, `s-${Date.now()}-${Math.floor(Math.random() * 1000)}${ext}`);
+  copyFileSync(filePath, dest);
+  return pathToFileURL(dest).href;
+}
+
+let lastRichMediaWarn = 0;
+
+function warnSendFail(action: string, retcode: number, message?: string): void {
+  const raw = (message || "无说明").replace(/\s+/g, " ");
+  if (/rich media/i.test(raw)) {
+    const now = Date.now();
+    if (now - lastRichMediaWarn < 20_000) return;
+    lastRichMediaWarn = now;
+    log.warn(`OneBot ${action} 发图被 QQ 拒绝。指令文字照常回，这条报错不再连打`);
+    return;
+  }
+  log.warn(`OneBot ${action} 失败 ret=${retcode} ${raw.slice(0, 180)}`);
+}
+
+/** NapCat 不认 SVG；本地图放到英文临时路径，避免中文路径和超大 base64 */
 function rewriteCqImagesForOneBot(text: string): string {
   return text.replace(/\[CQ:image,file=([^\]]+)\]/gi, (_all, raw: string) => {
     const src = String(raw || "").trim();
@@ -28,11 +54,9 @@ function rewriteCqImagesForOneBot(text: string): string {
     try {
       const size = statSync(filePath).size;
       if (size > 1_600_000) {
-        log.warn("图片太大，QQ 收不了富媒体，改为文字说明");
         return "（图片过大，未能发给 QQ）";
       }
-      const b64 = readFileSync(filePath).toString("base64");
-      return `[CQ:image,file=base64://${b64}]`;
+      return `[CQ:image,file=${localImageForNapCat(filePath)}]`;
     } catch (e) {
       log.warn(`OneBot 读图失败：${e instanceof Error ? e.message : String(e)}`);
       return "（读图失败）";
@@ -446,11 +470,7 @@ export class OneBot11Bridge {
               : undefined;
         const ok = retcode === 0 || status === "ok" || status === "async";
         if (!ok) {
-          const rawTip = (message || "无说明").replace(/\s+/g, " ");
-          const tip = /rich media/i.test(rawTip)
-            ? "图片被 QQ 拒绝"
-            : rawTip.slice(0, 180);
-          log.warn(`OneBot ${pend.action} 失败 ret=${retcode} ${tip}`);
+          warnSendFail(pend.action, retcode, message);
         }
         pend.resolve({
           ok,
