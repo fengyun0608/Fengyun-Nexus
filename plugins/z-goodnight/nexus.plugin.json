@@ -1,0 +1,10 @@
+{
+  "id": "z.goodnight",
+  "name": "你看我看",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "priority": 2100,
+  "hooks": ["onReady"],
+  "permissions": ["channel.send"],
+  "category": "local"
+}

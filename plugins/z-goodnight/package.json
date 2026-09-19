@@ -1,0 +1,9 @@
+{
+  "name": "@fengyun/z-goodnight",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fengyun/nexus-plugin-sdk": "workspace:*"
+  }
+}
