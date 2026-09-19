@@ -96,6 +96,8 @@ import {
   toWorkflowDef,
 } from "./workflow-files.js";
 import { makePluginCtx, setPluginRuntime, setPluginChannelBag, setPluginOneBot } from "./plugin-ctx.js";
+import { loadAgentSkills, skillsPromptBlock } from "./agent-skills.js";
+import { buildAgentToolDefs, runAgentTool } from "./agent-tools.js";
 import { isJunkAiText, splitAiSegments } from "./ai-segments.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
@@ -397,6 +399,7 @@ function frameworkSystemPrompt(): string {
     "有人问你是谁、是什么模型、谁做的，只说 Fengyun Nexus，不要报中文产品名或出品方。",
     "不要说自己是别的模型，也不要说自己是别的产品。",
     "这个通道如果另外写了人设，就在 Fengyun Nexus 这个身份上按那个人设说话。",
+    "需要查框架状态、插件、工作流或 MCP 时，使用提供的工具，不要编造。",
   ].join("\n");
 }
 
@@ -695,7 +698,63 @@ async function bootstrap(): Promise<void> {
       db: db.stats(),
     }),
   });
+  mcp.register({
+    name: "nexus.plugins",
+    description: "List loaded plugins",
+    handler: () =>
+      plugins.list().map((p) => ({
+        id: p.id,
+        name: p.name,
+        version: p.version,
+      })),
+  });
+  mcp.register({
+    name: "nexus.workflows",
+    description: "List workflows",
+    handler: () => workflows.list().map((w) => ({ id: w.id, name: w.name })),
+  });
 
+  workflows.setHandlers({
+    llm: async (prompt) => {
+      if (!llm.snapshot().hasKey) return "";
+      return llm.chat([
+        { role: "system", content: frameworkSystemPrompt() },
+        { role: "user", content: prompt },
+      ]);
+    },
+    tool: async (name, args) => {
+      const mapped = name.includes(".") ? name : `nexus.${name}`;
+      try {
+        return await mcp.call(mapped, args);
+      } catch {
+        try {
+          return await mcp.call(name, args);
+        } catch (e) {
+          return { error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+    },
+    http: async (url, init) => {
+      const method = String(init.method || "GET").toUpperCase();
+      const res = await fetch(url, {
+        method,
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: method === "GET" || method === "HEAD" ? undefined : JSON.stringify(init.body ?? {}),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const text = await res.text();
+      try {
+        return { status: res.status, json: JSON.parse(text) };
+      } catch {
+        return { status: res.status, text: text.slice(0, 2000) };
+      }
+    },
+  });
+
+  const agentSkills = loadAgentSkills(ROOT);
+  await bootLine(
+    agentSkills.length ? `运行时技能 ${agentSkills.length} 个` : "运行时技能：无",
+  );
   initEnvTasks(ROOT);
 
   const tokens = new Map<string, { user: string; exp: number }>();
@@ -1161,6 +1220,8 @@ async function bootstrap(): Promise<void> {
     const history: Array<{ role: "user" | "assistant" | "system"; content: string }> = [
       { role: "system", content: frameworkSystemPrompt() },
     ];
+    const skillBlock = skillsPromptBlock(agentSkills);
+    if (skillBlock) history.push({ role: "system", content: skillBlock });
     const persona = String(chSettings.systemPrompt || "").trim();
     if (persona) history.push({ role: "system", content: persona });
     // 给模型：去掉 @ 和呼唤前缀
@@ -1187,9 +1248,22 @@ async function bootstrap(): Promise<void> {
         content: t.content,
       })),
     );
+
+    const toolBag = {
+      mcp,
+      workflows,
+      plugins,
+      statusLines: collectStatusLines,
+      channelSettings: () => getChannelSettings(channelCfg, msg.channel),
+      userId: msg.userId,
+      isMaster,
+      isAdminConsole,
+    };
+    const tools = buildAgentToolDefs(mcp);
+
     const assistant = (
       await Promise.race([
-        llm.chat(history),
+        llm.chatWithTools(history, tools, (name, args) => runAgentTool(name, args, toolBag)),
         new Promise<string>((_, reject) => {
           setTimeout(() => reject(new Error("AI 响应超时")), 50_000);
         }),

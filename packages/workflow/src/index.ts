@@ -29,11 +29,23 @@ export interface WorkflowRunResult {
   ok: boolean;
   detail?: string;
   memory?: Record<string, unknown>;
+  outputs?: Record<string, unknown>;
 }
+
+export type WorkflowHandlers = {
+  llm?: (prompt: string, payload: Record<string, unknown>) => Promise<string> | string;
+  tool?: (name: string, args: Record<string, unknown>) => Promise<unknown> | unknown;
+  http?: (url: string, init: Record<string, unknown>) => Promise<unknown> | unknown;
+};
 
 export class WorkflowRunner {
   private defs = new Map<string, WorkflowDef>();
   private memoryStore = new Map<string, Record<string, unknown>>();
+  private handlers: WorkflowHandlers = {};
+
+  setHandlers(h: WorkflowHandlers): void {
+    this.handlers = { ...this.handlers, ...h };
+  }
 
   register(def: WorkflowDef): void {
     this.defs.set(def.id, def);
@@ -53,6 +65,7 @@ export class WorkflowRunner {
 
     const memKey = String(payload.memoryKey ?? id);
     const memory = { ...(this.memoryStore.get(memKey) ?? {}) };
+    const outputs: Record<string, unknown> = {};
     const byId = new Map(def.nodes.map((n) => [n.id, n]));
     const visited: string[] = [];
     let cur: string | undefined = def.entry;
@@ -71,8 +84,43 @@ export class WorkflowRunner {
         if (op === "set") memory[key] = payload[key] ?? node.config?.value;
         if (op === "get") payload[key] = memory[key];
       }
+      if (node.type === "llm") {
+        const prompt = String(
+          node.config?.prompt ?? payload.prompt ?? payload.text ?? "你好",
+        );
+        if (this.handlers.llm) {
+          const text = await this.handlers.llm(prompt, { ...payload, memory });
+          outputs.llm = text;
+          payload.llm = text;
+        } else {
+          outputs.llm = "";
+          payload.llm = "";
+        }
+      }
       if (node.type === "tool") {
-        payload._lastTool = String(node.config?.name ?? "tool");
+        const name = String(node.config?.name ?? "tool");
+        const args = {
+          ...((node.config?.args as Record<string, unknown>) || {}),
+          ...payload,
+        };
+        if (this.handlers.tool) {
+          const result = await this.handlers.tool(name, args);
+          outputs.tool = result;
+          payload._lastTool = name;
+          payload._lastToolResult = result;
+        } else {
+          payload._lastTool = name;
+        }
+      }
+      if (node.type === "http") {
+        const url = String(node.config?.url ?? "");
+        if (url && this.handlers.http) {
+          outputs.http = await this.handlers.http(url, {
+            method: String(node.config?.method || "GET"),
+            body: node.config?.body,
+          });
+          payload._lastHttp = outputs.http;
+        }
       }
       if (node.type === "branch") {
         const flag = Boolean(payload.branch ?? node.config?.default);
@@ -82,6 +130,6 @@ export class WorkflowRunner {
       cur = node.next?.[0];
     }
     this.memoryStore.set(memKey, memory);
-    return { workflowId: id, visited, ok: true, memory };
+    return { workflowId: id, visited, ok: true, memory, outputs };
   }
 }

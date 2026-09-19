@@ -35,6 +35,11 @@ export class ZMasterPlugin extends Plugin {
   rule = [
     { reg: "^#主人菜单$", fnc: "menu", describe: "主人菜单" },
     {
+      reg: "^#认主$",
+      fnc: "claimMaster",
+      describe: "尚无主人时认主",
+    },
+    {
       reg: "^#主人列表",
       fnc: "listMasters",
       permission: "master" as const,
@@ -58,6 +63,10 @@ export class ZMasterPlugin extends Plugin {
 
   async menu(e: NexusEvent, ctx: PluginContext) {
     const sections = [
+      {
+        title: "认主",
+        lines: ["#认主 — 通道还没有主人时，把自己设为核心主人"],
+      },
       {
         title: "查看",
         lines: ["#主人列表 — 核心 / 新 / 普通"],
@@ -86,6 +95,15 @@ export class ZMasterPlugin extends Plugin {
       return;
     }
     await e.replyImage(pathToFileURL(shot.pngPath).href);
+  }
+
+  async claimMaster(e: NexusEvent, ctx: PluginContext) {
+    const r = ctx.masters?.claim({ channelId: e.channel, actorId: e.userId });
+    if (!r?.ok) {
+      await e.reply(r?.error || "认主失败");
+      return;
+    }
+    await e.reply("已认主，你是本通道核心主人");
   }
 
   async listMasters(e: NexusEvent, ctx: PluginContext) {

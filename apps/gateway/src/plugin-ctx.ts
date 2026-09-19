@@ -5,6 +5,7 @@ import type {
 import type { OneBot11Bridge } from "./onebot11-bridge.js";
 import {
   addChannelMaster,
+  claimFirstMaster,
   getChannelSettings,
   isChannelMaster,
   masterLevelOf,
@@ -95,6 +96,20 @@ export function makePluginCtx(
           normal: [...s.normalMasters],
           all: [...s.masters],
         };
+      },
+      claim: (o?: { channelId?: string; actorId?: string }) => {
+        if (!channelBag) return { ok: false, error: "通道未就绪" };
+        const cid = o?.channelId || channelId;
+        const actor = o?.actorId || opts?.eventUserId || "";
+        const cfg = channelBag.getCfg();
+        const prev = getChannelSettings(cfg, cid);
+        const r = claimFirstMaster(prev, actor);
+        if (!r.ok) return { ok: false, error: r.error };
+        channelBag.setCfg({
+          channels: { ...cfg.channels, [cid]: r.settings },
+        });
+        channelBag.save();
+        return { ok: true };
       },
       add: (targetId, level, o) => {
         if (!channelBag) return { ok: false, error: "通道未就绪" };

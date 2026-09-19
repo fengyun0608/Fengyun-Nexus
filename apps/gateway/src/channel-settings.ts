@@ -175,6 +175,28 @@ const LEVEL_RANK: Record<MasterLevel, number> = {
 
 export type MasterMutateResult = { ok: true; settings: ChannelSettings } | { ok: false; error: string };
 
+/** 通道尚无主人时，第一个人可用 #认主 成为核心主人 */
+export function claimFirstMaster(
+  settings: ChannelSettings,
+  userId: string,
+): MasterMutateResult {
+  if (settings.masters.length || settings.coreMasters.length) {
+    return { ok: false, error: "已有主人，请用 #添加主人" };
+  }
+  const target = String(userId).trim();
+  if (!target) return { ok: false, error: "无法识别你的账号" };
+  if (!/^\d{5,}$/.test(target) && !/^web:/i.test(target) && target !== "admin") {
+    /* QQ 用数字；控制台也可能是别的 id，仍允许认主 */
+    if (target.length < 2) return { ok: false, error: "账号无效" };
+  }
+  let next = { ...settings };
+  next.coreMasters = [target];
+  next.newMasters = [];
+  next.normalMasters = [];
+  next = syncMastersUnion(next);
+  return { ok: true, settings: next };
+}
+
 /** 主人互加：核心可加任何级；新主人可加新/普通；普通只能加普通。 */
 export function addChannelMaster(
   settings: ChannelSettings,

@@ -211,6 +211,11 @@ export interface PluginContext {
       normal: string[];
       all: string[];
     };
+    /** 尚无主人时认主成为核心 */
+    claim: (opts?: { channelId?: string; actorId?: string }) => {
+      ok: boolean;
+      error?: string;
+    };
     add: (
       targetId: string,
       level: MasterLevel,
