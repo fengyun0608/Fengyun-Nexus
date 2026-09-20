@@ -37,6 +37,7 @@ export type LlmStreamOpts = {
   onDelta?: (text: string) => void;
   /** 每回合摘要，给网关打日志。 */
   onTrace?: (line: string) => void;
+  /** 0 或不传：不限轮次，直到标签外有结果。正数才截断。 */
   maxRounds?: number;
 };
 
@@ -67,32 +68,6 @@ function clipLine(text: string, n = 180): string {
   const t = String(text || "").replace(/\s+/g, " ").trim();
   if (!t) return "";
   return t.length > n ? `${t.slice(0, n)}…` : t;
-}
-
-/** 列目录、读文件算只读。写文件、重载不算。 */
-function isBrowseCall(call: LlmToolCall): boolean {
-  const name = call.function.name;
-  if (
-    name === "nexus_list_skills" ||
-    name === "nexus_list_plugins" ||
-    name === "nexus_list_caps" ||
-    name === "nexus_skill_read" ||
-    name === "nexus_workspace_read" ||
-    name === "nexus_workspace_list"
-  ) {
-    return true;
-  }
-  if (name !== "nexus_shell") return false;
-  let cmd = "";
-  try {
-    cmd = String((JSON.parse(call.function.arguments || "{}") as { command?: string }).command || "");
-  } catch {
-    return false;
-  }
-  if (/Set-Content|Out-File|Add-Content|New-Item|mkdir|WriteAllText|plugin_reload|@'|@"|\bni\b/i.test(cmd)) {
-    return false;
-  }
-  return /Get-Content|Get-ChildItem|Select-Object|Select-String|\bls\b|\bdir\b|\bfind\b|\bcat\b|\btype\b/i.test(cmd);
 }
 
 /** API 的 reasoning 也包进 think 标签，外面只留给人看的正文。 */
@@ -207,10 +182,9 @@ export class LlmRouter {
     if (!tools.length) return this.chat(messages, opts);
 
     const history = messages.map((m) => ({ ...m }));
-    const maxRounds = Math.min(Math.max(opts?.maxRounds ?? 20, 1), 28);
+    // 0 = 不限轮次。能力模式默认不限，直到标签外有结果才停。
+    const maxRounds = opts?.maxRounds ?? 0;
     const thoughts: string[] = [];
-    let readStreak = 0;
-    let toldToWrite = false;
     const trace = (line: string) => {
       try {
         opts?.onTrace?.(line);
@@ -230,7 +204,6 @@ export class LlmRouter {
         content: hideContent ? "" : content || "",
         tool_calls: calls,
       });
-      let browse = 0;
       for (const call of calls) {
         let args: Record<string, unknown> = {};
         try {
@@ -250,18 +223,6 @@ export class LlmRouter {
           name: call.function.name,
           content: typeof result === "string" ? result : JSON.stringify(result).slice(0, 6000),
         });
-        if (isBrowseCall(call)) browse += 1;
-      }
-      if (browse === calls.length) readStreak += 1;
-      else readStreak = 0;
-      if (readStreak >= 4 && !toldToWrite) {
-        toldToWrite = true;
-        history.push({
-          role: "user",
-          content:
-            "读够了，不要再 Get-Content、列目录、翻网关源码。立刻把插件写到 plugins/ 并调用 nexus_plugin_reload。写完在 <think> 外面说一句结果。",
-        });
-        trace("AI 停读  连续只读已够，下一轮必须写文件");
       }
     };
     const oneTurn = async (round: number): Promise<string | null> => {
@@ -279,30 +240,21 @@ export class LlmRouter {
         history.push({
           role: "user",
           content:
-            "还没写完。不要停，不要只思考。现在就把文件写到 plugins/ 并重载，然后在 <think> 外面说一句。",
+            "还没写完。不要停，不要只思考。继续读、继续写，写到 plugins/ 并重载。做完再在 <think> 外面说一句。",
         });
-        trace("AI 空回话  继续写文件，不结束");
+        trace("AI 空回话  继续，不因轮次结束");
         return null;
       }
       await runCalls(calls, turn.content || "", leaked.length > 0);
       return null;
     };
 
-    for (let i = 0; i < maxRounds; i++) {
-      const done = await oneTurn(i + 1);
+    for (let i = 1; maxRounds <= 0 || i <= maxRounds; i++) {
+      const done = await oneTurn(i);
       if (done) return finish(done);
+      if (i % 20 === 0) trace(`AI 仍在继续  已 ${i} 回合，不因读或写的轮次停`);
     }
-    history.push({
-      role: "user",
-      content:
-        "轮次用在读上面了。现在只写 plugins/ 并 nexus_plugin_reload，不要再读。写完在 <think> 外面说一句。",
-    });
-    trace("AI 续写  读文件轮次用尽，接着写文件");
-    for (let w = 0; w < 6; w++) {
-      const done = await oneTurn(maxRounds + w + 1);
-      if (done) return finish(done);
-    }
-    trace("AI 停  写文件轮次也用尽");
+    trace("AI 停  已到调用方给出的轮次上限");
     return finish("还没写完，我接着弄。");
   }
 
@@ -340,7 +292,7 @@ export class LlmRouter {
     if (!this.opts.apiKey) return { content: "" };
 
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 90_000);
+    const timer = setTimeout(() => ctrl.abort(), 600_000);
     let res: Response;
     try {
       res = await fetch(`${this.endpoint()}/chat/completions`, {
@@ -392,7 +344,7 @@ export class LlmRouter {
     if (!this.opts.apiKey) return { content: "" };
 
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 120_000);
+    const timer = setTimeout(() => ctrl.abort(), 600_000);
     let res: Response;
     try {
       res = await fetch(`${this.endpoint()}/chat/completions`, {

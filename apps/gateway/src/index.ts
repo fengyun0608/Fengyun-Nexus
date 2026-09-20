@@ -453,7 +453,7 @@ function frameworkSystemPrompt(opts?: {
       "主人说戳我、戳一下：有 nexus_qq_poke 就调；没有就自己查 OneBot 地址（nexus_onebot_get），用 shell 调 send_poke / group_poke，或写插件用 ctx.ob11.call 再重载。不要只文字假装戳。",
       "有人说截图、截屏、截个图、电脑画面发群里：调用 nexus_screen。那是本机真实屏幕，不是状态卡片。不要用 nexus_shot 充数。没有显示器就照工具结果说明截不了。",
       "nexus_shot 只渲菜单或 HTML 图，不能拿来代替电脑截图。",
-      "写代码：短脚本放沙箱；要常驻能力就写到 plugins/ 再 nexus_plugin_reload。看一两个示例就写，不要把网关源码整份读完。说「已创建 / 写好了」之前，必须用 nexus_shell 确认 plugins/目录/index.ts 真的在，并看到热更加载成功。文件不在就不要说写好了。",
+      "写代码：短脚本放沙箱；要常驻能力就写到 plugins/ 再 nexus_plugin_reload。读文件、写文件不限轮次，写完再停。说「已创建 / 写好了」之前，必须用 nexus_shell 确认 plugins/目录/index.ts 真的在，并看到热更加载成功。文件不在就不要说写好了。",
       "改通道人设/回复群或 OneBot 开关路径：用 nexus_channel_patch / nexus_onebot_patch。不要改密码。",
       "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp。控件树是空的网页壳，用 nexus_web_attach 挂页面，或 nexus_window_see 认出字在哪再 nexus_click_text。普通窗口用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。不够就自己写脚本。",
       "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。snapshot 里有字和坐标。不要只用 web_read 只读摘要。",
@@ -1726,39 +1726,41 @@ async function bootstrap(): Promise<void> {
       },
     };
 
-    const llmDeadlineMs = capabilityMode ? 600_000 : 90_000;
+    const llmDeadlineMs = capabilityMode ? 0 : 90_000;
+    const toolRun = capabilityMode
+      ? llm.chatWithTools(
+          history,
+          buildAgentToolDefs(mcp),
+          async (name, args) => {
+            const hint =
+              name === "nexus_shell"
+                ? ` ${String((args as { command?: string }).command || "")
+                    .replace(/\s+/g, " ")
+                    .slice(0, 160)}`
+                : "";
+            log.info(`工具 ${name}${hint}`);
+            const result = await runAgentTool(name, args, toolBag);
+            const raw = typeof result === "string" ? result : JSON.stringify(result ?? "");
+            log.info(`工具回执 ${name}  ${raw.replace(/\s+/g, " ").slice(0, 180) || "空"}`);
+            return result;
+          },
+          {
+            ...(opts?.onDelta ? { onDelta: opts.onDelta } : {}),
+            onTrace: (line) => log.info(line),
+            maxRounds: 0,
+          },
+        )
+      : llm.chat(history, opts?.onDelta ? { onDelta: opts.onDelta } : undefined);
     const assistant = (
-      await Promise.race([
-        capabilityMode
-          ? llm.chatWithTools(
-              history,
-              buildAgentToolDefs(mcp),
-              async (name, args) => {
-                const hint =
-                  name === "nexus_shell"
-                    ? ` ${String((args as { command?: string }).command || "")
-                        .replace(/\s+/g, " ")
-                        .slice(0, 160)}`
-                    : "";
-                log.info(`工具 ${name}${hint}`);
-                const result = await runAgentTool(name, args, toolBag);
-                const raw = typeof result === "string" ? result : JSON.stringify(result ?? "");
-                log.info(`工具回执 ${name}  ${raw.replace(/\s+/g, " ").slice(0, 180) || "空"}`);
-                return result;
-              },
-              {
-                ...(opts?.onDelta ? { onDelta: opts.onDelta } : {}),
-                onTrace: (line) => log.info(line),
-              },
-            )
-          : llm.chat(history, opts?.onDelta ? { onDelta: opts.onDelta } : undefined),
-        new Promise<string>((_, reject) => {
-          setTimeout(
-            () => reject(new Error(capabilityMode ? "AI 响应超时（能力模式多轮工具）" : "AI 响应超时")),
-            llmDeadlineMs,
-          );
-        }),
-      ]).catch((e) => {
+      await (llmDeadlineMs > 0
+        ? Promise.race([
+            toolRun,
+            new Promise<string>((_, reject) => {
+              setTimeout(() => reject(new Error("AI 响应超时")), llmDeadlineMs);
+            }),
+          ])
+        : toolRun
+      ).catch((e) => {
         const tip = e instanceof Error ? e.message : String(e);
         log.warn(`LLM 调用失败：${tip}`);
         return tip.includes("超时") ? "AI 响应超时，我再试一次或说简单点。" : `AI 异常：${tip}`;
