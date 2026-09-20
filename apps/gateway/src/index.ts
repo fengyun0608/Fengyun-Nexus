@@ -143,7 +143,11 @@ import {
 import { scheduleSystemRestart } from "./restart-exec.js";
 import { remountPluginChannels } from "./channel-adapters.js";
 import { renderDocView, findRepoRoot } from "./docs-serve.js";
-import { reloadPlugins, watchPluginsHotReload } from "./plugin-hot-reload.js";
+import {
+  reloadPlugins,
+  seedPluginDirMap,
+  watchPluginsHotReload,
+} from "./plugin-hot-reload.js";
 import {
   applyStoredPluginConfigs,
   loadPluginConfigMap,
@@ -677,6 +681,7 @@ async function bootstrap(): Promise<void> {
     });
     if (enabled) await bootLine(`已加载：${p.manifest.name || p.manifest.id}`);
   }
+  seedPluginDirMap(scan.byDir || {});
 
   const quietBoot = {
     ok: (_m: string) => undefined,

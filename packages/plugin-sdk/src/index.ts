@@ -299,6 +299,13 @@ export class PluginHost {
     this.plugins.set(plugin.manifest.id, plugin);
   }
 
+  /** 卸掉单个插件（热更某个目录时用），停用标记一并清掉。 */
+  unregister(id: string): boolean {
+    const had = this.plugins.delete(id);
+    this.disabled.delete(id);
+    return had;
+  }
+
   /** Drop all loaded plugins; enabled flags for known ids can be restored by caller. */
   clear(): void {
     this.plugins.clear();
@@ -370,8 +377,11 @@ export class PluginHost {
   async emitReady(
     makeCtx: (id: string) => PluginContext,
     print?: (line: string) => void | Promise<void>,
+    onlyIds?: Iterable<string>,
   ): Promise<void> {
+    const allow = onlyIds ? new Set(onlyIds) : null;
     for (const p of this.values()) {
+      if (allow && !allow.has(p.manifest.id)) continue;
       if (!this.isEnabled(p.manifest.id)) continue;
       try {
         const r = await p.onReady?.(makeCtx(p.manifest.id));
