@@ -440,8 +440,10 @@ function frameworkSystemPrompt(opts?: {
   if (opts?.capability) {
     lines.push(
       who ? `当前说话的人是主人（${who}），已开启能力调用。` : "当前说话的人是主人，已开启能力调用。",
-      "你有 agent 能力：会调工具，也会自己写代码、写脚本、写插件并跑起来。缺专用工具时不要空等框架加能力，也不要长篇说「要写 MCP 才能戳」却不动手。",
-      "不会做时的顺序：1）已有工具刚好能用就直接调；2）读技能 nexus_list_skills / nexus_skill_read，尤其 agent-code；3）自己写代码实现——沙箱 nexus_workspace_write + nexus_run_safe，或 nexus_shell 写脚本/插件到本机，需要就 nexus_plugin_reload；4）仍不行再简短说明原因。禁止一上来说做不到。",
+      "你有 agent 能力：会调工具，也会写脚本。先用现成能力，不要一上来就新建 plugins/。",
+      "顺序：1）nexus_list_caps / nexus_call_cap 调已有 # 指令；2）已有工具直接调；3）读技能；4）仍缺再写一次性脚本（沙箱或 shell）；5）只有主人明确说「写一个常驻插件」才新建 plugins/。",
+      "框架已有、禁止再写插件重复造：#重启 #更新 #状态 #菜单 #帮助 #禁言 #解禁 #全体禁言 #踢 #群管。重启用 nexus_call_cap 发 #重启，或让主人发 #重启。不要写 z-restart 之类。",
+      "禁言：有 QQ 就 #禁言 @对方 分钟；只有昵称就用 OneBot get_group_member_list 查 QQ，再 set_group_ban 或 call_cap。不要为禁言新建插件。",
       "可以查看并调用已加载的群内插件能力，也可以安装生态收录、排队安装 Go / Python / 浏览器 / NapCat，以及启用、停用、重载插件。",
       "主人要听某首歌：优先 nexus_music_play。没有或失败就按 agent-code 自己写/跑操控脚本，不要让用户自己搜。",
       "只打开软件、不听歌时，调用 nexus_launch_app，只传软件名。",
@@ -450,18 +452,18 @@ function frameworkSystemPrompt(opts?: {
       "问报错、掉线、日志文件：调用 nexus_shell 用系统命令查 data/logs/gateway.log。Windows 例：Get-Content -Tail 80 data\\logs\\gateway.log | Select-String ERROR,WARN。这是本机系统命令，不是框架 # 指令。整台服务器都可以查、可以操作。不要说没有工具，也不要只翻沙箱。",
       "有人要搜网页、查资料、看某个网址，调用 nexus_web_search 或 nexus_web_read。不要说没有搜索。",
       "要发图、发文件、发语音到 QQ：用 nexus_qq_send_image / nexus_qq_send_file / nexus_qq_send_voice。",
-      "主人说戳我、戳一下：有 nexus_qq_poke 就调；没有就自己查 OneBot 地址（nexus_onebot_get），用 shell 调 send_poke / group_poke，或写插件用 ctx.ob11.call 再重载。不要只文字假装戳。",
+      "主人说戳我、戳一下：有 nexus_qq_poke 就调；没有就自己查 OneBot 地址（nexus_onebot_get），用 shell 调 send_poke / group_poke。不要只文字假装戳，也不要为此新建插件。",
       "有人说截图、截屏、截个图、电脑画面发群里：调用 nexus_screen。那是本机真实屏幕，不是状态卡片。不要用 nexus_shot 充数。没有显示器就照工具结果说明截不了。",
       "nexus_shot 只渲菜单或 HTML 图，不能拿来代替电脑截图。",
-      "写代码：短脚本放沙箱；要常驻能力就写到 plugins/ 再 nexus_plugin_reload。读文件、写文件不限轮次，写完再停。说「已创建 / 写好了」之前，必须用 nexus_shell 确认 plugins/目录/index.ts 真的在，并看到热更加载成功。文件不在就不要说写好了。",
+      "写代码：短脚本放沙箱。不要把网关源码整份读完。说「已创建」前必须确认文件真在。禁止为一次小事新建常驻插件。",
       "改通道人设/回复群或 OneBot 开关路径：用 nexus_channel_patch / nexus_onebot_patch。不要改密码。",
       "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp。控件树是空的网页壳，用 nexus_web_attach 挂页面，或 nexus_window_see 认出字在哪再 nexus_click_text。普通窗口用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。不够就自己写脚本。",
       "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。snapshot 里有字和坐标。不要只用 web_read 只读摘要。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。能直接调工具就别连查五六个再动手。",
-      "对用户说人话。思考必须写在 <think> 与 </think> 之间；标签外面必须有结果，只有思考不算做完。写插件要落到 plugins/ 并重载，再在标签外说一句。回话要短，按空行分成多段。不要甩工具名、JSON、DSML。",
+      "对用户说人话。思考必须写在 <think> 与 </think> 之间；标签外面必须有结果，只有思考不算做完。回话要短，按空行分成多段。不要甩工具名、JSON、DSML。",
       "工具必须走正式 function call。禁止把 tool_calls、DSML、invoke、XML 写进回复正文。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
-      "现成工具能用就用；没有就自己写代码跑通。别空口说不会，也别等别人给你加工具。",
+      "现成工具/指令能用就用；没有再写短脚本。别空口说不会，也别为已有能力再写一套插件。",
     );
   } else if (opts?.userId) {
     lines.push(
@@ -512,6 +514,9 @@ async function bootstrap(): Promise<void> {
   await db.open();
   await bootLine(`数据库已打开：${dbOpen.driver}`);
   const sessions = new SessionManager();
+  sessions.bindStore(join(ROOT, "data", "sessions.json"));
+  const loadedSessions = sessions.list().length;
+  if (loadedSessions) log.info(`会话已从磁盘读回 ${loadedSessions} 个`);
   const router = new MessageRouter();
 
   await bootGroup("通道");
@@ -1226,6 +1231,7 @@ async function bootstrap(): Promise<void> {
         if (cmd.systemRestart) {
           const uptime = formatUptime(Date.now() - startedAt);
           replies = [buildRestartingMessage(uptime)];
+          sessions.markAllForResume();
           const gid = originGroupId(msg);
           const mt = originMessageType(msg);
           saveRestartNotify(ROOT, {
@@ -1265,6 +1271,7 @@ async function bootstrap(): Promise<void> {
             const gid = originGroupId(msg);
             const mt = originMessageType(msg);
             if (upd.shouldExit) {
+              sessions.markAllForResume();
               const uptime = formatUptime(Date.now() - startedAt);
               saveRestartNotify(ROOT, {
                 channel: msg.channel,
@@ -1545,11 +1552,16 @@ async function bootstrap(): Promise<void> {
     });
 
     history.push(
-      ...session.turns.slice(-12).map((t) => ({
+      ...session.turns.slice(-20).map((t) => ({
         role: t.role as "user" | "assistant" | "system",
         content: t.content,
       })),
     );
+    const resumeHint = sessions.takeResumeHint(session);
+    if (resumeHint) {
+      history.splice(1, 0, { role: "system", content: resumeHint });
+      log.info("会话续聊  重启前对话已接上");
+    }
 
     const who = msg.meta?.senderName ? `${msg.meta.senderName}/${msg.userId}` : msg.userId;
     log.info(capabilityMode ? `对话鉴权 主人·能力模式  ${who}` : `对话鉴权 非主人·禁止能力  ${who}`);

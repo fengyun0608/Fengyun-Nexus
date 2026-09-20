@@ -142,6 +142,9 @@ importers:
         specifier: workspace:*
         version: link:../shared
     devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.3
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -229,7 +232,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  plugins/z-goodnight:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   plugins/z-group-admin:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/z-group-notice:
     dependencies:
       '@fengyun/nexus-plugin-sdk':
         specifier: workspace:*
@@ -266,6 +281,12 @@ importers:
         version: link:../../packages/plugin-sdk
 
   plugins/z-status:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/z-summon-owner:
     dependencies:
       '@fengyun/nexus-plugin-sdk':
         specifier: workspace:*
