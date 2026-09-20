@@ -82,9 +82,15 @@ export function matchWakePrefix(
     const rePlain = new RegExp(`^${escapeReg(p)}\\s*`, "i");
     if (rePlain.test(t)) {
       let rest = t.replace(rePlain, "").trim();
-      // nexus帮助 → #帮助；nexus 你好 → 你好（有空格不加 #）
-      if (rest && !rest.startsWith(cmd) && !rest.startsWith("#") && !/\s/.test(rest)) {
-        rest = `${cmd}${rest}`;
+      // 「nexus帮助」→「#帮助」；「nexus 你好」有空格 → 仍当说话
+      // 中文常没空格：「白子禁言这个人」不能加成「#禁言…」，否则会误进群管
+      if (rest && !rest.startsWith(cmd) && !rest.startsWith("#")) {
+        const hasArgSep = /\s/.test(rest) || rest.includes("@") || /\[CQ:at/i.test(rest);
+        const shortBare = [...rest].length <= 6;
+        if (hasArgSep || shortBare) {
+          // 有空格/@：白子禁言 @对方 10；短词：白子帮助 / 白子状态
+          rest = `${cmd}${rest}`;
+        }
       }
       return { matched: true, rest };
     }
