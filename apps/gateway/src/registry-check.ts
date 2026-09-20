@@ -27,7 +27,7 @@ export type PluginUpdateItem = {
   repoUrl?: string;
   localFingerprint?: string;
   remoteFingerprint?: string;
-  status: "same" | "update" | "local-only" | "remote-only" | "unknown";
+  status: "same" | "update" | "local-only" | "remote-only" | "local-newer" | "unknown";
   message?: string;
 };
 
@@ -73,6 +73,17 @@ function readPluginMeta(dirPath: string): { id: string; name?: string; version?:
   return { id: id || dirPath.split(/[/\\]/).pop() || "unknown", name, version };
 }
 
+function cmpVer(a: string, b: string): number {
+  const pa = a.split(/[^0-9]+/).filter(Boolean).map(Number);
+  const pb = b.split(/[^0-9]+/).filter(Boolean).map(Number);
+  const n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i++) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da !== db) return da - db;
+  }
+  return 0;
+}
 function shouldSkipName(name: string): boolean {
   return (
     name === "node_modules" ||
@@ -294,12 +305,19 @@ export function checkPluginUpdates(
     } else if (localFingerprint === remoteFingerprint) {
       status = "same";
       message = "无更新";
+    } else if (
+      meta.version &&
+      remoteVersion &&
+      cmpVer(remoteVersion, meta.version) < 0
+    ) {
+      status = "local-newer";
+      message = `远端更旧 ${remoteVersion}，本地 ${meta.version}，跳过`;
     } else {
       status = "update";
       message =
         meta.version && remoteVersion && meta.version !== remoteVersion
           ? `有更新 ${meta.version} → ${remoteVersion}`
-          : "有更新";
+          : "内容有变";
     }
 
     items.push({

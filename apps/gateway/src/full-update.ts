@@ -71,6 +71,16 @@ export function applyFullUpdate(
       const need = before.items.filter(
         (i) => i.status === "update" || i.status === "remote-only",
       );
+      const older = before.items.filter((i) => i.status === "local-newer");
+      if (older.length) {
+        pushNodes(
+          nodes,
+          "远端更旧，已跳过",
+          older
+            .map((i) => `${i.name || i.id || i.dir} 本地 ${i.localVersion} / 远端 ${i.remoteVersion}`)
+            .join("\n"),
+        );
+      }
       if (need.length) {
         const beforeFp = new Map(
           need.map((i) => [i.dir, i.localFingerprint || ""]),
@@ -103,7 +113,7 @@ export function applyFullUpdate(
                 if (i.status === "remote-only") {
                   return `${name}（新装 ${i.remoteVersion || "?"}）`;
                 }
-                return `${name}${i.remoteVersion ? ` ${i.remoteVersion}` : ""}`;
+                return `${name} ${i.remoteVersion || i.localVersion || ""} 内容有变`.trim();
               });
             pushNodes(
               nodes,
@@ -136,14 +146,13 @@ export function applyFullUpdate(
   }
 
   const anyUpdated = Boolean(fw.updated) || pluginsUpdated;
+  const nextStep = fw.updated
+    ? pluginsUpdated
+      ? "即将重启以加载新版本和新插件"
+      : "即将重启以加载新版本"
+    : "即将重启以加载新插件";
   if (anyUpdated) {
-    pushNodes(
-      nodes,
-      [
-        "下一步",
-        "即将重启以加载新版本",
-      ].join("\n"),
-    );
+    pushNodes(nodes, ["下一步", nextStep].join("\n"));
   } else {
     pushNodes(nodes, "结果\n全部已是最新，无需重启");
   }
@@ -160,7 +169,7 @@ export function applyFullUpdate(
     message = [
       `更新完成：${bits.join(" + ")}`,
       highlights.length ? `变更要点：\n${highlights.map((h) => `· ${h}`).join("\n")}${more}` : "",
-      "即将重启以加载新版本，请稍候",
+      nextStep,
     ]
       .filter(Boolean)
       .join("\n");
