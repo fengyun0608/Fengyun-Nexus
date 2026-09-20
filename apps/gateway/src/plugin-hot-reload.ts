@@ -147,7 +147,8 @@ export async function reloadOnePlugin(
     rememberDirIds(dirName, newIds);
 
     if (deps.root && newIds.length) {
-      const applied = await applyStoredPluginConfigs(deps.root, host.values());
+      const only = host.values().filter((p) => newIds.includes(p.manifest.id));
+      const applied = await applyStoredPluginConfigs(deps.root, only);
       if (applied) log.info(`插件配置已套用 ${applied} 项`);
     }
 
@@ -159,7 +160,10 @@ export async function reloadOnePlugin(
       );
     }
 
-    if (deps.remountChannels) {
+    const hasAdapter =
+      existsSync(join(dirPath, "adapter")) ||
+      scan.plugins.some((p) => (p.manifest.contributes?.adapters?.length || 0) > 0);
+    if (hasAdapter && deps.remountChannels) {
       await deps.remountChannels();
     }
 
