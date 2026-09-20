@@ -76,6 +76,8 @@ export type AgentToolBag = {
     patch: Record<string, unknown>,
   ) => { ok: boolean; message: string; config?: OneBotConfig };
   getOneBotSnapshot?: () => unknown;
+  /** 同窗口重启（写 flag + exit 75），会话会先落盘续聊 */
+  requestFrameworkRestart?: () => { ok: boolean; message: string };
 };
 
 const MASTER_TOOLS = new Set([
@@ -119,6 +121,9 @@ const MASTER_TOOLS = new Set([
   "nexus_qq_send_file",
   "nexus_qq_send_voice",
   "nexus_qq_poke",
+  "nexus_qq_ban",
+  "nexus_qq_find_member",
+  "nexus_framework_restart",
   "nexus_screen",
   "nexus_shot",
   "nexus_workspace_list",
@@ -151,6 +156,49 @@ function tool(
       },
     },
   };
+}
+
+function resolveGroupId(bag: AgentToolBag, args: Record<string, unknown>): string {
+  const fromArgs = String(args.group_id || args.groupId || "").trim();
+  if (fromArgs) return fromArgs;
+  const meta = (bag.messageCtx?.meta || {}) as { groupId?: string; messageType?: string };
+  if (meta.messageType === "group" && meta.groupId) return String(meta.groupId).trim();
+  const chatId = String(bag.messageCtx?.chatId || "");
+  if (chatId.startsWith("group:")) return chatId.slice(6).trim();
+  return "";
+}
+
+function botIdOfCtx(bag: AgentToolBag): string | undefined {
+  const meta = (bag.messageCtx?.meta || {}) as { botId?: string; selfId?: string };
+  const id = meta.botId || meta.selfId;
+  return id ? String(id) : undefined;
+}
+
+async function findMembersByNick(
+  bag: AgentToolBag,
+  groupId: string,
+  nick: string,
+): Promise<Array<{ user_id: string; nickname: string; card: string }>> {
+  if (!bag.onebot || !groupId || !nick) return [];
+  const list = await bag.onebot.callAction(
+    "get_group_member_list",
+    { group_id: Number(groupId) || groupId, no_cache: true },
+    { botId: botIdOfCtx(bag) },
+  );
+  const rows = Array.isArray(list.data) ? (list.data as Array<Record<string, unknown>>) : [];
+  const key = nick.trim();
+  return rows
+    .filter((m) => {
+      const nickname = String(m.nickname ?? "");
+      const card = String(m.card ?? "");
+      return nickname.includes(key) || card.includes(key);
+    })
+    .map((m) => ({
+      user_id: String(m.user_id ?? m.userId ?? ""),
+      nickname: String(m.nickname ?? ""),
+      card: String(m.card ?? ""),
+    }))
+    .filter((m) => /^\d{5,12}$/.test(m.user_id));
 }
 
 function resolveSendCtx(bag: AgentToolBag, args: Record<string, unknown>): NexusMessage | null {
@@ -253,7 +301,7 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     tool("nexus_list_caps", "列出已加载插件的群内能力", {}),
     tool(
       "nexus_call_cap",
-      "调用一条群内插件能力，例如 #菜单",
+      "调用一条群内插件 # 指令。仅当没有对应直接工具时用。禁言用 nexus_qq_ban，重启用 nexus_framework_restart，不要靠模拟输入。",
       { text: { type: "string", description: "指令文本" } },
       ["text"],
     ),
@@ -318,6 +366,30 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
         user_id: { type: "string", description: "被戳的 QQ 号；默认当前说话的人" },
         group_id: { type: "string", description: "群号；群聊默认当前群" },
       },
+    ),
+    tool(
+      "nexus_qq_find_member",
+      "按群昵称/名片在当前群找成员 QQ。禁言前不知道 QQ 时先调这个。直接走 OneBot，不要写插件、不要模拟 # 指令。",
+      {
+        nick: { type: "string", description: "昵称或名片关键词，如 黄昏" },
+        group_id: { type: "string", description: "群号；默认当前群" },
+      },
+      ["nick"],
+    ),
+    tool(
+      "nexus_qq_ban",
+      "直接禁言群成员（OneBot set_group_ban）。可传 user_id，或只传 nick 自动查找。不要写插件，不要模拟 #禁言。",
+      {
+        user_id: { type: "string", description: "被禁言 QQ 号" },
+        nick: { type: "string", description: "群昵称/名片关键词；没有 user_id 时用" },
+        minutes: { type: "number", description: "分钟，默认 10，最大 43200" },
+        group_id: { type: "string", description: "群号；默认当前群" },
+      },
+    ),
+    tool(
+      "nexus_framework_restart",
+      "直接重启 Fengyun Nexus 框架（同窗口）。不要写重启插件，不要模拟输入 #重启。",
+      {},
     ),
     tool(
       "nexus_screen",
@@ -755,6 +827,67 @@ export async function runAgentTool(
       user_id: userId,
       group_id: groupId || undefined,
     };
+  }
+  if (name === "nexus_qq_find_member") {
+    if (!bag.onebot) return { error: "OneBot 未就绪" };
+    const groupId = resolveGroupId(bag, args);
+    const nick = String(args.nick || args.name || "").trim();
+    if (!groupId) return { error: "缺少群号（请在群里用，或传 group_id）" };
+    if (!nick) return { error: "缺少昵称" };
+    const hits = await findMembersByNick(bag, groupId, nick);
+    return {
+      ok: hits.length > 0,
+      group_id: groupId,
+      count: hits.length,
+      members: hits.slice(0, 20),
+      message: hits.length
+        ? `找到 ${hits.length} 人`
+        : `没找到昵称含「${nick}」的成员`,
+    };
+  }
+  if (name === "nexus_qq_ban") {
+    if (!bag.onebot) return { error: "OneBot 未就绪" };
+    const groupId = resolveGroupId(bag, args);
+    if (!groupId) return { error: "缺少群号（请在群里用，或传 group_id）" };
+    let userId = String(args.user_id || args.userId || "").trim();
+    const nick = String(args.nick || args.name || "").trim();
+    if (!userId && nick) {
+      const hits = await findMembersByNick(bag, groupId, nick);
+      if (!hits.length) return { ok: false, message: `没找到昵称含「${nick}」的成员` };
+      if (hits.length > 1) {
+        return {
+          ok: false,
+          message: `匹配到 ${hits.length} 人，请指定更准的昵称或 user_id`,
+          members: hits.slice(0, 10),
+        };
+      }
+      userId = hits[0]!.user_id;
+    }
+    if (!/^\d{5,12}$/.test(userId)) return { error: "缺少有效的 user_id 或 nick" };
+    let minutes = Number(args.minutes ?? args.duration ?? 10);
+    if (!Number.isFinite(minutes) || minutes < 1) minutes = 10;
+    if (minutes > 43200) minutes = 43200;
+    const duration = Math.floor(minutes * 60);
+    const r = await bag.onebot.callAction(
+      "set_group_ban",
+      {
+        group_id: Number(groupId) || groupId,
+        user_id: Number(userId) || userId,
+        duration,
+      },
+      { botId: botIdOfCtx(bag) },
+    );
+    return {
+      ok: Boolean(r.ok),
+      message: r.ok ? `已禁言 ${minutes} 分钟` : String(r.message || "禁言失败"),
+      user_id: userId,
+      group_id: groupId,
+      minutes,
+    };
+  }
+  if (name === "nexus_framework_restart") {
+    if (!bag.requestFrameworkRestart) return { error: "当前不能重启框架" };
+    return bag.requestFrameworkRestart();
   }
   if (name === "nexus_screen") {
     const shot = await captureDesktop(join(bag.repoRoot, "data", "shots"));

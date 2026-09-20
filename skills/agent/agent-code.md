@@ -7,40 +7,26 @@ description: 没有专用工具时，用沙箱或 shell 写短脚本并跑通；
 
 ## 顺序
 
-1. 已有 `#` 指令 / 工具刚好能用 → `nexus_call_cap` 或直接调工具
-2. 读本技能和其他相关技能
-3. 写**一次性脚本**并执行（沙箱或 shell）
-4. 仍失败再简短说原因
-5. **只有主人明确说「写一个常驻插件」** 才新建 `plugins/`
+1. **直接框架工具**（禁言 `nexus_qq_ban`、找人 `nexus_qq_find_member`、重启 `nexus_framework_restart`、戳 `nexus_qq_poke`）
+2. `nexus_list_mcp` / `nexus_call_mcp` 调已注册 MCP
+3. 没有直接工具时才 `nexus_call_cap`（模拟 # 指令，能免则免）
+4. 读技能 → 一次性脚本
+5. **只有主人明确说「写常驻插件」** 才新建 `plugins/`
 
-## 框架已有（禁止再写插件）
+## 直接工具（禁止再写插件）
 
-- `#重启` / `#更新` / `#状态` / `#菜单` / `#帮助`
-- `#禁言` `#解禁` `#全体禁言` `#踢` `#群管`
-- 重启：`nexus_call_cap` 发 `#重启`，或让主人发。不要写 `z-restart`
-- 禁言：有 QQ 用 `#禁言 @对方 分钟`；只有昵称就 OneBot 查成员再禁。不要写「按名禁言」插件
+- 禁言：`nexus_qq_ban`（可传 `nick` 或 `user_id`）
+- 按昵称找人：`nexus_qq_find_member`
+- 重启框架：`nexus_framework_restart`（不要写 z-restart，不要模拟 #重启）
+- 戳一戳：`nexus_qq_poke`
 
 ## 写在哪
 
-- 一次性脚本：`nexus_workspace_write` 写到沙箱，再用 `nexus_run_safe` 或 `nexus_shell` 跑
-- 常驻插件：主人点名之后，才用 `nexus_shell` 在 `plugins/` 新建（对照 `plugins/templates/ts-plugin`），写完 `nexus_plugin_reload`，并补上 `node_modules/@fengyun/nexus-plugin-sdk` 链接
-- 查 OneBot 地址：`nexus_onebot_get`（不要猜密码）
-
-## QQ 示例（戳一戳）
-
-NapCat 支持 `send_poke`：群聊带 `group_id` + `user_id`，私聊只带 `user_id`。
-
-```powershell
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:端口/send_poke" -ContentType "application/json" -Body '{"user_id":对方QQ,"group_id":群号}'
-```
-
-有现成 `nexus_qq_poke` 也可以直接用。
+- 一次性脚本：沙箱 `nexus_workspace_write` + `nexus_run_safe` / `nexus_shell`
+- 常驻插件：主人点名之后才建，并补 sdk 链接 + `nexus_plugin_reload`
 
 ## 禁止
 
-- 不要为 `#重启`、禁言、状态这类已有能力再写插件
-- 不要说「通道只能回消息所以戳不了」然后停手
-- 不要只说「我可以开始写插件了」却不写不跑
+- 不要为禁言/重启再写插件，也不要用 call_cap 假装输入 # 指令
 - 不要只把过程写进 `<think>`，标签外一句不说
-- 不要在文件还没落到磁盘、也没热更加载成功时，说「已创建 / 写好了」
-- 不要为一次小事改框架 gateway 核心；优先脚本；常驻插件要主人点名
+- 不要在文件没落盘时说「写好了」

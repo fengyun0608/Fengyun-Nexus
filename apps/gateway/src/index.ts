@@ -441,9 +441,9 @@ function frameworkSystemPrompt(opts?: {
     lines.push(
       who ? `当前说话的人是主人（${who}），已开启能力调用。` : "当前说话的人是主人，已开启能力调用。",
       "你有 agent 能力：会调工具，也会写脚本。先用现成能力，不要一上来就新建 plugins/。",
-      "顺序：1）nexus_list_caps / nexus_call_cap 调已有 # 指令；2）已有工具直接调；3）读技能；4）仍缺再写一次性脚本（沙箱或 shell）；5）只有主人明确说「写一个常驻插件」才新建 plugins/。",
-      "框架已有、禁止再写插件重复造：#重启 #更新 #状态 #菜单 #帮助 #禁言 #解禁 #全体禁言 #踢 #群管。重启用 nexus_call_cap 发 #重启，或让主人发 #重启。不要写 z-restart 之类。",
-      "禁言：有 QQ 就 #禁言 @对方 分钟；只有昵称就用 OneBot get_group_member_list 查 QQ，再 set_group_ban 或 call_cap。不要为禁言新建插件。",
+      "顺序：1）直接调框架工具（禁言 nexus_qq_ban、找人 nexus_qq_find_member、重启 nexus_framework_restart、戳 nexus_qq_poke）；2）nexus_list_mcp / nexus_call_mcp；3）没有直接工具再用 nexus_call_cap；4）读技能；5）一次性脚本；6）只有主人明确说写常驻插件才新建 plugins/。禁止模拟输入 # 指令来干已有直接工具能做的事。",
+      "框架已有直接工具：nexus_qq_ban / nexus_qq_find_member / nexus_framework_restart / nexus_qq_poke。禁止再写 z-restart、按名禁言之类插件。禁言可传 nick 或 user_id。",
+      "禁言：调 nexus_qq_ban（可 nick）。不要写插件，不要 call_cap 模拟 #禁言。",
       "可以查看并调用已加载的群内插件能力，也可以安装生态收录、排队安装 Go / Python / 浏览器 / NapCat，以及启用、停用、重载插件。",
       "主人要听某首歌：优先 nexus_music_play。没有或失败就按 agent-code 自己写/跑操控脚本，不要让用户自己搜。",
       "只打开软件、不听歌时，调用 nexus_launch_app，只传软件名。",
@@ -848,6 +848,52 @@ async function bootstrap(): Promise<void> {
           (e) => `${e.at.replace("T", " ").slice(0, 19)} [${e.level}] ${e.message}`,
         ),
       };
+    },
+  });
+
+  mcp.register({
+    name: "nexus.qq_find_member",
+    description: "按群昵称找成员 QQ（直接 OneBot，不模拟指令）",
+    handler: async (args) =>
+      runAgentTool("nexus_qq_find_member", args, {
+        mcp,
+        workflows,
+        plugins,
+        statusLines: () => [],
+        channelSettings: () => getChannelSettings(channelCfg, "onebot11"),
+        userId: "",
+        isMaster: true,
+        isAdminConsole: true,
+        repoRoot: ROOT,
+        onebot,
+      }),
+  });
+  mcp.register({
+    name: "nexus.qq_ban",
+    description: "直接禁言群成员（OneBot set_group_ban）",
+    handler: async (args) =>
+      runAgentTool("nexus_qq_ban", args, {
+        mcp,
+        workflows,
+        plugins,
+        statusLines: () => [],
+        channelSettings: () => getChannelSettings(channelCfg, "onebot11"),
+        userId: "",
+        isMaster: true,
+        isAdminConsole: true,
+        repoRoot: ROOT,
+        onebot,
+      }),
+  });
+  mcp.register({
+    name: "nexus.framework_restart",
+    description: "直接重启 Fengyun Nexus（同窗口），不模拟 #重启",
+    handler: () => {
+      sessions.markAllForResume();
+      const r = scheduleSystemRestart(ROOT);
+      if (!r.ok) return { ok: false, message: r.message };
+      setTimeout(() => process.exit(r.exitCode), 1500);
+      return { ok: true, message: "正在重启" };
     },
   });
 
@@ -1680,6 +1726,14 @@ async function bootstrap(): Promise<void> {
       repoRoot: ROOT,
       messageCtx: msg,
       onebot,
+      requestFrameworkRestart: () => {
+        sessions.markAllForResume();
+        const r = scheduleSystemRestart(ROOT);
+        if (!r.ok) return { ok: false, message: r.message };
+        log.ok(`AI 请求同窗口重启（退出码 ${r.exitCode}）`);
+        setTimeout(() => process.exit(r.exitCode), 1500);
+        return { ok: true, message: "正在重启，会话已保存，起来后可接着聊" };
+      },
       patchChannelSettings: (patch: Record<string, unknown>) => {
         const prev = getChannelSettings(channelCfg, msg.channel);
         const next: ChannelSettings = { ...prev };
