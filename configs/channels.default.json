@@ -20,7 +20,8 @@
       "onlyMasters": false,
       "replyGroupIds": [],
       "systemPrompt": "",
-      "note": ""
+      "accessToken": "",
+      "note": "调用需 Authorization: Bearer <令牌> 或 X-Nexus-Token；也可用环境变量 NEXUS_WEBHOOK_TOKEN。管理登录令牌亦可。"
     },
     "onebot11": {
       "label": "QQ（OneBot 11）",

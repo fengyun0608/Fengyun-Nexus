@@ -27,6 +27,14 @@ import {
   type RegistryConfig,
 } from "@fengyun/nexus-shared";
 import { WorkflowRunner } from "@fengyun/nexus-workflow";
+import {
+  LoginRateLimiter,
+  adminPersistShape,
+  hashPassword,
+  resolveListenHost,
+  verifyAdminPassword,
+  webhookTokenFromRequest,
+} from "./admin-security.js";
 import { bootGroup, bootLine, installProcessGuard, printBootBanner, printBootSuccess, quietNodeSqliteWarning } from "./boot-banner.js";
 import { warnBootGaps } from "./boot-check.js";
 import { resolveOb11Media, setOb11MediaHost, setOb11MediaRoot } from "./ob11-media.js";
@@ -351,20 +359,21 @@ function loadAdmin(): AdminConfig {
       ...local,
       setupCompleted: Boolean(local.setupCompleted ?? base.setupCompleted),
       sessionHours: Number(local.sessionHours ?? base.sessionHours ?? 12),
+      passwordHash:
+        typeof local.passwordHash === "string" && local.passwordHash
+          ? local.passwordHash
+          : base.passwordHash,
+      defaultPassword:
+        typeof local.defaultPassword === "string"
+          ? local.defaultPassword
+          : base.defaultPassword,
     };
   }
   return loadJson<AdminConfig>("configs/admin.default.json");
 }
 
 function persistAdmin(cfg: AdminConfig): void {
-  const out = {
-    username: cfg.username,
-    passwordEnv: cfg.passwordEnv,
-    defaultPassword: cfg.defaultPassword,
-    sessionHours: cfg.sessionHours,
-    setupCompleted: cfg.setupCompleted,
-  };
-  writeFileSync(ADMIN_LOCAL, `${JSON.stringify(out, null, 2)}\n`, "utf8");
+  writeFileSync(ADMIN_LOCAL, `${JSON.stringify(adminPersistShape(cfg), null, 2)}\n`, "utf8");
 }
 
 function loadRegistry(): RegistryConfig {
@@ -502,12 +511,27 @@ async function bootstrap(): Promise<void> {
   let adminCfg = loadAdmin();
   adminCfg.sessionHours = adminCfg.sessionHours || 12;
   const registry = loadRegistry();
+  const loginLimiter = new LoginRateLimiter();
   await bootGroup("环境");
   await bootLine("开始确认运行环境");
   await bootLine(`环境已就绪：${profile.label || profile.id}`);
 
-  function currentPassword(): string {
-    return process.env[adminCfg.passwordEnv] || adminCfg.defaultPassword;
+  function passwordMatches(password: string): boolean {
+    return verifyAdminPassword(password, adminCfg);
+  }
+
+  /** 登录成功且仍是明文口令时，升级为哈希落盘 */
+  function maybeUpgradePasswordHash(password: string): void {
+    if (process.env[adminCfg.passwordEnv || "NEXUS_ADMIN_PASSWORD"]) return;
+    if (adminCfg.passwordHash) return;
+    if (!adminCfg.defaultPassword) return;
+    adminCfg = {
+      ...adminCfg,
+      passwordHash: hashPassword(password),
+      defaultPassword: "",
+    };
+    persistAdmin(adminCfg);
+    log.info("管理口令已升级为哈希存储");
   }
 
   await bootGroup("数据库");
@@ -2124,18 +2148,31 @@ async function bootstrap(): Promise<void> {
 
   app.post("/v1/admin/login", (req, res) => {
     const { username, password } = req.body ?? {};
+    const ip = String(req.ip || req.socket.remoteAddress || "?");
+    const userTry = typeof username === "string" ? username : "?";
+    const blocked = loginLimiter.blockedSeconds(ip, userTry);
+    if (blocked > 0) {
+      res.status(429).json({ error: `尝试过多，请 ${blocked} 秒后再试` });
+      return;
+    }
     const expectUser = adminCfg.username;
-    const expectPass = currentPassword();
     if (
       typeof username !== "string" ||
       typeof password !== "string" ||
       !safeEqual(username, expectUser) ||
-      !safeEqual(password, expectPass)
+      !passwordMatches(password)
     ) {
-      res.status(401).json({ error: "用户名或密码错误" });
-      log.warn(`管理登录失败  用户=${typeof username === "string" ? username : "?"}`);
+      const hit = loginLimiter.hitFail(ip, userTry);
+      if (hit.locked) {
+        res.status(429).json({ error: `尝试过多，请 ${hit.retryAfterSec} 秒后再试` });
+      } else {
+        res.status(401).json({ error: "用户名或密码错误" });
+      }
+      log.warn(`管理登录失败  用户=${userTry}`);
       return;
     }
+    loginLimiter.clear(ip, expectUser);
+    maybeUpgradePasswordHash(password);
     const token = issueToken(expectUser);
     const mustReconfigure = !adminCfg.setupCompleted;
     log.info(`管理登录成功  用户=${expectUser}  需重设账号=${mustReconfigure ? "是" : "否"}`);
@@ -2201,7 +2238,8 @@ async function bootstrap(): Promise<void> {
     adminCfg = {
       ...adminCfg,
       username: username.trim(),
-      defaultPassword: password,
+      passwordHash: hashPassword(password),
+      defaultPassword: "",
       setupCompleted: true,
       sessionHours: 12,
     };
@@ -2220,7 +2258,7 @@ async function bootstrap(): Promise<void> {
       return;
     }
     const { currentPassword: cur, username, password, confirmPassword } = req.body ?? {};
-    if (typeof cur !== "string" || !safeEqual(cur, currentPassword())) {
+    if (typeof cur !== "string" || !passwordMatches(cur)) {
       res.status(401).json({ error: "当前密码不正确" });
       return;
     }
@@ -2233,7 +2271,8 @@ async function bootstrap(): Promise<void> {
       }
       nextUser = username.trim();
     }
-    let nextPass = currentPassword();
+    let nextHash = adminCfg.passwordHash;
+    let nextPlain = adminCfg.defaultPassword || "";
     if (typeof password === "string" && password.length > 0) {
       const pErr = validatePassword(password);
       if (pErr) {
@@ -2244,13 +2283,15 @@ async function bootstrap(): Promise<void> {
         res.status(400).json({ error: "两次密码不一致" });
         return;
       }
-      nextPass = password;
+      nextHash = hashPassword(password);
+      nextPlain = "";
     }
 
     adminCfg = {
       ...adminCfg,
       username: nextUser,
-      defaultPassword: nextPass,
+      passwordHash: nextHash,
+      defaultPassword: nextPlain,
       setupCompleted: true,
       sessionHours: 12,
     };
@@ -2670,6 +2711,26 @@ async function bootstrap(): Promise<void> {
   });
 
   app.post("/v1/channels/webhook", async (req, res) => {
+    const presented = webhookTokenFromRequest(req);
+    const envTok = String(process.env.NEXUS_WEBHOOK_TOKEN || "").trim();
+    const cfgTok = String(getChannelSettings(channelCfg, "webhook").accessToken || "").trim();
+    const expected = envTok || cfgTok;
+    let adminOk = false;
+    if (presented) {
+      const rec = tokens.get(hashToken(presented));
+      adminOk = Boolean(rec && rec.exp >= Date.now());
+    }
+    const secretOk =
+      Boolean(expected) && Boolean(presented) && expected.length === presented.length
+        ? safeEqual(expected, presented)
+        : false;
+    if (!adminOk && !secretOk) {
+      res.status(401).json({
+        error:
+          "Webhook 未授权：请配置 NEXUS_WEBHOOK_TOKEN 或通道 accessToken，或携带管理登录令牌",
+      });
+      return;
+    }
     const adapter = channels.get("webhook")!;
     const msg = adapter.normalizeInbound(req.body);
     const texts = await processInbound(msg);
@@ -2704,7 +2765,7 @@ async function bootstrap(): Promise<void> {
     const gwPort = Number(process.env.PORT ?? profile.gateway.port);
     const wsPath = cfg.reverseWsPath || st.reverseWsPath || "/onebot/v11/ws";
     const path = wsPath.startsWith("/") ? wsPath : `/${wsPath}`;
-    const bind = String(process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
+    const bind = resolveListenHost(profile.gateway.host);
     const wsHosts = connectHosts(bind);
     const urlsFor = (listenPort: number) => {
       const p = listenPort > 0 ? listenPort : gwPort;
@@ -3598,8 +3659,8 @@ async function bootstrap(): Promise<void> {
   }
 
   const port = Number(process.env.PORT ?? profile.gateway.port);
-  // 默认听所有网卡。只要本机访问时再设 HOST=127.0.0.1
-  const host = String(process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
+  // HOST 环境变量优先；否则用姿态配置（desktop/mobile/termux 默认 127.0.0.1，server 默认 0.0.0.0）
+  const host = resolveListenHost(profile.gateway.host);
 
   try {
     const opened = ensureGatewayPortOpen({ envId: profile.id, host, port });
@@ -3621,6 +3682,31 @@ async function bootstrap(): Promise<void> {
     await bootGroup("网关");
     await bootLine("开始启动网关");
     await bootLine(`网关已监听：${host}:${port}`);
+    if (host === "0.0.0.0" || host === "::" || host === "[::]") {
+      await bootLine("监听已对所有网卡开放；仅本机访问请设 HOST=127.0.0.1");
+    }
+    {
+      const wh = String(process.env.NEXUS_WEBHOOK_TOKEN || "").trim();
+      const whCfg = String(getChannelSettings(channelCfg, "webhook").accessToken || "").trim();
+      if (!wh && !whCfg) {
+        await bootLine("Webhook 未配置共享令牌：匿名请求将被拒绝（可配 NEXUS_WEBHOOK_TOKEN）");
+      }
+    }
+    if (onebot.getConfig().enabled) {
+      const bots = onebot.getConfig().bots || [];
+      const bare = bots.filter((b) => !String(b.accessToken || "").trim());
+      const rootTok = String(onebot.getConfig().accessToken || "").trim();
+      if (!rootTok && bare.length === bots.length) {
+        const allowEmpty =
+          process.env.NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN === "1" ||
+          process.env.NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN === "true";
+        if (!allowEmpty) {
+          await bootLine("OneBot 未配置 accessToken：上报将被拒绝（调试可设 NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN=1）");
+        } else {
+          await bootLine("OneBot 空令牌放行已开启（仅建议本机调试）");
+        }
+      }
+    }
     const primary = urls.find((u) => !u.includes("127.0.0.1"));
     const local = urls.find((u) => u.includes("127.0.0.1"));
     if (primary) await bootLine(`控制台已打开：${primary}`);

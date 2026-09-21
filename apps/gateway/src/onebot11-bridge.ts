@@ -498,7 +498,7 @@ export class OneBot11Bridge {
     this.syncListenPorts();
   }
 
-  /** 只认这个端口上那个号自己的令牌。没填就是空，不做校验。 */
+  /** 这个端口对应号的令牌；号上没有则回退全局 accessToken */
   tokenFor(listenPort: number): string {
     const bots = this.cfg.bots || [];
     const port = Math.floor(Number(listenPort) || 0);
@@ -510,12 +510,20 @@ export class OneBot11Bridge {
             const p = Math.floor(Number(b.listenPort) || 0);
             return p === 0 || p === gateway;
           });
-    return String(exact?.accessToken || "").trim();
+    const botTok = String(exact?.accessToken || "").trim();
+    if (botTok) return botTok;
+    return String(this.cfg.accessToken || "").trim();
   }
 
   private authOk(authorization?: string, queryToken?: string | null, listenPort = 0): boolean {
     const token = this.tokenFor(listenPort);
-    if (!token) return true;
+    if (!token) {
+      // 空令牌默认拒绝。本机调试可设 NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN=1
+      const allow =
+        process.env.NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN === "1" ||
+        process.env.NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN === "true";
+      return allow;
+    }
     const bearer = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
     return bearer === token || queryToken === token;
   }

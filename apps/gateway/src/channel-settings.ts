@@ -23,6 +23,8 @@ export type ChannelSettings = {
   replyGroupIds: string[];
   /** 本通道 AI 人设（注入 system prompt） */
   systemPrompt: string;
+  /** Webhook 共享令牌（可被 NEXUS_WEBHOOK_TOKEN 覆盖） */
+  accessToken?: string;
   note?: string;
   [key: string]: unknown;
 };

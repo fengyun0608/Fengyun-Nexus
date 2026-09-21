@@ -54,7 +54,13 @@ export interface EnvProfile {
 export interface AdminConfig {
   username: string;
   passwordEnv: string;
+  /**
+   * 仅引导/兼容旧配置用的明文口令。正式设置后应清空，改存 passwordHash。
+   * 环境变量 passwordEnv 仍可覆盖校验。
+   */
   defaultPassword: string;
+  /** scrypt 哈希口令（优先于 defaultPassword） */
+  passwordHash?: string;
   /** Login session lifetime in hours (default 12). */
   sessionHours: number;
   /** False until first console reconfiguration of username/password. */
