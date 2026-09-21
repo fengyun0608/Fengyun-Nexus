@@ -34,6 +34,7 @@ import {
   resolveListenHost,
   verifyAdminPassword,
   webhookTokenFromRequest,
+  allowBrowserOrigin,
 } from "./admin-security.js";
 import { bootGroup, bootLine, installProcessGuard, printBootBanner, printBootSuccess, quietNodeSqliteWarning } from "./boot-banner.js";
 import { warnBootGaps } from "./boot-check.js";
@@ -2015,7 +2016,15 @@ async function bootstrap(): Promise<void> {
   });
 
   const app = express();
-  if (profile.gateway.cors) app.use(cors());
+  if (profile.gateway.cors) {
+    app.use((req, res, next) => {
+      cors({
+        origin(origin, cb) {
+          cb(null, allowBrowserOrigin(origin, req.headers.host));
+        },
+      })(req, res, next);
+    });
+  }
   app.use(express.json({ limit: "2mb" }));
 
   app.get("/v1/ob11-media/:name", (req, res) => {

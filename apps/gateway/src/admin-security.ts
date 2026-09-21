@@ -145,6 +145,23 @@ export function resolveListenHost(profileHost: string | undefined): string {
   return "127.0.0.1";
 }
 
+/** 浏览器跨域：无 Origin、本机、以及与本次 Host 相同的地址放行。NapCat 等无 Origin 的客户端不受影响。 */
+export function allowBrowserOrigin(origin: string | undefined, hostHeader: string | undefined): boolean {
+  if (!origin) return true;
+  let hostname = "";
+  try {
+    hostname = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
+  const raw = String(hostHeader || "").trim().toLowerCase();
+  const reqHost = raw.startsWith("[")
+    ? raw.slice(1, raw.indexOf("]") > 0 ? raw.indexOf("]") : undefined)
+    : raw.split(":")[0];
+  return Boolean(reqHost) && hostname === reqHost;
+}
+
 export function extractBearer(authorization?: string): string {
   const h = String(authorization || "");
   return h.startsWith("Bearer ") ? h.slice(7).trim() : "";
