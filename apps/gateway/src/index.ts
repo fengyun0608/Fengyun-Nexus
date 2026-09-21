@@ -3659,7 +3659,7 @@ async function bootstrap(): Promise<void> {
   }
 
   const port = Number(process.env.PORT ?? profile.gateway.port);
-  // HOST 环境变量优先；否则用姿态配置（desktop/mobile/termux 默认 127.0.0.1，server 默认 0.0.0.0）
+  // HOST 环境变量优先；否则用姿态配置（默认 0.0.0.0，外网可连）
   const host = resolveListenHost(profile.gateway.host);
 
   try {
