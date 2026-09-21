@@ -517,13 +517,8 @@ export class OneBot11Bridge {
 
   private authOk(authorization?: string, queryToken?: string | null, listenPort = 0): boolean {
     const token = this.tokenFor(listenPort);
-    if (!token) {
-      // 空令牌默认拒绝。本机调试可设 NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN=1
-      const allow =
-        process.env.NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN === "1" ||
-        process.env.NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN === "true";
-      return allow;
-    }
+    // 接收端与上报端都是空令牌时，本机和外网都放行
+    if (!token) return true;
     const bearer = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
     return bearer === token || queryToken === token;
   }

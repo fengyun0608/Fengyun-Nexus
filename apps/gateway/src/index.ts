@@ -3697,14 +3697,7 @@ async function bootstrap(): Promise<void> {
       const bare = bots.filter((b) => !String(b.accessToken || "").trim());
       const rootTok = String(onebot.getConfig().accessToken || "").trim();
       if (!rootTok && bare.length === bots.length) {
-        const allowEmpty =
-          process.env.NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN === "1" ||
-          process.env.NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN === "true";
-        if (!allowEmpty) {
-          await bootLine("OneBot 未配置 accessToken：上报将被拒绝（调试可设 NEXUS_ONEBOT_ALLOW_EMPTY_TOKEN=1）");
-        } else {
-          await bootLine("OneBot 空令牌放行已开启（仅建议本机调试）");
-        }
+        await bootLine("OneBot 未配置 accessToken：空令牌放行（本机与外网）");
       }
     }
     const primary = urls.find((u) => !u.includes("127.0.0.1"));
