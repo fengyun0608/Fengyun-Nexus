@@ -19,7 +19,7 @@ const isMobile = ref(
   typeof window !== "undefined" && window.matchMedia("(max-width: 860px)").matches,
 );
 
-const user = ref("fengyun");
+const user = ref("");
 const pass = ref("");
 
 let mobileMq: MediaQueryList | null = null;
@@ -182,7 +182,7 @@ async function onLogin() {
       <p class="muted">后台控制台</p>
       <n-form class="login-form" @submit.prevent="onLogin">
         <n-form-item label="用户名">
-          <n-input v-model:value="user" autocomplete="username" size="large" />
+          <n-input v-model:value="user" placeholder="用户名" autocomplete="username" size="large" />
         </n-form-item>
         <n-form-item label="密码">
           <n-input
