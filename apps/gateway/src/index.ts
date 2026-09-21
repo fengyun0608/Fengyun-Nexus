@@ -1129,9 +1129,11 @@ async function bootstrap(): Promise<void> {
   initEnvTasks(ROOT);
 
   const tokens = new Map<string, { user: string; exp: number }>();
+  const mediaTickets = new Map<string, { exp: number }>();
 
   function invalidateAllSessions(): void {
     tokens.clear();
+    mediaTickets.clear();
   }
 
   function issueToken(user: string): string {
@@ -1140,6 +1142,13 @@ async function bootstrap(): Promise<void> {
     const exp = Date.now() + hours * 3600_000;
     tokens.set(hashToken(token), { user, exp });
     return token;
+  }
+
+  function issueMediaTicket(): string {
+    const hours = adminCfg.sessionHours || 12;
+    const ticket = randomBytes(18).toString("hex");
+    mediaTickets.set(hashToken(ticket), { exp: Date.now() + hours * 3600_000 });
+    return ticket;
   }
 
   function authMiddleware(
@@ -2038,13 +2047,15 @@ async function bootstrap(): Promise<void> {
     res.sendFile(file);
   });
 
+  app.get("/v1/media/ticket", authMiddleware, (_req, res) => {
+    res.json({ ticket: issueMediaTicket() });
+  });
+
   app.get("/v1/media/shot/:name", (req, res) => {
-    const header = req.headers.authorization ?? "";
-    const token = header.startsWith("Bearer ")
-      ? header.slice(7)
-      : String(req.query.token || "");
-    const rec = token ? tokens.get(hashToken(token)) : undefined;
+    const ticket = String(req.query.ticket || "");
+    const rec = ticket ? mediaTickets.get(hashToken(ticket)) : undefined;
     if (!rec || rec.exp < Date.now()) {
+      if (rec) mediaTickets.delete(hashToken(ticket));
       res.status(401).end();
       return;
     }
@@ -2058,6 +2069,8 @@ async function bootstrap(): Promise<void> {
       res.status(404).end();
       return;
     }
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Cache-Control", "private, no-store");
     res.type(name.toLowerCase().endsWith(".svg") ? "image/svg+xml" : "png");
     res.sendFile(file);
   });

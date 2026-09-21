@@ -24,13 +24,15 @@ const loadingHistory = ref(true);
 const msgs = ref<Msg[]>([]);
 const box = ref<HTMLElement | null>(null);
 
+const mediaTicket = ref("");
+
 function shotSrc(content: string): string {
   const cq = content.match(/\[CQ:image,file=([^\]]+)\]/);
   const raw = cq?.[1] || "";
-  if (!raw) return "";
+  if (!raw || !mediaTicket.value) return "";
   const name = decodeURIComponent(raw.split(/[/\\]/).pop() || "");
   if (!/^[\w.-]+\.(png|svg)$/i.test(name)) return "";
-  return `/v1/media/shot/${encodeURIComponent(name)}?token=${encodeURIComponent(auth.token)}`;
+  return `/v1/media/shot/${encodeURIComponent(name)}?ticket=${encodeURIComponent(mediaTicket.value)}`;
 }
 
 function pushWelcome() {
@@ -148,7 +150,15 @@ async function send() {
   }
 }
 
-onMounted(() => void loadHistory());
+onMounted(async () => {
+  try {
+    const res = await api<{ ticket: string }>("/v1/media/ticket", { token: auth.token });
+    mediaTicket.value = res.ticket || "";
+  } catch {
+    mediaTicket.value = "";
+  }
+  void loadHistory();
+});
 </script>
 
 <template>
