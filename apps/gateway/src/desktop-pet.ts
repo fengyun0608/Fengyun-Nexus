@@ -206,7 +206,8 @@ export class DesktopPetManager {
 
   status(): DesktopPetStatus {
     const running = Boolean(this.child && this.child.exitCode === null && !this.child.killed);
-    const sherpaMarker = join(this.root, "data", "desktop-pet", "voice", "sherpa", "ready");
+    const sherpaMarker = join(this.root, "data", "desktop-pet", "voice", "sherpa", "ready.json");
+    const sherpaReady = existsSync(sherpaMarker);
     return {
       enabled: this.cfg.enabled,
       running,
@@ -215,7 +216,7 @@ export class DesktopPetManager {
       engine: this.cfg.engine,
       voice: {
         preferred: this.cfg.engine,
-        sherpaReady: existsSync(sherpaMarker),
+        sherpaReady,
         systemSpeechReady: process.platform === "win32",
       },
       message: this.lastMessage || undefined,

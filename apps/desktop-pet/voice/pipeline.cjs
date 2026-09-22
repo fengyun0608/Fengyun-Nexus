@@ -39,7 +39,17 @@ function createVoicePipeline(opts) {
       emitStatus(false, `呼唤引擎退出 code=${code ?? "?"}`);
     },
   });
-  const sherpa = createSherpaKws({ dataRoot });
+  const sherpa = createSherpaKws({
+    dataRoot,
+    petDir,
+    onLine: handleLine,
+    onExit: (code) => {
+      // sherpa 在切听写时会停进程，勿当成整管线崩了
+      if (active?.id === "sherpa" && state === "idle_wake") {
+        emitStatus(false, `sherpa 退出 code=${code ?? "?"}`);
+      }
+    },
+  });
 
   function engineLabel(id) {
     if (id === "sherpa") return "sherpa-onnx";
@@ -83,9 +93,8 @@ function createVoicePipeline(opts) {
     }
   }
 
-  /** P1 真接 sherpa 后改为检测 bin+模型 */
   function sherpaRunnable() {
-    return false;
+    return typeof sherpa.runnable === "function" ? sherpa.runnable() : sherpa.available();
   }
 
   function pickRunner(pref) {
@@ -127,7 +136,15 @@ function createVoicePipeline(opts) {
     }
     lastEngine = runner.id;
     active = runner;
-    const ok = runner.start({ wakeWords: cfg.wakeWords, aliases: cfg.aliases });
+    let ok = runner.start({ wakeWords: cfg.wakeWords, aliases: cfg.aliases });
+    if (!ok && runner.id === "sherpa" && speech.available()) {
+      emitStatus(true, "sherpa 启动失败，降级 System.Speech");
+      runner = speech;
+      lastEngine = speech.id;
+      active = speech;
+      ok = speech.start({ wakeWords: cfg.wakeWords, aliases: cfg.aliases });
+      degraded = true;
+    }
     if (!ok) {
       active = null;
       lastEngine = "none";
@@ -136,7 +153,7 @@ function createVoicePipeline(opts) {
     }
     onEvent({ type: "metric", name: "engine", value: lastEngine });
     if (degraded || (preferred === "sherpa" && lastEngine === "system-speech")) {
-      emitStatus(true, "sherpa 未装齐，已降级 System.Speech");
+      emitStatus(true, lastEngine === "system-speech" ? "已降级 System.Speech" : `正在启动 · ${engineLabel(lastEngine)}`);
     } else {
       emitStatus(true, `正在启动 · ${engineLabel(lastEngine)}`);
     }

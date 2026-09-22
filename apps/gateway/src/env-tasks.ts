@@ -12,6 +12,7 @@ import {
   resolveFlavor,
   type NapCatFlavor,
 } from "./napcat-setup.js";
+import { installSherpaVoice } from "./desktop-pet-voice-setup.js";
 
 const requireFrom = createRequire(import.meta.url);
 
@@ -78,10 +79,10 @@ const runtimes: EnvRuntimeDef[] = [
   {
     id: "desktop-pet",
     label: "桌宠（消息通道）",
-    versions: ["electron"],
+    versions: ["electron", "electron+sherpa"],
     modes: ["binary"],
     installed: false,
-    hint: "本机桌面猫娘通道，需下载 Electron；仅电脑端可部署",
+    hint: "本机桌面猫娘通道：Electron + 可选 sherpa 本机呼唤；仅电脑端可部署",
   },
 ];
 
@@ -701,6 +702,27 @@ async function installDesktopPetTask(task: EnvTask): Promise<void> {
     `${now()}\n${bin}\n`,
     "utf8",
   );
+
+  setProgress(task, 88);
+  if (process.platform === "win32") {
+    appendLog(task, "安装 sherpa-onnx 本机呼唤（KWS 模型 + 麦克风引擎）…");
+    try {
+      const ready = await installSherpaVoice({
+        root: rootDir,
+        onLog: (m) => appendLog(task, m),
+        onProgress: (n) => setProgress(task, 88 + Math.floor(n * 0.07)),
+      });
+      appendLog(task, `sherpa 呼唤就绪：${ready.microphone}`);
+      task.note = `Electron + sherpa · ${ready.at}`;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      appendLog(task, `sherpa 安装跳过（可稍后重装桌宠）：${msg}`);
+      appendLog(task, "未装 sherpa 时桌宠会自动降级 System.Speech");
+    }
+  } else {
+    appendLog(task, "非 Windows：跳过 sherpa，仅 Electron");
+  }
+
   appendLog(task, "下一步：消息通道 → 桌面桌宠 → 打开开关");
   setProgress(task, 95);
 }

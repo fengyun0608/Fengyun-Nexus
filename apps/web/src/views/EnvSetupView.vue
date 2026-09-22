@@ -220,7 +220,7 @@ onUnmounted(() => {
             <a href="https://napneko.github.io/guide/boot/Shell" target="_blank" rel="noreferrer">Shell 说明</a>
           </p>
           <p v-if="r.id === 'desktop-pet'" class="hint">
-            下载 Electron 体积较大；国内默认走 npmmirror。装好后到
+            会装 Electron，并尽量装 sherpa 本机呼唤（失败则降级 System.Speech）。国内走镜像。装好后到
             <button type="button" class="linkish" @click="router.push('/channels/desktop-pet')">
               消息通道 · 桌面桌宠
             </button>
