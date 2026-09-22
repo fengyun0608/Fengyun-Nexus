@@ -86,7 +86,7 @@ import { ensureGatewayPortOpen } from "./open-port.js";
 import { buildRestartOkLines, buildRestartOkPanelHtml, buildStatusLines, buildStatusPanelHtml, probePublicReach, type StatusShotInput } from "./status-shot.js";
 import { addOnlineTotal, collectStatusAccounts, ONLINE_KV, readOnlineTotals } from "./status-accounts.js";
 import { execFileSync } from "node:child_process";
-import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, type BotConfig } from "./bot-config.js";
+import { loadBotConfig, saveBotConfig, stripWakePrefix, shouldTriggerAi, stripAtMentions, stripWakeForChat, hasWakePrefix, type BotConfig } from "./bot-config.js";
 import {
   DEFAULT_WALLPAPER_URL,
   isAllowedWallpaperUrl,
@@ -2147,9 +2147,14 @@ async function bootstrap(): Promise<void> {
   onebot.setEnrichInbound(async (msg, ev) => {
     const dest = join(ROOT, "data", "agent-media");
     mkdirSync(dest, { recursive: true });
+    // 群聊未 @ / 未呼唤：不下载图、不听写，避免路人互聊刷 WARN
+    const careMedia =
+      msg.meta?.messageType !== "group" ||
+      Boolean(msg.meta?.atSelf) ||
+      hasWakePrefix(String(msg.content || ""), botCfg);
 
     // 语音 → 听写并入正文
-    const records = extractOb11Records(ev.message, ev.raw_message);
+    const records = careMedia ? extractOb11Records(ev.message, ev.raw_message) : [];
     const voiceBits: string[] = [];
     for (const rec of records.slice(0, 2)) {
       const dl = await onebot.downloadRecordFile(rec, dest);
@@ -2187,18 +2192,22 @@ async function bootstrap(): Promise<void> {
         });
       }
     };
-    await pushImages(extractOb11Images(ev.message, ev.raw_message), "direct", {
-      userId: msg.userId,
-      name: msg.meta?.senderName,
-    });
 
     const quoteId =
       String(msg.meta?.quoteMessageId || "").trim() ||
       extractOb11QuoteMessageId(ev.message, ev.raw_message);
+    // 引用图：只有会触发 AI 时才拉（@ / 呼唤 / 私聊）
+    if (careMedia) {
+      await pushImages(extractOb11Images(ev.message, ev.raw_message), "direct", {
+        userId: msg.userId,
+        name: msg.meta?.senderName,
+      });
+    }
+
     let quoteUserId = "";
     let quoteSenderName = "";
     let quoteText = "";
-    if (quoteId) {
+    if (careMedia && quoteId) {
       const quoted = await onebot.fetchQuotedMessage(quoteId);
       if (quoted.ok) {
         quoteUserId = String(quoted.senderUserId || "").trim();

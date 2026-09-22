@@ -1008,46 +1008,78 @@ export class OneBot11Bridge {
         }
       }
       if (existsSync(file)) return { ok: true, path: file, message: "本地图片" };
-      const r = await this.callAction("get_image", { file }, { botId, timeoutMs: 25_000 });
-      if (r.ok) {
-        const data = (r.data || {}) as Record<string, unknown>;
-        const local = String(data.file || data.path || "");
-        if (local && existsSync(local)) return { ok: true, path: local, message: "已拉取图片" };
-        const url2 = String(data.url || "");
-        if (url2 && /^https?:\/\//i.test(url2)) {
-          const via = await tryUrl(url2);
-          if (via.ok) return via;
+      const candidates = [...new Set([file, file.split(/[/\\]/).pop() || ""].filter(Boolean))];
+      let lastErr = "";
+      for (const cand of candidates) {
+        const r = await this.callAction("get_image", { file: cand }, { botId, timeoutMs: 25_000 });
+        if (r.ok) {
+          const data = (r.data || {}) as Record<string, unknown>;
+          const local = String(data.file || data.path || "");
+          if (local && existsSync(local)) return { ok: true, path: local, message: "已拉取图片" };
+          const url2 = String(data.url || "");
+          if (url2 && /^https?:\/\//i.test(url2)) {
+            const via = await tryUrl(url2);
+            if (via.ok) return via;
+          }
+          const b64 = String(data.base64 || "");
+          if (b64) {
+            const buf = Buffer.from(b64, "base64");
+            return { ok: true, path: tryWrite(buf, String(data.file || "jpg")), message: "已拉取图片" };
+          }
+        } else {
+          lastErr = r.message || lastErr;
         }
-        const b64 = String(data.base64 || "");
-        if (b64) {
-          const buf = Buffer.from(b64, "base64");
-          return { ok: true, path: tryWrite(buf, String(data.file || "jpg")), message: "已拉取图片" };
+        const r2 = await this.callAction("get_file", { file: cand }, { botId, timeoutMs: 25_000 });
+        if (r2.ok) {
+          const data = (r2.data || {}) as Record<string, unknown>;
+          const local = String(data.file || data.path || "");
+          if (local && existsSync(local)) return { ok: true, path: local, message: "已拉取图片" };
+          const b64 = String(data.base64 || "");
+          if (b64) {
+            return { ok: true, path: tryWrite(Buffer.from(b64, "base64"), "bin"), message: "已拉取图片" };
+          }
+        } else {
+          lastErr = r2.message || lastErr;
         }
       }
-      const r2 = await this.callAction("get_file", { file }, { botId, timeoutMs: 25_000 });
-      if (!r2.ok) return { ok: false, message: r.message || r2.message || "拉取图片失败" };
-      const data = (r2.data || {}) as Record<string, unknown>;
-      const local = String(data.file || data.path || "");
-      if (local && existsSync(local)) return { ok: true, path: local, message: "已拉取图片" };
-      const b64 = String(data.base64 || "");
-      if (b64) {
-        return { ok: true, path: tryWrite(Buffer.from(b64, "base64"), "bin"), message: "已拉取图片" };
-      }
-      return { ok: false, message: "图片接口无文件" };
+      return { ok: false, message: lastErr || "图片接口无文件" };
     };
+
+    const fileHints: string[] = [];
+    if (img.file) fileHints.push(img.file);
+    if (img.url && /^https?:\/\//i.test(img.url)) {
+      try {
+        const u = new URL(img.url);
+        const base = u.pathname.split("/").filter(Boolean).pop() || "";
+        if (base) fileHints.push(base);
+        // multimedia 链路上常见一长串 id
+        const idish = u.pathname.match(/\/([0-9a-fA-F_-]{16,})(?:\.[a-z]+)?$/i)?.[1];
+        if (idish) fileHints.push(idish, `${idish}.image`);
+      } catch {
+        /* ignore */
+      }
+    }
 
     // 先试 URL，失败再 get_image（NapCat 临时链常 400）
     if (img.url && /^https?:\/\//i.test(img.url)) {
       const via = await tryUrl(img.url);
       if (via.ok) return via;
-      if (img.file) {
-        const fb = await tryGetImage(img.file);
+      for (const hint of [...new Set(fileHints)]) {
+        const fb = await tryGetImage(hint);
         if (fb.ok) return { ...fb, message: `${fb.message}（URL ${via.message} 后回退）` };
-        return { ok: false, message: `${via.message}；回退也失败：${fb.message}` };
       }
-      return via;
+      return {
+        ok: false,
+        message: fileHints.length
+          ? `${via.message}；get_image 亦失败`
+          : `${via.message}（无 file 可回退）`,
+      };
     }
-    return tryGetImage(img.file);
+    for (const hint of [...new Set(fileHints)]) {
+      const fb = await tryGetImage(hint);
+      if (fb.ok) return fb;
+    }
+    return tryGetImage(img.file || "");
   }
 
   /** 取被引用消息原文（含图片段与原作者） */

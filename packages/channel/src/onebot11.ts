@@ -36,18 +36,47 @@ export function extractOb11Text(message: string | Ob11Segment[] | undefined, raw
   return String(raw ?? "").trim();
 }
 
-/** 入站图片段：file / url */
+/** 入站图片段：file / url（尽量多留标识，方便 URL 失效后 get_image） */
 export function extractOb11Images(
   message: string | Ob11Segment[] | undefined,
   raw?: string,
 ): Array<{ file: string; url?: string }> {
   const out: Array<{ file: string; url?: string }> = [];
+  const push = (fileRaw: string, urlRaw?: string) => {
+    let file = String(fileRaw || "").trim();
+    let url = urlRaw != null ? String(urlRaw).trim() : undefined;
+    try {
+      file = decodeURIComponent(file);
+    } catch {
+      /* keep */
+    }
+    if (url) {
+      url = url.replace(/&amp;/gi, "&");
+      try {
+        url = decodeURIComponent(url);
+      } catch {
+        /* keep */
+      }
+    }
+    if (!file && url) {
+      try {
+        const base = new URL(url).pathname.split("/").filter(Boolean).pop() || "";
+        file = decodeURIComponent(base);
+      } catch {
+        file = url;
+      }
+    }
+    if (file || url) out.push({ file: file || url || "", url });
+  };
   if (Array.isArray(message)) {
     for (const seg of message) {
       if (seg.type !== "image") continue;
-      const file = String(seg.data?.file || seg.data?.file_id || "").trim();
-      const url = seg.data?.url != null ? String(seg.data.url) : undefined;
-      if (file || url) out.push({ file: file || url || "", url });
+      const d = seg.data || {};
+      const file = String(
+        d.file || d.file_id || d.file_unique || d.filename || d.name || "",
+      ).trim();
+      const url = d.url != null ? String(d.url) : undefined;
+      push(file, url);
     }
   }
   const blob = `${typeof message === "string" ? message : ""} ${raw ?? ""}`;
@@ -55,7 +84,7 @@ export function extractOb11Images(
     const body = m[1] || "";
     const file = body.match(/file=([^,\]]+)/i)?.[1]?.trim() || "";
     const url = body.match(/url=([^,\]]+)/i)?.[1]?.trim();
-    if (file || url) out.push({ file: file || url || "", url });
+    push(file, url);
   }
   return out;
 }
