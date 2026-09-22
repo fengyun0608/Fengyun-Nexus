@@ -29,6 +29,26 @@ function findRepoRootFromCwd(): string {
   return cwd;
 }
 
+/** 听写近音纠错（与桌宠 stt-correct 对齐） */
+function correctSttText(text: string): string {
+  let s = String(text || "").trim();
+  if (!s) return s;
+  const pairs: Array<[RegExp, string]> = [
+    [/石中县/g, "绥中县"],
+    [/遂中县/g, "绥中县"],
+    [/岁中县/g, "绥中县"],
+    [/碎中县/g, "绥中县"],
+    [/隋中县/g, "绥中县"],
+    [/随中县/g, "绥中县"],
+    [/穗中县/g, "绥中县"],
+    [/水中县/g, "绥中县"],
+    [/石中(?!县)/g, "绥中"],
+    [/遂中(?!县)/g, "绥中"],
+  ];
+  for (const [re, to] of pairs) s = s.replace(re, to);
+  return s.trim();
+}
+
 async function speechFileToTextSherpa(
   filePath: string,
   root: string,
@@ -61,11 +81,29 @@ async function speechFileToTextSherpa(
       .filter(Boolean);
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i]!;
-      if (/^(OK\||err|error|loading|num_|sample|Elapsed|Rtf)/i.test(line)) continue;
+      if (/^(OK\||err|error|loading|num_|sample|Elapsed|Rtf|Creating|Started|Done|----)/i.test(line)) {
+        continue;
+      }
+      if (line.startsWith("{") && line.includes("text")) {
+        try {
+          const j = JSON.parse(line) as { text?: string };
+          if (j?.text?.trim()) {
+            return { ok: true, text: correctSttText(j.text), message: "sherpa 已听写" };
+          }
+        } catch {
+          /* fall through */
+        }
+      }
       const m = line.match(/(?:text|result)\s*[=:：]\s*(.+)$/i);
-      if (m?.[1]) return { ok: true, text: m[1].trim(), message: "sherpa 已听写" };
+      if (m?.[1]) {
+        return { ok: true, text: correctSttText(m[1]), message: "sherpa 已听写" };
+      }
       if (/[\u4e00-\u9fff]/.test(line) && line.length < 80) {
-        return { ok: true, text: line.replace(/^["']|["']$/g, ""), message: "sherpa 已听写" };
+        return {
+          ok: true,
+          text: correctSttText(line.replace(/^["']|["']$/g, "")),
+          message: "sherpa 已听写",
+        };
       }
     }
     return null;
@@ -134,7 +172,9 @@ export async function speechFileToText(
 
   const repo = root || findRepoRootFromCwd();
   const sherpa = await speechFileToTextSherpa(path, repo);
-  if (sherpa?.ok && sherpa.text) return sherpa;
+  if (sherpa?.ok && sherpa.text) {
+    return { ...sherpa, text: correctSttText(sherpa.text) };
+  }
 
   const script = `
 $ErrorActionPreference = 'Stop'
@@ -164,7 +204,7 @@ try {
     );
     const b64 = String(stdout || "").trim().replace(/\s+/g, "");
     if (!b64) return { ok: false, message: "没有听出文字" };
-    const text = Buffer.from(b64, "base64").toString("utf8").trim();
+    const text = correctSttText(Buffer.from(b64, "base64").toString("utf8").trim());
     if (!text) return { ok: false, message: "没有听出文字" };
     return {
       ok: true,

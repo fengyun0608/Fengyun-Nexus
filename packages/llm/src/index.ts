@@ -64,6 +64,22 @@ function speakOutsideTags(text: string): string {
     .trim();
 }
 
+/** 模型把答复塞进思考时，尽量捞一句能给人看的话 */
+function rescueSpeakFromThoughts(thoughts: string[]): string {
+  const blob = thoughts.join("\n");
+  const lines = blob
+    .split(/\n+/)
+    .map((l) => l.replace(/^[\s*•\-]+/, "").trim())
+    .filter((l) => l.length >= 6 && l.length <= 120);
+  const scored = lines.filter((l) =>
+    /[℃度晴雨云雪风温]|天气|绥中|今天|明天|周末|紫外|带伞/.test(l),
+  );
+  const pick = scored[scored.length - 1] || lines[lines.length - 1] || "";
+  if (!pick) return "";
+  if (/^用户|我需要|让我|实际上|之前|可能是|应该是|不要|工具/.test(pick)) return "";
+  return pick;
+}
+
 function clipLine(text: string, n = 180): string {
   const t = String(text || "").replace(/\s+/g, " ").trim();
   if (!t) return "";
@@ -225,6 +241,7 @@ export class LlmRouter {
         });
       }
     };
+    let emptySpeak = 0;
     const oneTurn = async (round: number): Promise<string | null> => {
       const turn = await this.chatTurn(history, tools);
       if (turn.reasoning?.trim()) thoughts.push(turn.reasoning.trim());
@@ -236,6 +253,19 @@ export class LlmRouter {
       if (!calls.length) {
         const text = composeSpeak(thoughts.join("\n\n"), turn.content);
         if (speakOutsideTags(text)) return text;
+        emptySpeak += 1;
+        if (emptySpeak >= 2) {
+          const rescued = rescueSpeakFromThoughts(thoughts);
+          if (rescued) {
+            trace(`AI 空回话  从思考捞出一句：${clipLine(rescued)}`);
+            return composeSpeak(thoughts.join("\n\n"), rescued);
+          }
+          trace("AI 空回话  二次仍空，结束本轮");
+          return composeSpeak(
+            thoughts.join("\n\n"),
+            "我刚才卡住了，请把问题再说一遍。",
+          );
+        }
         history.push({ role: "assistant", content: turn.content || "" });
         history.push({
           role: "user",
@@ -245,6 +275,7 @@ export class LlmRouter {
         trace("AI 空回话  继续，不因轮次结束");
         return null;
       }
+      emptySpeak = 0;
       await runCalls(calls, turn.content || "", leaked.length > 0);
       return null;
     };
