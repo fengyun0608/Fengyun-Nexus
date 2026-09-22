@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src http: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
+    />
+    <title>风云枢纽 · 桌宠</title>
+    <link rel="stylesheet" href="./pet.css" />
+  </head>
+  <body>
+    <div id="stage" class="stage">
+      <div class="bubble" id="bubble" hidden></div>
+      <div class="pet" id="pet" data-mood="idle" title="拖我移动 · 点我说话 · 呼唤名字唤醒">
+        <!-- 自绘矢量猫娘（风云枢纽桌宠形象），非第三方 Live2D 商用模型 -->
+        <svg class="figure" viewBox="0 0 200 280" aria-hidden="true">
+          <defs>
+            <linearGradient id="hair" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#7dd3c0" />
+              <stop offset="100%" stop-color="#3aa890" />
+            </linearGradient>
+            <linearGradient id="dress" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#e8fff8" />
+              <stop offset="100%" stop-color="#b8ebe0" />
+            </linearGradient>
+          </defs>
+          <!-- 尾巴 -->
+          <path class="tail" d="M118 190 C160 170 175 210 150 230 C135 242 125 220 118 210" fill="none" stroke="#3aa890" stroke-width="14" stroke-linecap="round" />
+          <!-- 身体 -->
+          <ellipse cx="100" cy="200" rx="42" ry="48" fill="url(#dress)" />
+          <path d="M70 175 Q100 155 130 175 L128 210 Q100 230 72 210 Z" fill="url(#dress)" />
+          <!-- 头 -->
+          <circle cx="100" cy="110" r="48" fill="#ffe8d6" />
+          <!-- 猫耳 -->
+          <path class="ear-l" d="M62 78 L48 28 L88 62 Z" fill="url(#hair)" />
+          <path class="ear-r" d="M138 78 L152 28 L112 62 Z" fill="url(#hair)" />
+          <path d="M64 72 L56 42 L82 64 Z" fill="#ffc4c4" opacity="0.85" />
+          <path d="M136 72 L144 42 L118 64 Z" fill="#ffc4c4" opacity="0.85" />
+          <!-- 头发 -->
+          <path d="M52 105 Q55 55 100 48 Q145 55 148 105 Q140 70 100 68 Q60 70 52 105 Z" fill="url(#hair)" />
+          <path d="M55 120 Q48 160 70 175 Q62 140 72 118 Z" fill="#3aa890" />
+          <path d="M145 120 Q152 160 130 175 Q138 140 128 118 Z" fill="#3aa890" />
+          <!-- 刘海 -->
+          <path d="M70 78 Q100 95 130 78 Q118 88 100 90 Q82 88 70 78 Z" fill="#2f9a84" />
+          <!-- 眼睛 -->
+          <g class="eyes">
+            <ellipse class="eye-l" cx="82" cy="112" rx="8" ry="10" fill="#1a3a34" />
+            <ellipse class="eye-r" cx="118" cy="112" rx="8" ry="10" fill="#1a3a34" />
+            <circle cx="84" cy="109" r="2.2" fill="#fff" />
+            <circle cx="120" cy="109" r="2.2" fill="#fff" />
+          </g>
+          <!-- 腮红 -->
+          <ellipse cx="68" cy="128" rx="8" ry="4" fill="#ff9aa2" opacity="0.45" />
+          <ellipse cx="132" cy="128" rx="8" ry="4" fill="#ff9aa2" opacity="0.45" />
+          <!-- 嘴 -->
+          <path class="mouth" d="M94 132 Q100 138 106 132" fill="none" stroke="#c45c5c" stroke-width="2.2" stroke-linecap="round" />
+          <!-- 围巾小铃 -->
+          <circle cx="100" cy="162" r="7" fill="#f0c14a" stroke="#d4a017" stroke-width="1.5" />
+        </svg>
+      </div>
+      <div class="hud">
+        <span id="status">待命 · 呼唤名字或点我</span>
+        <button type="button" id="btnMic" class="btn">开麦</button>
+        <button type="button" id="btnQuit" class="btn ghost">退出</button>
+      </div>
+    </div>
+    <script src="./pet.js"></script>
+  </body>
+</html>

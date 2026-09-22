@@ -7,6 +7,7 @@ import {
   NModal,
   NSelect,
   NSpace,
+  NSwitch,
   useMessage,
 } from "naive-ui";
 import { api } from "@/api/client";
@@ -34,6 +35,12 @@ const wallFit = ref<"cover" | "contain" | "fill">("cover");
 const wallDim = ref(0.42);
 const wallSaving = ref(false);
 const defaultUrl = ref(DEFAULT_WALLPAPER_URL);
+
+const petEnabled = ref(false);
+const petRunning = ref(false);
+const petWake = ref("喵璃, 小璃, Nexus, 风云");
+const petBusy = ref(false);
+const petHint = ref("");
 
 const fitOptions = [
   { label: "铺满裁切（cover）", value: "cover" },
@@ -72,6 +79,78 @@ async function loadAppearance() {
     if (res.appearance) consoleUi.applyLocal(res.appearance);
   } catch {
     /* ignore */
+  }
+}
+
+async function loadDesktopPet() {
+  try {
+    const res = await api<{
+      enabled?: boolean;
+      running?: boolean;
+      wakeWords?: string[];
+      message?: string;
+      config?: { wakeWords?: string[] };
+    }>("/v1/admin/desktop-pet", { token: auth.token });
+    petEnabled.value = Boolean(res.enabled);
+    petRunning.value = Boolean(res.running);
+    const words = res.config?.wakeWords || res.wakeWords || [];
+    if (words.length) petWake.value = words.join(", ");
+    petHint.value =
+      res.message ||
+      (res.running ? "桌宠进程在跑" : petEnabled.value ? "已开启但进程未起来" : "");
+  } catch {
+    /* ignore */
+  }
+}
+
+async function onPetSwitch(v: boolean) {
+  petBusy.value = true;
+  try {
+    const res = await api<{
+      message?: string;
+      enabled?: boolean;
+      running?: boolean;
+    }>("/v1/admin/desktop-pet", {
+      method: "PUT",
+      token: auth.token,
+      body: JSON.stringify({
+        enabled: v,
+        wakeWords: petWake.value,
+      }),
+    });
+    petEnabled.value = Boolean(res.enabled ?? v);
+    petRunning.value = Boolean(res.running);
+    petHint.value = res.message || "";
+    message.success(res.message || (v ? "桌宠已开启" : "桌宠已关闭"));
+  } catch (e) {
+    petEnabled.value = !v;
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    petBusy.value = false;
+  }
+}
+
+async function savePetWake() {
+  petBusy.value = true;
+  try {
+    const res = await api<{ message?: string; running?: boolean; enabled?: boolean }>(
+      "/v1/admin/desktop-pet",
+      {
+        method: "PUT",
+        token: auth.token,
+        body: JSON.stringify({
+          enabled: petEnabled.value,
+          wakeWords: petWake.value,
+        }),
+      },
+    );
+    petRunning.value = Boolean(res.running);
+    petHint.value = res.message || "呼唤词已保存";
+    message.success(res.message || "已保存");
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    petBusy.value = false;
   }
 }
 
@@ -189,6 +268,7 @@ async function saveCredentials() {
 onMounted(() => {
   void loadMe();
   void loadAppearance();
+  void loadDesktopPet();
 });
 </script>
 
@@ -196,7 +276,7 @@ onMounted(() => {
   <div class="page">
     <header class="page-head">
       <h1>管理</h1>
-      <p class="muted">当前账号：{{ displayUser || "—" }}。改密与控制台壁纸都在本页。</p>
+      <p class="muted">当前账号：{{ displayUser || "—" }}。改密、壁纸与桌面桌宠都在本页。</p>
     </header>
 
     <div class="admin-row surface">
@@ -205,6 +285,24 @@ onMounted(() => {
         <p class="muted">修改管理端登录密码；可选同时改用户名。</p>
       </div>
       <n-button type="primary" @click="openPasswordModal">修改</n-button>
+    </div>
+
+    <div class="admin-row surface pet-row">
+      <div>
+        <strong>桌面桌宠</strong>
+        <p class="muted">
+          开关只写到后端；开启后在本机桌面弹出猫娘角色。麦克风呼唤与对话在桌宠里完成，不是网页里聊。
+        </p>
+        <label class="field">
+          呼唤词（逗号分隔）
+          <n-input v-model:value="petWake" placeholder="喵璃, 小璃, Nexus" />
+        </label>
+        <p v-if="petHint" class="hint">{{ petHint }}{{ petRunning ? " · 进程在跑" : "" }}</p>
+      </div>
+      <div class="pet-actions">
+        <n-switch :value="petEnabled" :loading="petBusy" @update:value="onPetSwitch" />
+        <n-button size="small" quaternary :loading="petBusy" @click="savePetWake">保存呼唤词</n-button>
+      </div>
     </div>
 
     <div class="surface wall-card">
@@ -291,6 +389,23 @@ onMounted(() => {
   border-radius: 12px;
   background: var(--surface);
   margin-bottom: 14px;
+}
+.pet-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.pet-row > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.pet-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  padding-top: 4px;
 }
 .wall-card {
   border: 1px solid var(--line);

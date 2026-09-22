@@ -91,6 +91,7 @@ import {
   saveConsoleAppearance,
   type ConsoleAppearance,
 } from "./console-appearance.js";
+import { DesktopPetManager } from "./desktop-pet.js";
 import {
   listPluginDirs,
   listPluginFiles,
@@ -2161,6 +2162,50 @@ async function bootstrap(): Promise<void> {
     res.json({ ok: true, message: "已保存", appearance: consoleAppearance });
   });
 
+  const desktopPet = new DesktopPetManager(ROOT, log);
+  const petGatewayUrl = () => {
+    const p = Number(process.env.PORT ?? profile.gateway.port);
+    return `http://127.0.0.1:${p}`;
+  };
+
+  app.get("/v1/admin/desktop-pet", authMiddleware, (_req, res) => {
+    res.json({ ok: true, ...desktopPet.status(), config: desktopPet.getConfig() });
+  });
+
+  app.put("/v1/admin/desktop-pet", authMiddleware, async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as {
+        enabled?: boolean;
+        wakeWords?: string[] | string;
+      };
+      const wakeWords = Array.isArray(body.wakeWords)
+        ? body.wakeWords.map((x) => String(x).trim()).filter(Boolean)
+        : typeof body.wakeWords === "string"
+          ? String(body.wakeWords)
+              .split(/[,，\s]+/)
+              .map((x) => x.trim())
+              .filter(Boolean)
+          : undefined;
+      const enabled =
+        typeof body.enabled === "boolean" ? body.enabled : desktopPet.getConfig().enabled;
+      const st = await desktopPet.apply({
+        enabled,
+        wakeWords,
+        gatewayUrl: petGatewayUrl(),
+        issueToken: () => issueToken(adminCfg.username || "admin"),
+      });
+      res.json({
+        ok: true,
+        message: enabled ? "桌宠已开启，角色应出现在桌面右下角" : "桌宠已关闭",
+        ...st,
+        config: desktopPet.getConfig(),
+      });
+    } catch (e) {
+      const tip = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ error: tip, errorType: "desktop_pet" });
+    }
+  });
+
   /** 教程 / 示例：新窗口打开，路径仅允许 docs、模板、workflows */
   app.get("/v1/docs/view", (req, res) => {
     const path = String(req.query.path || "");
@@ -3758,6 +3803,10 @@ async function bootstrap(): Promise<void> {
       onebotConnected: () => onebot.status().connected,
     });
     void deliverRestartSuccessNotice();
+    void desktopPet.restoreIfEnabled({
+      gatewayUrl: petGatewayUrl(),
+      issueToken: () => issueToken(adminCfg.username || "admin"),
+    });
 
     // 后端终端输入（跑代码的那个窗口），不是网页
     startTerminalRepl({
