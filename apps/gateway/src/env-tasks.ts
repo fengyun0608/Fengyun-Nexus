@@ -26,6 +26,9 @@ export type EnvRuntimeDef = {
   installed?: boolean;
   activeVersion?: string;
   hint?: string;
+  /** false 时前端只展示，不允许点安装 */
+  deployable?: boolean;
+  unavailableReason?: string;
 };
 
 export type EnvTask = {
@@ -78,7 +81,7 @@ const runtimes: EnvRuntimeDef[] = [
     versions: ["electron"],
     modes: ["binary"],
     installed: false,
-    hint: "本机桌面猫娘通道，需下载 Electron；装完到「消息通道 → 桌面桌宠」开关启用",
+    hint: "本机桌面猫娘通道，需下载 Electron；仅电脑端可部署",
   },
 ];
 
@@ -101,6 +104,7 @@ export function setNapCatAfterInstall(fn: () => void): void {
 const tasks: EnvTask[] = [];
 let seq = 1;
 let rootDir = process.cwd();
+let nexusEnvId = String(process.env.NEXUS_ENV || "desktop").toLowerCase();
 let workerBusy = false;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
 /** Print install lines to the backend terminal (not only web). */
@@ -252,19 +256,48 @@ function resolveDesktopPetElectron(root: string): string | null {
   return null;
 }
 
+export function isDesktopPetDeployable(envId?: string): boolean {
+  const id = String(envId || nexusEnvId || process.env.NEXUS_ENV || "desktop")
+    .trim()
+    .toLowerCase();
+  return id === "desktop";
+}
+
+export function desktopPetUnavailableReason(envId?: string): string {
+  if (isDesktopPetDeployable(envId)) return "";
+  return "当前环境无法部署";
+}
+
+function applyDesktopPetDeployGate(): void {
+  const rt = runtimes.find((r) => r.id === "desktop-pet");
+  if (!rt) return;
+  const ok = isDesktopPetDeployable();
+  rt.deployable = ok;
+  rt.unavailableReason = ok ? "" : "当前环境无法部署";
+  if (!ok) {
+    rt.hint = "桌宠仅支持电脑端部署；当前环境只展示，不能安装或启用";
+  } else {
+    rt.hint =
+      "本机桌面猫娘通道，需下载 Electron；装完到「消息通道 → 桌面桌宠」开关启用";
+  }
+}
+
 export function initEnvTasks(
   root: string,
-  opts?: { onLog?: (line: string) => void },
+  opts?: { onLog?: (line: string) => void; envId?: string },
 ): void {
   rootDir = root;
+  if (opts?.envId) nexusEnvId = String(opts.envId).trim().toLowerCase() || nexusEnvId;
   consoleSink = opts?.onLog ?? null;
   mkdirSync(join(rootDir, "data", "runtimes"), { recursive: true });
   refreshInstalledFlags();
+  applyDesktopPetDeployGate();
   kickWorker();
 }
 
 export function listRuntimes(): EnvRuntimeDef[] {
   refreshInstalledFlags();
+  applyDesktopPetDeployGate();
   return runtimes.map((r) => ({ ...r }));
 }
 
@@ -305,6 +338,10 @@ export function createInstallTask(input: {
 }): EnvTask {
   const rt = runtimes.find((r) => r.id === input.runtime);
   if (!rt) throw new Error("未知运行时");
+  applyDesktopPetDeployGate();
+  if (rt.id === "desktop-pet" && rt.deployable === false) {
+    throw new Error(rt.unavailableReason || "当前环境无法部署");
+  }
   const version = input.version || rt.versions[0]!;
   const mode = input.mode || (rt.modes.includes("binary") ? "binary" : rt.modes[0]!)!;
   if (!rt.versions.includes(version) && !rt.versions.some((v) => version.startsWith(v))) {
@@ -603,6 +640,9 @@ async function executeInstall(task: EnvTask, signal?: AbortSignal): Promise<void
 }
 
 async function installDesktopPetTask(task: EnvTask): Promise<void> {
+  if (!isDesktopPetDeployable()) {
+    throw new Error("当前环境无法部署");
+  }
   setProgress(task, 10);
   appendLog(task, "桌宠消息通道：安装 Electron 运行时");
   const petDir = join(rootDir, "apps", "desktop-pet");

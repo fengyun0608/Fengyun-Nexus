@@ -109,6 +109,8 @@ const petWake = ref("喵璃, 小璃, Nexus, 风云");
 const petBusy = ref(false);
 const petHint = ref("");
 const petEnvInstalled = ref(false);
+const petDeployable = ref(true);
+const petUnavailable = ref("");
 
 const plugins = ref<PluginItem[]>([]);
 const devItems = ref<DevPlugin[]>([]);
@@ -142,25 +144,37 @@ async function loadDesktopPet() {
         message?: string;
         config?: { wakeWords?: string[] };
         wakeWords?: string[];
+        deployable?: boolean;
+        unavailableReason?: string;
       }>("/v1/admin/desktop-pet", { token: auth.token }),
-      api<{ runtimes?: Array<{ id: string; installed?: boolean }> }>("/v1/admin/env-runtimes", {
-        token: auth.token,
-      }),
+      api<{ runtimes?: Array<{ id: string; installed?: boolean; deployable?: boolean }> }>(
+        "/v1/admin/env-runtimes",
+        { token: auth.token },
+      ),
     ]);
     petEnabled.value = Boolean(pet.enabled);
     petRunning.value = Boolean(pet.running);
     const words = pet.config?.wakeWords || pet.wakeWords || [];
     if (words.length) petWake.value = words.join(", ");
     petHint.value = pet.message || "";
-    petEnvInstalled.value = Boolean(
-      (env.runtimes || []).find((r) => r.id === "desktop-pet")?.installed,
-    );
+    petDeployable.value = pet.deployable !== false;
+    petUnavailable.value = pet.unavailableReason || "";
+    const rt = (env.runtimes || []).find((r) => r.id === "desktop-pet");
+    petEnvInstalled.value = Boolean(rt?.installed);
+    if (rt && rt.deployable === false) {
+      petDeployable.value = false;
+      petUnavailable.value = petUnavailable.value || "当前环境无法部署";
+    }
   } catch {
     /* ignore */
   }
 }
 
 async function onPetSwitch(v: boolean) {
+  if (!petDeployable.value) {
+    message.error(petUnavailable.value || "当前环境无法部署");
+    return;
+  }
   petBusy.value = true;
   try {
     const res = await api<{
@@ -640,7 +654,15 @@ watch(showOnebot, (open) => {
           >
             <strong>桌宠启停</strong>
             <span>
-              {{ petRunning ? "进程在跑" : petEnabled ? "已开启" : "未开启" }}
+              {{
+                !petDeployable
+                  ? petUnavailable || "当前环境无法部署"
+                  : petRunning
+                    ? "进程在跑"
+                    : petEnabled
+                      ? "已开启"
+                      : "未开启"
+              }}
               · {{ petEnvInstalled ? "运行时已装" : "先装环境" }}
             </span>
           </button>
@@ -863,17 +885,27 @@ watch(showOnebot, (open) => {
       <p class="hint">
         桌宠是消息通道。Electron 等资源在「环境配置」安装；麦克风呼唤与对话在本机桌宠窗口完成。
       </p>
-      <p v-if="!petEnvInstalled" class="hint">
+      <p v-if="!petDeployable" class="hint">{{ petUnavailable || "当前环境无法部署" }}</p>
+      <p v-else-if="!petEnvInstalled" class="hint">
         运行时未装。
         <n-button size="tiny" quaternary @click="router.push('/env-setup')">去环境配置安装</n-button>
       </p>
       <label class="field row-switch">
         启用桌宠
-        <n-switch :value="petEnabled" :loading="petBusy" @update:value="onPetSwitch" />
+        <n-switch
+          :value="petEnabled"
+          :disabled="!petDeployable"
+          :loading="petBusy"
+          @update:value="onPetSwitch"
+        />
       </label>
       <label class="field">
         呼唤词（逗号分隔）
-        <n-input v-model:value="petWake" placeholder="喵璃, 小璃, Nexus" />
+        <n-input
+          v-model:value="petWake"
+          :disabled="!petDeployable"
+          placeholder="喵璃, 小璃, Nexus"
+        />
       </label>
       <p v-if="petHint" class="hint">{{ petHint }}{{ petRunning ? " · 进程在跑" : "" }}</p>
       <template #footer>

@@ -41,6 +41,8 @@ const petRunning = ref(false);
 const petWake = ref("喵璃, 小璃, Nexus, 风云");
 const petBusy = ref(false);
 const petHint = ref("");
+const petDeployable = ref(true);
+const petUnavailable = ref("");
 
 const fitOptions = [
   { label: "铺满裁切（cover）", value: "cover" },
@@ -90,20 +92,29 @@ async function loadDesktopPet() {
       wakeWords?: string[];
       message?: string;
       config?: { wakeWords?: string[] };
+      deployable?: boolean;
+      unavailableReason?: string;
     }>("/v1/admin/desktop-pet", { token: auth.token });
     petEnabled.value = Boolean(res.enabled);
     petRunning.value = Boolean(res.running);
+    petDeployable.value = res.deployable !== false;
+    petUnavailable.value = res.unavailableReason || "";
     const words = res.config?.wakeWords || res.wakeWords || [];
     if (words.length) petWake.value = words.join(", ");
-    petHint.value =
-      res.message ||
-      (res.running ? "桌宠进程在跑" : petEnabled.value ? "已开启但进程未起来" : "");
+    petHint.value = !petDeployable.value
+      ? petUnavailable.value || "当前环境无法部署"
+      : res.message ||
+        (res.running ? "桌宠进程在跑" : petEnabled.value ? "已开启但进程未起来" : "");
   } catch {
     /* ignore */
   }
 }
 
 async function onPetSwitch(v: boolean) {
+  if (!petDeployable.value) {
+    message.error(petUnavailable.value || "当前环境无法部署");
+    return;
+  }
   petBusy.value = true;
   try {
     const res = await api<{
@@ -299,13 +310,30 @@ onMounted(() => {
         </p>
         <label class="field">
           呼唤词（逗号分隔）
-          <n-input v-model:value="petWake" placeholder="喵璃, 小璃, Nexus" />
+          <n-input
+            v-model:value="petWake"
+            :disabled="!petDeployable"
+            placeholder="喵璃, 小璃, Nexus"
+          />
         </label>
-        <p v-if="petHint" class="hint">{{ petHint }}{{ petRunning ? " · 进程在跑" : "" }}</p>
+        <p v-if="petHint" class="hint">{{ petHint }}{{ petDeployable && petRunning ? " · 进程在跑" : "" }}</p>
       </div>
       <div class="pet-actions">
-        <n-switch :value="petEnabled" :loading="petBusy" @update:value="onPetSwitch" />
-        <n-button size="small" quaternary :loading="petBusy" @click="savePetWake">保存呼唤词</n-button>
+        <n-switch
+          :value="petEnabled"
+          :disabled="!petDeployable"
+          :loading="petBusy"
+          @update:value="onPetSwitch"
+        />
+        <n-button
+          size="small"
+          quaternary
+          :disabled="!petDeployable"
+          :loading="petBusy"
+          @click="savePetWake"
+        >
+          保存呼唤词
+        </n-button>
       </div>
     </div>
 

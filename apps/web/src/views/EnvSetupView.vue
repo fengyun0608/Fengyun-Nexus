@@ -22,6 +22,8 @@ type EnvRuntimeDef = {
   installed?: boolean;
   activeVersion?: string;
   hint?: string;
+  deployable?: boolean;
+  unavailableReason?: string;
 };
 
 const auth = useAuthStore();
@@ -156,6 +158,14 @@ onUnmounted(() => {
           <n-tag size="small" :type="r.installed ? 'success' : 'warning'" style="margin-bottom: 10px">
             {{ r.installed ? `已安装 ${r.activeVersion || ""}` : "未安装" }}
           </n-tag>
+          <n-tag
+            v-if="r.deployable === false"
+            size="small"
+            type="error"
+            style="margin-bottom: 10px; margin-left: 6px"
+          >
+            {{ r.unavailableReason || "当前环境无法部署" }}
+          </n-tag>
           <p v-if="r.hint || isChannelRuntime(r.id)" class="hint">
             {{
               r.hint ||
@@ -169,21 +179,26 @@ onUnmounted(() => {
               {{ isChannelRuntime(r.id) ? "安装包" : "版本" }}
               <n-select
                 v-model:value="picks[r.id].version"
+                :disabled="r.deployable === false"
                 :options="(r.versions || []).map((v) => ({ label: versionLabel(r.id, v), value: v }))"
               />
             </label>
             <n-button
               type="primary"
-              :disabled="!isChannelRuntime(r.id) && r.installed"
+              :disabled="
+                r.deployable === false || (!isChannelRuntime(r.id) && r.installed)
+              "
               :loading="busy === r.id"
               @click="install(r.id)"
             >
               {{
-                r.id === "napcat" && r.installed
-                  ? "重装/接线"
-                  : r.id === "desktop-pet" && r.installed
-                    ? "重装运行时"
-                    : "安装"
+                r.deployable === false
+                  ? "无法部署"
+                  : r.id === "napcat" && r.installed
+                    ? "重装/接线"
+                    : r.id === "desktop-pet" && r.installed
+                      ? "重装运行时"
+                      : "安装"
               }}
             </n-button>
           </div>

@@ -1129,7 +1129,7 @@ async function bootstrap(): Promise<void> {
   await bootLine(
     agentSkills.length ? `运行时技能 ${agentSkills.length} 个` : "运行时技能：无",
   );
-  initEnvTasks(ROOT);
+  initEnvTasks(ROOT, { envId: profile.id });
 
   const tokens = new Map<string, { user: string; exp: number }>();
   const mediaTickets = new Map<string, { exp: number }>();
@@ -2171,11 +2171,28 @@ async function bootstrap(): Promise<void> {
   };
 
   app.get("/v1/admin/desktop-pet", authMiddleware, (_req, res) => {
-    res.json({ ok: true, ...desktopPet.status(), config: desktopPet.getConfig() });
+    const deployable = profile.id === "desktop";
+    res.json({
+      ok: true,
+      ...desktopPet.status(),
+      config: desktopPet.getConfig(),
+      deployable,
+      unavailableReason: deployable ? "" : "当前环境无法部署",
+      envId: profile.id,
+    });
   });
 
   app.put("/v1/admin/desktop-pet", authMiddleware, async (req, res) => {
     try {
+      if (profile.id !== "desktop") {
+        res.status(400).json({
+          error: "当前环境无法部署",
+          errorType: "env_unsupported",
+          deployable: false,
+          envId: profile.id,
+        });
+        return;
+      }
       const body = (req.body ?? {}) as {
         enabled?: boolean;
         wakeWords?: string[] | string;
@@ -2201,6 +2218,8 @@ async function bootstrap(): Promise<void> {
         message: enabled ? "桌宠已开启，角色应出现在桌面右下角" : "桌宠已关闭",
         ...st,
         config: desktopPet.getConfig(),
+        deployable: true,
+        envId: profile.id,
       });
     } catch (e) {
       const tip = e instanceof Error ? e.message : String(e);
@@ -3805,10 +3824,12 @@ async function bootstrap(): Promise<void> {
       onebotConnected: () => onebot.status().connected,
     });
     void deliverRestartSuccessNotice();
-    void desktopPet.restoreIfEnabled({
-      gatewayUrl: petGatewayUrl(),
-      issueToken: () => issueToken(adminCfg.username || "admin"),
-    });
+    if (profile.id === "desktop") {
+      void desktopPet.restoreIfEnabled({
+        gatewayUrl: petGatewayUrl(),
+        issueToken: () => issueToken(adminCfg.username || "admin"),
+      });
+    }
 
     // 后端终端输入（跑代码的那个窗口），不是网页
     startTerminalRepl({
