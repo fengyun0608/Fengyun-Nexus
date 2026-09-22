@@ -33,7 +33,7 @@ export function modelSupportsVision(model?: string): boolean {
   const m = String(model || "").toLowerCase();
   if (!m) return false;
   if (/no[-_]?vision|text[-_]?only/.test(m)) return false;
-  return /vl\b|vision|gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|\bo1\b|\bo3\b|\bo4\b|gemini|claude-3|claude-4|llava|qwen2\.5-vl|qwen3-vl|qwen-vl|internvl|minicpm-v|phi-4-multimodal|step-1v|glm-4v|skywork-vl|doubao.*vision|seed-?1\.5|seed-?1\.6/.test(
+  return /vl\b|vision|omni|gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|\bo1\b|\bo3\b|\bo4\b|gemini|claude-3|claude-4|llava|qwen2\.5-vl|qwen3-vl|qwen-vl|internvl|minicpm-v|phi-4-multimodal|step-1v|glm-4v|skywork-vl|doubao.*vision|seed-?1\.5|seed-?1\.6/.test(
     m,
   );
 }
