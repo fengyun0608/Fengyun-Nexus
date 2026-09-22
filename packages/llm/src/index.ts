@@ -240,7 +240,7 @@ export class LlmRouter {
         history.push({
           role: "user",
           content:
-            "还没写完。不要停，不要只思考。继续读、继续写，写到 plugins/ 并重载。做完再在 <think> 外面说一句。",
+            "刚才只有思考、标签外面一行都没有。请直接用一两句回答用户刚才的问题，写在 <think> 外面；不要提插件、工具名或 JSON。",
         });
         trace("AI 空回话  继续，不因轮次结束");
         return null;

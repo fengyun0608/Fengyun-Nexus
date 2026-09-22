@@ -7,6 +7,7 @@ const { join, dirname } = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const { sherpaReadyPath, voiceTmpDir } = require("./paths.cjs");
+const { correctSttText } = require("./stt-correct.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -162,7 +163,7 @@ async function recordAndTranscribe(opts) {
       };
     }
     try {
-      const text = (await transcribeSherpa({ ready, wavPath })).trim();
+      const text = correctSttText((await transcribeSherpa({ ready, wavPath })).trim());
       if (text) return { text, engine: "sherpa-asr", message: "ok" };
       return { text: "", engine: "sherpa-asr", message: "没听清，请靠近麦克风再说一次" };
     } catch (e) {
