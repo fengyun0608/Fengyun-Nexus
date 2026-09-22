@@ -31,9 +31,15 @@ export function loadProvidersFile(root: string): LlmProvidersFile {
     };
     // Migrate legacy single-provider llm.local.json
     if (Array.isArray(local.providers) && local.providers.length) {
+      // 发行默认里新增的预设，补进本机列表（不覆盖用户已改过的同 id）
+      const seen = new Set(local.providers.map((p) => p.id));
+      const merged = [...local.providers];
+      for (const p of def.providers) {
+        if (!seen.has(p.id)) merged.push({ ...p });
+      }
       return {
         activeId: local.activeId || def.activeId,
-        providers: local.providers,
+        providers: merged,
       };
     }
     if (local.apiKey || local.baseUrl || local.model) {

@@ -4,6 +4,7 @@ import {
   NButton,
   NInput,
   NModal,
+  NSelect,
   NSpace,
   NSpin,
   NTag,
@@ -36,6 +37,7 @@ const auth = useAuthStore();
 const message = useMessage();
 const loading = ref(true);
 const saving = ref(false);
+const modelsLoading = ref(false);
 const err = ref("");
 const info = ref<LlmInfo | null>(null);
 const activeId = ref("");
@@ -45,10 +47,19 @@ const name = ref("");
 const baseUrl = ref("");
 const model = ref("");
 const apiKey = ref("");
+const modelIds = ref<string[]>([]);
+const modelsHint = ref("");
 
 const active = computed(() =>
   (info.value?.providers || []).find((p) => p.id === activeId.value),
 );
+
+const modelOptions = computed(() => {
+  const ids = [...modelIds.value];
+  const cur = model.value.trim();
+  if (cur && !ids.includes(cur)) ids.unshift(cur);
+  return ids.map((id) => ({ label: id, value: id }));
+});
 
 function fillFrom(p?: Provider) {
   if (!p) return;
@@ -56,6 +67,8 @@ function fillFrom(p?: Provider) {
   baseUrl.value = p.baseUrl;
   model.value = p.model;
   apiKey.value = "";
+  modelIds.value = p.model ? [p.model] : [];
+  modelsHint.value = "";
 }
 
 async function load() {
@@ -96,6 +109,43 @@ async function switchProvider(id: string) {
   }
 }
 
+async function fetchModels() {
+  modelsLoading.value = true;
+  modelsHint.value = "";
+  try {
+    const body: Record<string, unknown> = {
+      id: activeId.value,
+      baseUrl: baseUrl.value.trim(),
+    };
+    if (apiKey.value.trim()) body.apiKey = apiKey.value.trim();
+    const res = await api<{
+      ok?: boolean;
+      models?: string[];
+      message?: string;
+      error?: string;
+    }>("/v1/admin/llm/models", {
+      method: "POST",
+      token: auth.token,
+      body: JSON.stringify(body),
+    });
+    const list = Array.isArray(res.models) ? res.models.filter(Boolean) : [];
+    modelIds.value = list;
+    modelsHint.value = res.message || (list.length ? `已拉取 ${list.length} 个` : "列表为空");
+    if (res.ok === false) {
+      message.warning(res.message || res.error || "拉取失败");
+    } else {
+      message.success(res.message || `已拉取 ${list.length} 个模型`);
+      if (list.length && !model.value.trim()) model.value = list[0]!;
+    }
+  } catch (e) {
+    const tip = e instanceof Error ? e.message : String(e);
+    modelsHint.value = tip;
+    message.error(tip);
+  } finally {
+    modelsLoading.value = false;
+  }
+}
+
 async function save() {
   saving.value = true;
   try {
@@ -130,7 +180,7 @@ onMounted(() => void load());
   <div class="page">
     <header class="page-head">
       <h1>AI 层</h1>
-      <p class="muted">点卡片切换启用；改密钥与地址用中央弹窗，保存即生效。</p>
+      <p class="muted">点卡片切换启用；改密钥与地址用中央弹窗，保存即生效。模型可搜索选择或手输。</p>
     </header>
     <n-spin :show="loading">
       <p v-if="err" class="err">{{ err }}</p>
@@ -144,7 +194,7 @@ onMounted(() => void load());
           >
             <div>
               <strong>{{ p.name }}</strong>
-              <div class="hint">{{ p.category }} · {{ p.model }}</div>
+              <div class="hint">{{ p.category }} · {{ p.model || "未选模型" }}</div>
             </div>
             <n-space align="center">
               <n-tag v-if="info?.activeId === p.id" size="small" type="success">当前</n-tag>
@@ -176,18 +226,37 @@ onMounted(() => void load());
       v-model:show="showEdit"
       preset="card"
       :title="`编辑 · ${name || activeId}`"
-      :style="{ width: 'min(480px, 94vw)' }"
+      :style="{ width: 'min(520px, 94vw)' }"
     >
       <label class="field">名称 <n-input v-model:value="name" /></label>
       <label class="field">Base URL <n-input v-model:value="baseUrl" /></label>
-      <label class="field">模型 <n-input v-model:value="model" /></label>
+      <label class="field">
+        模型
+        <n-space vertical :size="8" style="width: 100%">
+          <n-select
+            v-model:value="model"
+            filterable
+            tag
+            clearable
+            :options="modelOptions"
+            :loading="modelsLoading"
+            placeholder="搜索选择，或直接输入模型名"
+          />
+          <n-space>
+            <n-button size="small" :loading="modelsLoading" @click="fetchModels">
+              自动拉取模型列表
+            </n-button>
+            <span v-if="modelsHint" class="hint">{{ modelsHint }}</span>
+          </n-space>
+        </n-space>
+      </label>
       <label class="field">
         API Key
         <n-input
           v-model:value="apiKey"
           type="password"
           show-password-on="click"
-          :placeholder="active?.apiKeyMasked || '留空不改'"
+          :placeholder="active?.apiKeyMasked || '留空不改；拉模型需已填密钥'"
         />
       </label>
       <template #footer>

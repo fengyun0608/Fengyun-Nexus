@@ -174,6 +174,73 @@ export class LlmRouter {
     };
   }
 
+  /** 拉取 OpenAI 兼容 /models；可临时覆盖 baseUrl / apiKey（编辑弹窗未保存时）。 */
+  async listModels(override?: { baseUrl?: string; apiKey?: string }): Promise<{
+    ok: boolean;
+    models: string[];
+    message: string;
+  }> {
+    const baseUrl = String(override?.baseUrl || this.opts.baseUrl || "")
+      .trim()
+      .replace(/\/$/, "");
+    const apiKey = String(
+      override?.apiKey !== undefined && override.apiKey !== ""
+        ? override.apiKey
+        : this.opts.apiKey || "",
+    ).trim();
+    if (!baseUrl) {
+      return { ok: false, models: [], message: "请先填写 Base URL" };
+    }
+    try {
+      const res = await fetch(`${baseUrl}/models`, {
+        method: "GET",
+        headers: {
+          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+          "user-agent": "Fengyun-Nexus",
+          accept: "application/json",
+        },
+        signal: AbortSignal.timeout(30_000),
+      });
+      const raw = await res.text();
+      if (!res.ok) {
+        return {
+          ok: false,
+          models: [],
+          message: `拉取失败 HTTP ${res.status}：${raw.slice(0, 160)}`,
+        };
+      }
+      let data: unknown;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        return { ok: false, models: [], message: "返回不是 JSON" };
+      }
+      const list = Array.isArray((data as { data?: unknown })?.data)
+        ? ((data as { data: Array<{ id?: string }> }).data || [])
+        : Array.isArray(data)
+          ? (data as Array<{ id?: string }>)
+          : [];
+      const models = [
+        ...new Set(
+          list
+            .map((m) => String(m?.id || "").trim())
+            .filter(Boolean),
+        ),
+      ].sort((a, b) => a.localeCompare(b));
+      return {
+        ok: true,
+        models,
+        message: models.length ? `已拉取 ${models.length} 个模型` : "列表为空，可手动输入模型名",
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        models: [],
+        message: e instanceof Error ? e.message.slice(0, 160) : String(e),
+      };
+    }
+  }
+
   /** Chat via configured provider. Returns empty string when no API key (no local echo). */
   async chat(messages: LlmMessage[], streamOpts?: LlmStreamOpts): Promise<string> {
     if (streamOpts?.onDelta) {

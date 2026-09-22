@@ -3341,6 +3341,37 @@ async function bootstrap(): Promise<void> {
     });
   });
 
+  /** 拉取 OpenAI 兼容 /models（按供应商 id，或临时 baseUrl/apiKey） */
+  app.post("/v1/admin/llm/models", authMiddleware, async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as {
+        id?: string;
+        baseUrl?: string;
+        apiKey?: string;
+      };
+      const id = String(body.id || llmStore.activeId || "").trim();
+      const hit = llmStore.providers.find((p) => p.id === id);
+      const baseUrl = String(body.baseUrl || hit?.baseUrl || "").trim();
+      const apiKey =
+        typeof body.apiKey === "string" && body.apiKey.trim()
+          ? body.apiKey.trim()
+          : hit?.apiKey || "";
+      const result = await llm.listModels({ baseUrl, apiKey });
+      res.json({
+        ok: result.ok,
+        models: result.models,
+        message: result.message,
+        id: id || undefined,
+        baseUrl,
+      });
+    } catch (e) {
+      res.status(500).json({
+        error: e instanceof Error ? e.message : String(e),
+        errorType: "llm_models",
+      });
+    }
+  });
+
   app.get("/v1/logs", authMiddleware, (req, res) => {
     const limit = Number(req.query.limit ?? 120);
     const levelsRaw = String(req.query.levels || req.query.level || "").trim();

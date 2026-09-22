@@ -10,6 +10,14 @@
       "apiKey": ""
     },
     {
+      "id": "qianwen-maas",
+      "name": "千万平台",
+      "category": "cloud",
+      "baseUrl": "https://maas.qianwenaiapi.com/compatible-mode/v1",
+      "model": "",
+      "apiKey": ""
+    },
+    {
       "id": "deepseek",
       "name": "DeepSeek",
       "category": "cloud",
