@@ -38,6 +38,27 @@ export function modelSupportsVision(model?: string): boolean {
   );
 }
 
+/** 从可用模型列表里挑一个适合入站看图的视觉模型（偏小/快） */
+export function pickPreferredVisionModel(models: string[]): string | undefined {
+  const vis = [...new Set(models.map((m) => String(m || "").trim()).filter(Boolean))].filter((m) =>
+    modelSupportsVision(m),
+  );
+  if (!vis.length) return undefined;
+  const score = (name: string) => {
+    const x = name.toLowerCase();
+    let s = 0;
+    if (/qwen.*vl|vl.*qwen/.test(x)) s += 60;
+    if (/gpt-4o/.test(x)) s += 50;
+    if (/gemini.*flash|gemini-2/.test(x)) s += 45;
+    if (/claude-3[.-]?5-sonnet|claude-4/.test(x)) s += 40;
+    if (/flash|mini|plus|lite|small|turbo/.test(x)) s += 25;
+    if (/instruct|chat/.test(x)) s += 5;
+    if (/72b|max|large|pro|opus|405b/.test(x)) s -= 8;
+    return s;
+  };
+  return [...vis].sort((a, b) => score(b) - score(a) || a.localeCompare(b))[0];
+}
+
 export type ImageKind = "person_photo" | "meme" | "screenshot" | "art" | "other" | "unknown";
 
 export type ImageTraceResult = {

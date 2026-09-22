@@ -115,7 +115,7 @@ import { buildAgentToolDefs, buildPublicLookupToolDefs, runAgentTool } from "./a
 import { listOpenDesktopApps, hostInfo, hostUptime } from "./desktop-inspect.js";
 import { webRead, webSearch } from "./web-lookup.js";
 import { speechFileToText } from "./tts-stt.js";
-import { localImageToDataUrl, formatTraceForLlm, traceImageOrigin } from "./image-trace.js";
+import { localImageToDataUrl, formatTraceForLlm, traceImageOrigin, pickPreferredVisionModel } from "./image-trace.js";
 import { agentWorkspaceRoot, workspaceList } from "./agent-workspace.js";
 import {
   uiaClick,
@@ -220,6 +220,20 @@ function applyProviderToLlm(llm: LlmRouter, p: LlmProvider | undefined): void {
     baseUrl: p?.baseUrl || process.env.NEXUS_LLM_BASE_URL,
     model: p?.model || process.env.NEXUS_LLM_MODEL,
   });
+}
+
+/** 同供应商可用视觉模型缓存，避免每条图都打 /models */
+const visionModelCache = new Map<string, { at: number; model?: string }>();
+
+async function resolveVisionFallbackModel(llm: LlmRouter): Promise<string | undefined> {
+  const snap = llm.snapshot();
+  const key = `${snap.baseUrl}|${snap.hasKey ? "1" : "0"}`;
+  const hit = visionModelCache.get(key);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.model;
+  const listed = await llm.listModels();
+  const model = listed.ok ? pickPreferredVisionModel(listed.models) : undefined;
+  visionModelCache.set(key, { at: Date.now(), model });
+  return model;
 }
 
 function loadDotEnv(): void {
@@ -1713,6 +1727,8 @@ async function bootstrap(): Promise<void> {
     }
     if ((!userAsk || isJunkAiText(userAsk)) && !imageAtts.length) return [];
 
+    let visionRestoreModel = "";
+
     sessions.append(session, "user", userAsk);
     writeMsg({
       id: msg.id,
@@ -1734,10 +1750,21 @@ async function bootstrap(): Promise<void> {
     if (imageAtts.length) {
       const apNow = activeProvider(llmStore);
       const snapModel = llm.snapshot().model || apNow?.model || "";
-      const canSee = providerVisionCapable({
+      let canSee = providerVisionCapable({
         supportsVision: apNow?.supportsVision,
         model: snapModel,
       });
+      // 当前无视觉：同 key 下自动临时切到视觉模型看这一条（不改用户默认配置）
+      let visionTempModel = "";
+      if (!canSee && apNow?.supportsVision !== false) {
+        const picked = await resolveVisionFallbackModel(llm);
+        if (picked && picked !== snapModel) {
+          visionTempModel = picked;
+          llm.configure({ model: picked });
+          canSee = true;
+          log.info(`入站看图 临时换视觉模型  ${snapModel || "?"} → ${picked}`);
+        }
+      }
       if (canSee) {
         const parts: LlmContentPart[] = [{ type: "text", text: userAsk }];
         let attached = 0;
@@ -1755,13 +1782,14 @@ async function bootstrap(): Promise<void> {
             }
           }
           log.info(
-            `入站看图 ${attached} 张  模型=${snapModel}  quote=${imageAtts.some((a) => a.source === "quote") ? "是" : "否"}`,
+            `入站看图 ${attached} 张  模型=${visionTempModel || snapModel}  quote=${imageAtts.some((a) => a.source === "quote") ? "是" : "否"}`,
           );
         } else {
           log.warn("入站有图但转 data URL 失败（过大或读盘失败）");
+          if (visionTempModel) llm.configure({ model: snapModel });
         }
       } else {
-        // 无视觉：相似度 / 以图搜图，把线索写成文字塞进提问
+        // 无视觉且同供应商也没有 VL：相似度 / 以图搜图
         const clueBlocks: string[] = [];
         for (const a of imageAtts.slice(0, 2)) {
           const local = String(a.localPath || "");
@@ -1781,8 +1809,8 @@ async function bootstrap(): Promise<void> {
         }
         const clueText = clueBlocks.filter(Boolean).join("\n---\n");
         const mergedAsk = clueText
-          ? `${userAsk}\n\n【系统提示：当前模型「${snapModel || "未命名"}」无视觉能力，已用相似度/以图搜图代查，你看不到像素，请根据下列线索回答；不要说自己看见图。】\n${clueText}`
-          : `${userAsk}\n\n【系统提示：当前模型无视觉，且相似度反查暂无结果。请如实说明看不了图，并建议换视觉模型或稍后再试。】`;
+          ? `${userAsk}\n\n【系统提示：当前模型「${snapModel || "未命名"}」无视觉能力，且同平台暂无可用视觉模型；已用相似度/以图搜图代查，你看不到像素，请根据下列线索回答；不要说自己看见图。】\n${clueText}`
+          : `${userAsk}\n\n【系统提示：当前模型无视觉，且同平台无视觉模型、相似度反查也暂无结果。请如实说明看不了图，并建议在控制台换视觉模型。】`;
         for (let i = history.length - 1; i >= 0; i--) {
           if (history[i]?.role === "user") {
             history[i] = { role: "user", content: mergedAsk };
@@ -1793,6 +1821,8 @@ async function bootstrap(): Promise<void> {
           `入站无视觉反查  模型=${snapModel || "?"}  图=${imageAtts.length}  线索=${clueBlocks.length}`,
         );
       }
+      // 本回合结束后恢复用户默认模型（见下方 finally）
+      if (visionTempModel) visionRestoreModel = snapModel;
     }
     const resumeHint = sessions.takeResumeHint(session);
     if (resumeHint) {
@@ -1989,45 +2019,53 @@ async function bootstrap(): Promise<void> {
 
     const llmDeadlineMs = capabilityMode ? 0 : 90_000;
     const toolDefs = capabilityMode ? buildAgentToolDefs(mcp) : buildPublicLookupToolDefs();
-    const toolRun = llm.chatWithTools(
-      history,
-      toolDefs,
-      async (name, args) => {
-        const hint =
-          name === "nexus_shell"
-            ? ` ${String((args as { command?: string }).command || "")
-                .replace(/\s+/g, " ")
-                .slice(0, 160)}`
-            : name === "nexus_web_search"
-              ? ` ${String((args as { query?: string }).query || "").slice(0, 80)}`
-              : "";
-        log.info(`工具 ${name}${hint}`);
-        const result = await runAgentTool(name, args, toolBag);
-        const raw = typeof result === "string" ? result : JSON.stringify(result ?? "");
-        log.info(`工具回执 ${name}  ${raw.replace(/\s+/g, " ").slice(0, 180) || "空"}`);
-        return result;
-      },
-      {
-        ...(opts?.onDelta ? { onDelta: opts.onDelta } : {}),
-        onTrace: (line) => log.info(line),
-        maxRounds: capabilityMode ? 0 : 4,
-      },
-    );
-    const assistant = (
-      await (llmDeadlineMs > 0
-        ? Promise.race([
-            toolRun,
-            new Promise<string>((_, reject) => {
-              setTimeout(() => reject(new Error("AI 响应超时")), llmDeadlineMs);
-            }),
-          ])
-        : toolRun
-      ).catch((e) => {
-        const tip = e instanceof Error ? e.message : String(e);
-        log.warn(`LLM 调用失败：${tip}`);
-        return tip.includes("超时") ? "AI 响应超时，我再试一次或说简单点。" : `AI 异常：${tip}`;
-      })
-    ).trim();
+    let assistant = "";
+    try {
+      const toolRun = llm.chatWithTools(
+        history,
+        toolDefs,
+        async (name, args) => {
+          const hint =
+            name === "nexus_shell"
+              ? ` ${String((args as { command?: string }).command || "")
+                  .replace(/\s+/g, " ")
+                  .slice(0, 160)}`
+              : name === "nexus_web_search"
+                ? ` ${String((args as { query?: string }).query || "").slice(0, 80)}`
+                : "";
+          log.info(`工具 ${name}${hint}`);
+          const result = await runAgentTool(name, args, toolBag);
+          const raw = typeof result === "string" ? result : JSON.stringify(result ?? "");
+          log.info(`工具回执 ${name}  ${raw.replace(/\s+/g, " ").slice(0, 180) || "空"}`);
+          return result;
+        },
+        {
+          ...(opts?.onDelta ? { onDelta: opts.onDelta } : {}),
+          onTrace: (line) => log.info(line),
+          maxRounds: capabilityMode ? 0 : 4,
+        },
+      );
+      assistant = (
+        await (llmDeadlineMs > 0
+          ? Promise.race([
+              toolRun,
+              new Promise<string>((_, reject) => {
+                setTimeout(() => reject(new Error("AI 响应超时")), llmDeadlineMs);
+              }),
+            ])
+          : toolRun
+        ).catch((e) => {
+          const tip = e instanceof Error ? e.message : String(e);
+          log.warn(`LLM 调用失败：${tip}`);
+          return tip.includes("超时") ? "AI 响应超时，我再试一次或说简单点。" : `AI 异常：${tip}`;
+        })
+      ).trim();
+    } finally {
+      if (visionRestoreModel) {
+        llm.configure({ model: visionRestoreModel });
+        log.info(`入站看图 已恢复默认模型  ${visionRestoreModel}`);
+      }
+    }
 
     let spoken = stripLeakedToolMarkup(assistant);
     // 泄出工具已在 chatWithTools 内正式执行；这里只清残留标记，避免再跑一遍
