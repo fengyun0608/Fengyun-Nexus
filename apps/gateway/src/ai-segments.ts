@@ -3,7 +3,8 @@
  */
 
 const HARD_MAX = 420;
-const MAX_PARTS = 5;
+/** 群聊回话最多两条冒泡（思考另走合并转发） */
+const MAX_PARTS = 2;
 
 /** 单独发出毫无意义的符号（模型偶发、或截断残留） */
 const JUNK_ONLY = /^[\s丨|｜\-—_~～·.•…。、，,!！?？\u200b\u200c\u200d\ufeff]+$/u;
@@ -12,9 +13,45 @@ export function isJunkAiText(text: string): boolean {
   return JUNK_ONLY.test(String(text || "").trim());
 }
 
+function countScript(text: string): { cn: number; en: number } {
+  const t = String(text || "");
+  return {
+    cn: (t.match(/[\u4e00-\u9fff]/g) || []).length,
+    en: (t.match(/[A-Za-z]/g) || []).length,
+  };
+}
+
+/** 像内部推理 / 计划，不该当聊天气泡 */
+function isLikelyThinkingPara(p: string): boolean {
+  const t = String(p || "").trim();
+  if (!t) return false;
+  if (/^思考[：:]/.test(t)) return true;
+  if (
+    /^(The user|I should|I need|Let me|My (?:plan|response)|Strategy|Acknowledge|Explain why|Others are|Even saying)/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (/^(用户|我需要|让我|接下来|策略|计划|分析一下)/.test(t)) return true;
+  const { cn, en } = countScript(t);
+  if (en >= 40 && cn < Math.max(8, en * 0.25)) return true;
+  return false;
+}
+
+/** 像给人看的回话 */
+function isLikelySpeakPara(p: string): boolean {
+  const t = String(p || "").trim();
+  if (!t || isJunkAiText(t)) return false;
+  if (isLikelyThinkingPara(t) && !/^思考[：:]/.test(t)) return false;
+  if (/^(呜|喵|哼|哈|哎|哇|好|这|那|看|笑|啊|诶|欸|本猫|小璃)/.test(t)) return true;
+  const { cn, en } = countScript(t);
+  return cn >= 6 && cn >= en * 0.4;
+}
+
 /**
- * 只按标签拆：<think> / <thinking> 进合并转发，标签外才是回话。
- * 不靠句子猜测。
+ * 拆思考与回话：优先 <think> / <thinking>；
+ * 没有标签时，兼容模型把「思考：」英文推理写进正文的情况。
  */
 export function splitThinkingAndSpeak(text: string): {
   thinkingNodes: string[];
@@ -38,10 +75,37 @@ export function splitThinkingAndSpeak(text: string): {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
+  // 无标签：正文以「思考：」开头，或整段都是英文推理
+  if (!chunks.length && raw) {
+    let body = raw;
+    const prefixed = body.match(/^思考[：:]\s*([\s\S]+)$/);
+    if (prefixed) body = prefixed[1]!.trim();
+
+    const paras = body
+      .split(/\n{2,}/)
+      .map((s) => s.trim())
+      .filter((s) => s && !isJunkAiText(s));
+
+    if (paras.length && (prefixed || paras.every(isLikelyThinkingPara) || isLikelyThinkingPara(paras[0]!))) {
+      let speakAt = paras.length;
+      for (let i = 0; i < paras.length; i++) {
+        const p = paras[i]!;
+        if (isLikelySpeakPara(p) && !isLikelyThinkingPara(p)) {
+          speakAt = i;
+          break;
+        }
+      }
+      const thinkParas = paras.slice(0, speakAt);
+      const speakParas = paras.slice(speakAt);
+      if (thinkParas.length) chunks.push(thinkParas.join("\n\n"));
+      raw = speakParas.join("\n\n").trim();
+    }
+  }
+
   const speak = raw
     .split(/\n{2,}/)
     .map((s) => s.trim())
-    .filter((s) => s && !isJunkAiText(s))
+    .filter((s) => s && !isJunkAiText(s) && !isLikelyThinkingPara(s))
     .join("\n\n")
     .trim();
   return { thinkingNodes: packForwardNodes(chunks.join("\n\n")), speak };

@@ -2092,17 +2092,17 @@ async function bootstrap(): Promise<void> {
           userId: String(msg.meta?.selfId || msg.meta?.botId || "80000000"),
         });
         if (thinkingForwarded) log.info(`思考已合并转发  ${thinkingNodes.length} 段`);
-        else log.warn("思考合并转发失败，改并入正文");
+        else log.warn("思考合并转发失败，本条思考不落气泡");
       } catch (e) {
         log.warn(`思考转发异常：${e instanceof Error ? e.message : String(e)}`);
       }
     }
-    if (thinkingNodes.length && !thinkingForwarded) {
+    // 非 QQ 通道：思考并入正文一条，避免刷屏
+    if (thinkingNodes.length && !thinkingForwarded && msg.channel !== "onebot11") {
       parts.unshift(`思考：\n${thinkingNodes.join("\n\n")}`);
-      if (parts.length > 5) {
+      if (parts.length > 2) {
         const head = parts.shift()!;
-        const rest = parts.splice(0).join("\n\n");
-        parts.push(head, rest);
+        parts.splice(0, parts.length, head, parts.join("\n\n"));
       }
     }
 
