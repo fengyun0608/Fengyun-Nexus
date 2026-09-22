@@ -38,6 +38,10 @@ packs/fengyun-system-plugins/.git/
 # 对内笔记 — 只留本机，勿推远程
 docs/internal/
 
+# 框架内 AI 自写插件 — 本机运行即可，勿进仓
+plugins/z-goodnight/
+plugins/z-summon-owner/
+
 # 旧 React 控制台备份（已迁 Vue3）
 apps/web/_legacy-react/
 
