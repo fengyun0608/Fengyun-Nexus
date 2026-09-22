@@ -1,9 +1,10 @@
 /**
- * Go / Python / browser / NapCat install queue.
- * Uninstalled runtimes auto-enqueue（NapCat 除外，需手动点安装）; worker runs one-by-one with live logs.
+ * Go / Python / browser / NapCat / desktop-pet install queue.
+ * 通道类（NapCat、桌宠）不进一键排队，需手动点安装。
  */
 import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, appendFileSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import {
   installNapCat,
@@ -12,7 +13,9 @@ import {
   type NapCatFlavor,
 } from "./napcat-setup.js";
 
-export type EnvRuntimeId = "go" | "python" | "browser" | "napcat";
+const requireFrom = createRequire(import.meta.url);
+
+export type EnvRuntimeId = "go" | "python" | "browser" | "napcat" | "desktop-pet";
 export type EnvTaskStatus = "pending" | "running" | "paused" | "done" | "failed" | "cancelled";
 
 export type EnvRuntimeDef = {
@@ -68,6 +71,14 @@ const runtimes: EnvRuntimeDef[] = [
     modes: ["binary"],
     installed: false,
     hint: "一键装适配器，扫码后自动连 Nexus",
+  },
+  {
+    id: "desktop-pet",
+    label: "桌宠（消息通道）",
+    versions: ["electron"],
+    modes: ["binary"],
+    installed: false,
+    hint: "本机桌面猫娘通道，需下载 Electron；装完到「消息通道 → 桌面桌宠」开关启用",
   },
 ];
 
@@ -199,8 +210,46 @@ function refreshInstalledFlags(): void {
         rt.installed = true;
         rt.activeVersion = m.version || m.flavor || "installed";
       }
+      continue;
+    }
+    if (rt.id === "desktop-pet") {
+      const marker = markerPath("desktop-pet");
+      if (existsSync(marker)) {
+        try {
+          const j = JSON.parse(readFileSync(marker, "utf8")) as { version?: string };
+          rt.installed = true;
+          rt.activeVersion = j.version || "electron";
+          continue;
+        } catch {
+          /* fall through */
+        }
+      }
+      const electronOk = resolveDesktopPetElectron(rootDir);
+      if (electronOk) {
+        rt.installed = true;
+        rt.activeVersion = "electron";
+      }
     }
   }
+}
+
+function resolveDesktopPetElectron(root: string): string | null {
+  try {
+    const petPkg = join(root, "apps", "desktop-pet", "package.json");
+    if (!existsSync(petPkg)) return null;
+    const req = createRequire(petPkg);
+    const bin = req("electron") as string;
+    if (bin && existsSync(bin)) return bin;
+  } catch {
+    /* ignore */
+  }
+  try {
+    const bin = requireFrom("electron") as string;
+    if (bin && existsSync(bin)) return bin;
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 export function initEnvTasks(
@@ -262,7 +311,8 @@ export function createInstallTask(input: {
     // allow chromium alias / napcat flavors
     if (
       !(rt.id === "browser" && (version === "chromium" || version === "firefox")) &&
-      !(rt.id === "napcat")
+      !(rt.id === "napcat") &&
+      !(rt.id === "desktop-pet")
     ) {
       throw new Error("版本不可用");
     }
@@ -300,7 +350,7 @@ export function autoQueueMissing(): { queued: EnvTask[]; skipped: string[] } {
   const queued: EnvTask[] = [];
   const skipped: string[] = [];
   for (const rt of runtimes) {
-    if (rt.id === "napcat") {
+    if (rt.id === "napcat" || rt.id === "desktop-pet") {
       skipped.push(rt.id);
       continue;
     }
@@ -545,7 +595,74 @@ async function executeInstall(task: EnvTask, signal?: AbortSignal): Promise<void
     await installNapCatTask(task, signal);
     return;
   }
+  if (task.runtime === "desktop-pet") {
+    await installDesktopPetTask(task);
+    return;
+  }
   throw new Error("未知运行时");
+}
+
+async function installDesktopPetTask(task: EnvTask): Promise<void> {
+  setProgress(task, 10);
+  appendLog(task, "桌宠消息通道：安装 Electron 运行时");
+  const petDir = join(rootDir, "apps", "desktop-pet");
+  if (!existsSync(join(petDir, "package.json"))) {
+    throw new Error("缺少 apps/desktop-pet，请先更新框架");
+  }
+  const pnpmBin = which("pnpm") || which("pnpm.cmd");
+  const nodeBin = which("node") || which("node.exe") || process.execPath;
+  const mirror = process.env.ELECTRON_MIRROR || "https://npmmirror.com/mirrors/electron/";
+
+  setProgress(task, 25);
+  if (pnpmBin) {
+    appendLog(task, "安装 @fengyun/nexus-desktop-pet 依赖");
+    const code = await runCmd(
+      task,
+      pnpmBin,
+      ["--filter", "@fengyun/nexus-desktop-pet", "install"],
+      {
+        cwd: rootDir,
+        env: { ...process.env, ELECTRON_MIRROR: mirror },
+      },
+    );
+    if (code !== 0) appendLog(task, "pnpm install 返回非零，继续尝试下载 Electron");
+  } else {
+    appendLog(task, "未找到 pnpm，跳过依赖安装步骤");
+  }
+
+  setProgress(task, 55);
+  appendLog(task, `下载 Electron（镜像 ${mirror}）`);
+  const installJsCandidates = [
+    join(petDir, "node_modules", "electron", "install.js"),
+    join(rootDir, "node_modules", "electron", "install.js"),
+  ];
+  const installJs = installJsCandidates.find((p) => existsSync(p));
+  if (installJs && nodeBin) {
+    const code = await runCmd(task, nodeBin, [installJs], {
+      cwd: petDir,
+      env: { ...process.env, ELECTRON_MIRROR: mirror },
+    });
+    if (code !== 0) {
+      throw new Error("Electron 下载失败。可开梯子后重试，或设置 ELECTRON_MIRROR");
+    }
+  }
+
+  setProgress(task, 85);
+  const bin = resolveDesktopPetElectron(rootDir);
+  if (!bin) {
+    throw new Error(
+      "未检测到 electron.exe。请开网络后重装，或手动：pnpm --filter @fengyun/nexus-desktop-pet install",
+    );
+  }
+  appendLog(task, `Electron 已就绪：${bin}`);
+  mkdirSync(runtimeHome("desktop-pet"), { recursive: true });
+  writeFileSync(
+    join(runtimeHome("desktop-pet"), "ready"),
+    `${now()}\n${bin}\n`,
+    "utf8",
+  );
+  appendLog(task, "下一步：消息通道 → 桌面桌宠 → 打开开关");
+  setProgress(task, 95);
 }
 
 async function installNapCatTask(task: EnvTask, signal?: AbortSignal): Promise<void> {

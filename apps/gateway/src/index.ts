@@ -9,6 +9,7 @@ import {
   ChannelRegistry,
   WebChannel,
   WebhookChannel,
+  DesktopPetChannel,
   extractOb11Records,
 } from "@fengyun/nexus-channel";
 import { MessageRouter, SessionManager } from "@fengyun/nexus-core";
@@ -554,6 +555,7 @@ async function bootstrap(): Promise<void> {
   const channels = new ChannelRegistry();
   channels.register(new WebChannel());
   channels.register(new WebhookChannel());
+  channels.register(new DesktopPetChannel());
   const onebotCfg = loadOneBotConfig();
   const onebot = new OneBot11Bridge(onebotCfg);
   setOb11MediaRoot(ROOT);

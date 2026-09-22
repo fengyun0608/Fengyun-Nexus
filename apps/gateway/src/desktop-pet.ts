@@ -237,7 +237,7 @@ export class DesktopPetManager {
     }
     if (!electronBin) {
       this.lastMessage =
-        "未安装 Electron。请在仓库根执行：pnpm --filter @fengyun/nexus-desktop-pet install";
+        "桌宠运行时未安装。请到控制台「环境配置」安装「桌宠（消息通道）」";
       this.log.warn(this.lastMessage);
       throw new Error(this.lastMessage);
     }

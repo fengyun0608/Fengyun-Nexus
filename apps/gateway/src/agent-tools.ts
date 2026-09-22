@@ -324,7 +324,7 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     tool("nexus_list_runtimes", "查看可安装运行环境", {}),
     tool(
       "nexus_install_runtime",
-      "排队安装 go/python/browser/napcat",
+      "排队安装 go/python/browser/napcat/desktop-pet",
       { runtime: { type: "string" } },
       ["runtime"],
     ),

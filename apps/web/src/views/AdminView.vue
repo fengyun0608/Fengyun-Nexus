@@ -291,7 +291,11 @@ onMounted(() => {
       <div>
         <strong>桌面桌宠</strong>
         <p class="muted">
-          开关只写到后端；开启后在本机桌面弹出猫娘角色。麦克风呼唤与对话在桌宠里完成，不是网页里聊。
+          桌宠是消息通道之一。Electron 等资源请到「环境配置」安装；开关与呼唤词在
+          <button type="button" class="linkish" @click="$router.push('/channels/desktop-pet')">
+            消息通道 · 桌面桌宠
+          </button>
+          。这里也可直接开关。
         </p>
         <label class="field">
           呼唤词（逗号分隔）
@@ -441,5 +445,14 @@ onMounted(() => {
 }
 .warn {
   color: var(--amber);
+}
+.linkish {
+  color: var(--amber);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
 }
 </style>

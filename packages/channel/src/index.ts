@@ -81,6 +81,39 @@ export class WebhookChannel implements ChannelAdapter {
   }
 }
 
+/** 本机桌面桌宠通道：麦克风呼唤后走网关对话，需在「环境配置」安装 Electron 资源 */
+export class DesktopPetChannel implements ChannelAdapter {
+  id = "desktop-pet";
+  label = "桌面桌宠";
+
+  normalizeInbound(raw: unknown): NexusMessage {
+    const body = (raw ?? {}) as Record<string, unknown>;
+    return {
+      id: newId("msg"),
+      channel: this.id,
+      chatId: String(body.chatId ?? "desktop-pet"),
+      userId: String(body.userId ?? "desktop-pet"),
+      type: "text",
+      content: String(body.content ?? ""),
+      meta: {
+        rawMessage: String(body.content ?? ""),
+        senderName: body.nickname != null ? String(body.nickname) : "桌宠",
+        source: clipSource(body),
+      },
+      createdAt: nowIso(),
+    };
+  }
+
+  formatOutbound(msg: NexusMessage): unknown {
+    return {
+      id: msg.id,
+      content: msg.content,
+      createdAt: msg.createdAt,
+      replyTo: msg.meta?.replyTo,
+    };
+  }
+}
+
 export {
   OneBot11Channel,
   extractOb11Text,

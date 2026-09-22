@@ -101,6 +101,14 @@ const note = ref("");
 const showSettings = ref(false);
 const showPlugins = ref(false);
 const showOnebot = ref(false);
+const showPet = ref(false);
+
+const petEnabled = ref(false);
+const petRunning = ref(false);
+const petWake = ref("喵璃, 小璃, Nexus, 风云");
+const petBusy = ref(false);
+const petHint = ref("");
+const petEnvInstalled = ref(false);
 
 const plugins = ref<PluginItem[]>([]);
 const devItems = ref<DevPlugin[]>([]);
@@ -122,6 +130,82 @@ let onebotTimer: number | undefined;
 async function refreshOnebotLive() {
   if (id.value !== "onebot11") return;
   onebot.value = await api<OneBotInfo>("/v1/channels/onebot11", { token: auth.token });
+}
+
+async function loadDesktopPet() {
+  if (id.value !== "desktop-pet") return;
+  try {
+    const [pet, env] = await Promise.all([
+      api<{
+        enabled?: boolean;
+        running?: boolean;
+        message?: string;
+        config?: { wakeWords?: string[] };
+        wakeWords?: string[];
+      }>("/v1/admin/desktop-pet", { token: auth.token }),
+      api<{ runtimes?: Array<{ id: string; installed?: boolean }> }>("/v1/admin/env-runtimes", {
+        token: auth.token,
+      }),
+    ]);
+    petEnabled.value = Boolean(pet.enabled);
+    petRunning.value = Boolean(pet.running);
+    const words = pet.config?.wakeWords || pet.wakeWords || [];
+    if (words.length) petWake.value = words.join(", ");
+    petHint.value = pet.message || "";
+    petEnvInstalled.value = Boolean(
+      (env.runtimes || []).find((r) => r.id === "desktop-pet")?.installed,
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+async function onPetSwitch(v: boolean) {
+  petBusy.value = true;
+  try {
+    const res = await api<{
+      message?: string;
+      enabled?: boolean;
+      running?: boolean;
+    }>("/v1/admin/desktop-pet", {
+      method: "PUT",
+      token: auth.token,
+      body: JSON.stringify({ enabled: v, wakeWords: petWake.value }),
+    });
+    petEnabled.value = Boolean(res.enabled ?? v);
+    petRunning.value = Boolean(res.running);
+    petHint.value = res.message || "";
+    message.success(res.message || (v ? "桌宠已开启" : "桌宠已关闭"));
+  } catch (e) {
+    petEnabled.value = !v;
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    petBusy.value = false;
+  }
+}
+
+async function savePetWake() {
+  petBusy.value = true;
+  try {
+    const res = await api<{ message?: string; running?: boolean }>(
+      "/v1/admin/desktop-pet",
+      {
+        method: "PUT",
+        token: auth.token,
+        body: JSON.stringify({
+          enabled: petEnabled.value,
+          wakeWords: petWake.value,
+        }),
+      },
+    );
+    petRunning.value = Boolean(res.running);
+    petHint.value = res.message || "呼唤词已保存";
+    message.success(res.message || "已保存");
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    petBusy.value = false;
+  }
 }
 
 const showCfg = ref(false);
@@ -240,7 +324,13 @@ async function load() {
   loading.value = true;
   err.value = "";
   try {
-    await Promise.all([loadSettings(), loadPlugins(), loadOnebot(), loadFeed()]);
+    await Promise.all([
+      loadSettings(),
+      loadPlugins(),
+      loadOnebot(),
+      loadDesktopPet(),
+      loadFeed(),
+    ]);
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -542,6 +632,18 @@ watch(showOnebot, (open) => {
             <strong>OneBot 连接</strong>
             <span>{{ onebot?.connected ? "已连接" : "未连接" }}</span>
           </button>
+          <button
+            v-if="id === 'desktop-pet'"
+            type="button"
+            class="layer-card"
+            @click="showPet = true"
+          >
+            <strong>桌宠启停</strong>
+            <span>
+              {{ petRunning ? "进程在跑" : petEnabled ? "已开启" : "未开启" }}
+              · {{ petEnvInstalled ? "运行时已装" : "先装环境" }}
+            </span>
+          </button>
         </div>
 
         <section class="feed-section">
@@ -748,6 +850,37 @@ watch(showOnebot, (open) => {
         <n-space justify="end">
           <n-button @click="loadOnebot">刷新</n-button>
           <n-button type="primary" :loading="saving" @click="saveOnebot">保存</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal
+      v-model:show="showPet"
+      preset="card"
+      title="桌宠启停"
+      :style="{ width: 'min(480px, 94vw)' }"
+    >
+      <p class="hint">
+        桌宠是消息通道。Electron 等资源在「环境配置」安装；麦克风呼唤与对话在本机桌宠窗口完成。
+      </p>
+      <p v-if="!petEnvInstalled" class="hint">
+        运行时未装。
+        <n-button size="tiny" quaternary @click="router.push('/env-setup')">去环境配置安装</n-button>
+      </p>
+      <label class="field row-switch">
+        启用桌宠
+        <n-switch :value="petEnabled" :loading="petBusy" @update:value="onPetSwitch" />
+      </label>
+      <label class="field">
+        呼唤词（逗号分隔）
+        <n-input v-model:value="petWake" placeholder="喵璃, 小璃, Nexus" />
+      </label>
+      <p v-if="petHint" class="hint">{{ petHint }}{{ petRunning ? " · 进程在跑" : "" }}</p>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="loadDesktopPet">刷新</n-button>
+          <n-button quaternary :loading="petBusy" @click="savePetWake">保存呼唤词</n-button>
+          <n-button @click="showPet = false">关闭</n-button>
         </n-space>
       </template>
     </n-modal>

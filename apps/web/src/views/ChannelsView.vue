@@ -44,6 +44,7 @@ onMounted(() => void load());
     <n-space style="margin-bottom: 12px">
       <n-button @click="load">刷新</n-button>
       <n-button type="primary" @click="router.push('/onebot')">OneBot 11</n-button>
+      <n-button @click="router.push('/env-setup')">环境配置</n-button>
     </n-space>
     <n-spin :show="loading">
       <p v-if="err" class="err">{{ err }}</p>
