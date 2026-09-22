@@ -21,6 +21,7 @@ type Provider = {
   model: string;
   hasKey: boolean;
   apiKeyMasked: string;
+  supportsVision?: boolean;
 };
 
 type LlmInfo = {
@@ -41,6 +42,12 @@ const noAutofill = {
   "data-form-type": "other",
 } as const;
 
+const visionModeOptions = [
+  { label: "自动（按模型名猜）", value: "auto" },
+  { label: "能看图（视觉）", value: "yes" },
+  { label: "不能看图（相似度搜网）", value: "no" },
+];
+
 const auth = useAuthStore();
 const message = useMessage();
 const loading = ref(true);
@@ -55,6 +62,7 @@ const providerName = ref("");
 const endpointUrl = ref("");
 const modelId = ref("");
 const secretKey = ref("");
+const visionMode = ref<"auto" | "yes" | "no">("auto");
 const modelIds = ref<string[]>([]);
 const modelsHint = ref("");
 
@@ -80,6 +88,8 @@ function fillFrom(p?: Provider) {
   endpointUrl.value = p.baseUrl;
   modelId.value = p.model || "";
   secretKey.value = "";
+  visionMode.value =
+    p.supportsVision === true ? "yes" : p.supportsVision === false ? "no" : "auto";
   modelIds.value = p.model ? [p.model] : [];
   modelsHint.value = "";
 }
@@ -170,6 +180,9 @@ async function save() {
       activate: true,
     };
     if (secretKey.value.trim()) body.apiKey = secretKey.value.trim();
+    if (visionMode.value === "yes") body.supportsVision = true;
+    else if (visionMode.value === "no") body.supportsVision = false;
+    else body.supportsVision = null;
     info.value = await api<LlmInfo>("/v1/admin/llm", {
       method: "POST",
       token: auth.token,
@@ -207,7 +220,11 @@ onMounted(() => void load());
           >
             <div>
               <strong>{{ p.name }}</strong>
-              <div class="hint">{{ p.category }} · {{ p.model || "未选模型" }}</div>
+              <div class="hint">
+                {{ p.category }} · {{ p.model || "未选模型" }}
+                <template v-if="p.supportsVision === true"> · 视觉开</template>
+                <template v-else-if="p.supportsVision === false"> · 相似度搜图</template>
+              </div>
             </div>
             <n-space align="center">
               <n-tag v-if="info?.activeId === p.id" size="small" type="success">当前</n-tag>
@@ -282,6 +299,15 @@ onMounted(() => void load());
             <span v-if="modelsHint" class="hint">{{ modelsHint }}</span>
           </n-space>
         </n-space>
+      </div>
+      <div class="field">
+        <span class="field-label">看图能力</span>
+        <n-select
+          v-model:value="visionMode"
+          :options="visionModeOptions"
+          placeholder="自动或手动指定"
+        />
+        <p class="hint">不能看图时，发图会自动走相似度/以图搜网；能看图则把像素直接送给模型。</p>
       </div>
       <div class="field">
         <span class="field-label">API Key</span>

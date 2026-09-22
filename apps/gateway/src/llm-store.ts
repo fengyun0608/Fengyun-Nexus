@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { modelSupportsVision } from "./image-trace.js";
 
 export type LlmProviderCategory = "cloud" | "local" | "custom";
 
@@ -10,6 +11,8 @@ export type LlmProvider = {
   baseUrl?: string;
   model?: string;
   apiKey?: string;
+  /** 手动标：该供应商当前模型能看图；不填则按模型名猜测 */
+  supportsVision?: boolean;
 };
 
 export type LlmProvidersFile = {
@@ -91,6 +94,17 @@ export function publicProviders(file: LlmProvidersFile) {
       model: p.model ?? "",
       hasKey: Boolean(p.apiKey),
       apiKeyMasked: maskKey(p.apiKey),
+      supportsVision: p.supportsVision === true ? true : p.supportsVision === false ? false : undefined,
     })),
   };
+}
+
+/** 是否按视觉通路走：供应商手标优先，否则猜模型名 */
+export function providerVisionCapable(p?: {
+  supportsVision?: boolean;
+  model?: string;
+}): boolean {
+  if (p?.supportsVision === true) return true;
+  if (p?.supportsVision === false) return false;
+  return modelSupportsVision(p?.model);
 }

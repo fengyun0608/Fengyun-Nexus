@@ -262,6 +262,10 @@ export function buildPublicLookupToolDefs(): LlmToolDef[] {
           type: "boolean",
           description: "仅主人明确要求反查人像时为 true",
         },
+        blind_similarity: {
+          type: "boolean",
+          description: "无视觉或看不清时强制走相似度以图搜图",
+        },
       },
     ),
   ];
@@ -711,11 +715,18 @@ export async function runAgentTool(
       : undefined;
     const allowPerson =
       Boolean(args.allow_person_reverse) && (bag.isMaster || bag.isAdminConsole);
+    const desc = String(args.description || "").trim();
+    const ocr = String(args.ocr_text || args.ocrText || "").trim();
+    const blind =
+      args.blind_similarity === true ||
+      args.blindSimilarity === true ||
+      (!desc && !ocr && !kind);
     return traceImageOrigin(path, {
       kind,
-      description: String(args.description || "").trim() || undefined,
-      ocrText: String(args.ocr_text || args.ocrText || "").trim() || undefined,
+      description: desc || undefined,
+      ocrText: ocr || undefined,
       allowPersonReverse: allowPerson,
+      blindSimilarity: blind,
     });
   }
   if (name === "nexus_list_plugins") {

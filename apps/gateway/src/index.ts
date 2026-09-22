@@ -115,7 +115,7 @@ import { buildAgentToolDefs, buildPublicLookupToolDefs, runAgentTool } from "./a
 import { listOpenDesktopApps, hostInfo, hostUptime } from "./desktop-inspect.js";
 import { webRead, webSearch } from "./web-lookup.js";
 import { speechFileToText } from "./tts-stt.js";
-import { localImageToDataUrl, modelSupportsVision, formatTraceForLlm, traceImageOrigin } from "./image-trace.js";
+import { localImageToDataUrl, formatTraceForLlm, traceImageOrigin } from "./image-trace.js";
 import { agentWorkspaceRoot, workspaceList } from "./agent-workspace.js";
 import {
   uiaClick,
@@ -175,6 +175,7 @@ import {
   activeProvider,
   loadProvidersFile,
   publicProviders,
+  providerVisionCapable,
   saveProvidersFile,
   type LlmProvider,
 } from "./llm-store.js";
@@ -1698,8 +1699,12 @@ async function bootstrap(): Promise<void> {
       })),
     );
     if (imageAtts.length) {
-      const snapModel = llm.snapshot().model || activeProvider(llmStore)?.model || "";
-      const canSee = modelSupportsVision(snapModel);
+      const apNow = activeProvider(llmStore);
+      const snapModel = llm.snapshot().model || apNow?.model || "";
+      const canSee = providerVisionCapable({
+        supportsVision: apNow?.supportsVision,
+        model: snapModel,
+      });
       if (canSee) {
         const parts: LlmContentPart[] = [{ type: "text", text: userAsk }];
         let attached = 0;
@@ -3496,6 +3501,8 @@ async function bootstrap(): Promise<void> {
       if (typeof body.model === "string") next.model = body.model;
       if (typeof body.apiKey === "string" && body.apiKey.length > 0) next.apiKey = body.apiKey;
       if (body.clearKey === true) next.apiKey = "";
+      if (typeof body.supportsVision === "boolean") next.supportsVision = body.supportsVision;
+      if (body.supportsVision === null || body.supportsVision === "") delete next.supportsVision;
       return next;
     });
     let activeId = llmStore.activeId;

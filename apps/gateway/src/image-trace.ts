@@ -78,6 +78,52 @@ export function hintImageKind(opts: {
   return "unknown";
 }
 
+async function iqdbSearch(
+  path: string,
+): Promise<ImageTraceResult["sauceNao"]> {
+  try {
+    const buf = readFileSync(path);
+    if (buf.length > 4_000_000) return [];
+    const form = new FormData();
+    form.set(
+      "file",
+      new Blob([new Uint8Array(buf)], { type: "application/octet-stream" }),
+      `query${extname(path) || ".jpg"}`,
+    );
+    const res = await fetch("https://iqdb.org/", {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(30_000),
+      headers: { "user-agent": "FengyunNexus/1.0" },
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const out: NonNullable<ImageTraceResult["sauceNao"]> = [];
+    // iqdb 结果表：相似度 + 链接
+    for (const m of html.matchAll(
+      /<td[^>]*>\s*(\d{2,3})\s*%\s*similarity[\s\S]*?<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi,
+    )) {
+      const similarity = m[1];
+      const url = m[2] || "";
+      const title = clip(String(m[3] || "").replace(/<[^>]+>/g, " "), 100) || "iqdb 匹配";
+      if (Number(similarity) < 50) continue;
+      out.push({ title, url, similarity, source: "iqdb" });
+      if (out.length >= 6) break;
+    }
+    if (!out.length) {
+      for (const m of html.matchAll(/href="(https?:\/\/(?:danbooru|yande|gelbooru|sankaku|anime-pictures)[^"]+)"/gi)) {
+        const url = m[1] || "";
+        if (!url || out.some((x) => x.url === url)) continue;
+        out.push({ title: "iqdb 候选", url, source: "iqdb" });
+        if (out.length >= 4) break;
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 async function sauceNaoSearch(
   path: string,
   apiKey?: string,
@@ -235,12 +281,26 @@ export async function traceImageOrigin(
     kind === "person_photo" && !opts?.allowPersonReverse && !blind;
   if (!skipPerson) {
     sauceNao = await sauceNaoSearch(file, sauceKey || undefined);
+    if (!(sauceNao && sauceNao.length) || blind) {
+      const iq = await iqdbSearch(file);
+      if (iq?.length) {
+        const seen = new Set((sauceNao || []).map((x) => x.url || x.title));
+        sauceNao = [...(sauceNao || [])];
+        for (const row of iq) {
+          const key = row.url || row.title;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          sauceNao.push(row);
+        }
+        playbook.push(`iqdb 补充 ${iq.length} 条`);
+      }
+    }
     playbook.push(
       sauceNao?.length
-        ? `相似度引擎命中 ${sauceNao.length} 条${sauceKey ? "" : "（未配密钥，额度有限）"}`
+        ? `相似度引擎合计 ${sauceNao.length} 条${sauceKey ? "" : "（SauceNAO 未配密钥时额度有限）"}`
         : sauceKey
-          ? "SauceNAO 无结果或请求失败"
-          : "SauceNAO 无结果；可配 SAUCENAO_API_KEY 提高额度",
+          ? "SauceNAO / iqdb 暂无可用结果"
+          : "相似度暂无结果；可配 SAUCENAO_API_KEY，或换带视觉的模型",
     );
   }
 
