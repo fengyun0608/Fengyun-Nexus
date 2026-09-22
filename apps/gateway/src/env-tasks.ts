@@ -559,21 +559,15 @@ function runCmd(
   return new Promise((resolve, reject) => {
     appendLog(task, `$ ${command} ${args.join(" ")}`);
     const win = process.platform === "win32";
-    let child: ChildProcess;
-    if (win) {
-      const q = (s: string) => (`"${String(s).replace(/"/g, '\\"')}"`);
-      const line = [q(command), ...args.map(q)].join(" ");
-      child = spawn("cmd.exe", ["/d", "/s", "/c", line], {
-        cwd: opts?.cwd || rootDir,
-        env: { ...process.env, ...opts?.env },
-        windowsHide: true,
-      });
-    } else {
-      child = spawn(command, args, {
-        cwd: opts?.cwd || rootDir,
-        env: { ...process.env, ...opts?.env },
-      });
-    }
+    // Windows：不要手写 "path" 再塞进 cmd /c（会双重转义成 \"…\"，带空格路径直接炸）。
+    // .cmd/.bat 走 shell；.exe 用参数数组直调。
+    const isBatch = win && /\.(cmd|bat)$/i.test(command);
+    const child = spawn(command, args, {
+      cwd: opts?.cwd || rootDir,
+      env: { ...process.env, ...opts?.env },
+      windowsHide: true,
+      shell: isBatch,
+    });
     taskChildren.set(task.id, child);
     const onAbort = () => {
       try {
@@ -655,6 +649,8 @@ async function installDesktopPetTask(task: EnvTask): Promise<void> {
   const mirror = process.env.ELECTRON_MIRROR || "https://npmmirror.com/mirrors/electron/";
 
   setProgress(task, 25);
+  // 优先用当前网关同一份 node，避免 which() 指到带空格的 Program Files 路径踩坑
+  const nodeForInstall = process.execPath || nodeBin;
   if (pnpmBin) {
     appendLog(task, "安装 @fengyun/nexus-desktop-pet 依赖");
     const code = await runCmd(
@@ -678,14 +674,25 @@ async function installDesktopPetTask(task: EnvTask): Promise<void> {
     join(rootDir, "node_modules", "electron", "install.js"),
   ];
   const installJs = installJsCandidates.find((p) => existsSync(p));
-  if (installJs && nodeBin) {
-    const code = await runCmd(task, nodeBin, [installJs], {
+  if (installJs && nodeForInstall) {
+    const code = await runCmd(task, nodeForInstall, [installJs], {
       cwd: petDir,
       env: { ...process.env, ELECTRON_MIRROR: mirror },
     });
     if (code !== 0) {
-      throw new Error("Electron 下载失败。可开梯子后重试，或设置 ELECTRON_MIRROR");
+      const existing = resolveDesktopPetElectron(rootDir);
+      if (existing) {
+        appendLog(task, `Electron 下载命令失败，但本机已有可用二进制，继续：${existing}`);
+      } else {
+        throw new Error("Electron 下载失败。可开梯子后重试，或设置 ELECTRON_MIRROR");
+      }
     }
+  } else if (!installJs) {
+    const existing = resolveDesktopPetElectron(rootDir);
+    if (!existing) {
+      throw new Error("未找到 electron/install.js，请先保证 apps/desktop-pet 依赖已安装");
+    }
+    appendLog(task, `跳过下载脚本，使用已有 Electron：${existing}`);
   }
 
   setProgress(task, 85);
