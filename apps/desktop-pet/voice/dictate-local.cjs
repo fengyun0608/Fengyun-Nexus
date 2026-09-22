@@ -77,20 +77,30 @@ async function transcribeSherpa(opts) {
     maxBuffer: 4 * 1024 * 1024,
   });
   const raw = `${stdout || ""}\n${stderr || ""}`;
-  // 常见：整行文本，或 Text=xxx / result=xxx
   const lines = raw
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
-    if (/^(OK\||err|error|loading|num_|sample|Elapsed|Rtf)/i.test(line)) continue;
+    if (/^(OK\||err|error|loading|num_|sample|Elapsed|Rtf|Creating|Started|Done|----)/i.test(line)) {
+      continue;
+    }
+    // sherpa-onnx-offline 新版本输出 JSON：{"text":"..."}
+    if (line.startsWith("{") && line.includes("text")) {
+      try {
+        const j = JSON.parse(line);
+        if (j && typeof j.text === "string" && j.text.trim()) return String(j.text).trim();
+      } catch {
+        /* fall through */
+      }
+    }
     const m = line.match(/(?:text|result)\s*[=:：]\s*(.+)$/i);
     if (m) return m[1].trim();
-    // 纯中文/混合结果行
-    if (/[\u4e00-\u9fff]/.test(line) && line.length < 80) return line.replace(/^["']|["']$/g, "");
+    if (/[\u4e00-\u9fff]/.test(line) && line.length < 80 && !line.includes("=")) {
+      return line.replace(/^["']|["']$/g, "");
+    }
   }
-  // 退而取最后一行非空
   const last = lines[lines.length - 1] || "";
   if (/[\u4e00-\u9fffa-zA-Z0-9]/.test(last) && last.length < 80) return last;
   return "";
