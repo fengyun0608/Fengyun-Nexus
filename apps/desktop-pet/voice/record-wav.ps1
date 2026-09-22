@@ -1,7 +1,7 @@
 # Record N seconds 16kHz mono wav via MCI (ASCII-only for Windows PowerShell 5.x)
 param(
   [Parameter(Mandatory = $true)][string]$OutPath,
-  [Parameter(Mandatory = $false)][int]$Seconds = 6
+  [Parameter(Mandatory = $false)][int]$Seconds = 5
 )
 
 $ErrorActionPreference = "Stop"

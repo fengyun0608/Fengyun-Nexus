@@ -4,7 +4,7 @@
  */
 const { createSystemSpeechKws } = require("./providers/kws-system-speech.cjs");
 const { createSherpaKws } = require("./providers/kws-sherpa.cjs");
-const { recordAndTranscribe } = require("./dictate-local.cjs");
+const { recordAndTranscribe, loadReady } = require("./dictate-local.cjs");
 
 /**
  * @param {{
@@ -29,7 +29,7 @@ function createVoicePipeline(opts) {
     aliases: undefined,
     /** @type {'auto' | 'sherpa' | 'system-speech'} */
     engine: /** @type {'auto' | 'sherpa' | 'system-speech'} */ ("auto"),
-    dictateMs: 8000,
+    dictateMs: 5000,
   };
 
   const speech = createSystemSpeechKws({
@@ -67,8 +67,12 @@ function createVoicePipeline(opts) {
   function handleLine(line) {
     if (!line || dictating) return;
     if (line.startsWith("READY|")) {
-      emitStatus(true, `本机呼唤已就绪 · ${engineLabel(lastEngine)}`);
-      onEvent({ type: "ready", engine: lastEngine });
+      const asr = Boolean(loadReady(dataRoot));
+      const tip = asr
+        ? `本机呼唤已就绪 · ${engineLabel(lastEngine)} · 中文听写OK`
+        : `本机呼唤已就绪 · ${engineLabel(lastEngine)} · 听写模型未装`;
+      emitStatus(true, tip);
+      onEvent({ type: "ready", engine: lastEngine, asrReady: asr });
       return;
     }
     if (line.startsWith("ERR|")) {
@@ -184,8 +188,8 @@ function createVoicePipeline(opts) {
     if (dictating) return;
     dictating = true;
     state = "listening";
-    const seconds = Math.min(10, Math.max(4, Math.round((ms || 8000) / 1000)));
-    emitStatus(true, `请说内容…（约 ${seconds} 秒）`);
+    const seconds = Math.min(8, Math.max(4, Math.round((ms || 5000) / 1000)));
+    emitStatus(true, `请说内容…（约 ${seconds} 秒，说完稍等）`);
     onEvent({ type: "mode", mode: "dictate", state });
 
     try {
@@ -195,8 +199,8 @@ function createVoicePipeline(opts) {
     }
     active = null;
 
-    // 等桌宠「我在」播完，避免录进 TTS
-    await new Promise((r) => setTimeout(r, 1200));
+    // 不再播「我在」，避免 TTS 录进听写；短延迟让麦切换稳定
+    await new Promise((r) => setTimeout(r, 350));
     if (!dictating) return;
 
     try {
@@ -234,16 +238,18 @@ function createVoicePipeline(opts) {
   }
 
   function listenAgain() {
-    void enterDictate(cfg.dictateMs || 8000);
+    void enterDictate(cfg.dictateMs || 5000);
   }
 
   function getStatus() {
+    const asrReady = Boolean(loadReady(dataRoot));
     return {
       engine: lastEngine,
       preferred: cfg.engine || "auto",
       state,
       wakeWords: [...(cfg.wakeWords || [])],
       sherpaReady: sherpa.available() && sherpaRunnable(),
+      asrReady,
       systemSpeechReady: speech.available(),
     };
   }

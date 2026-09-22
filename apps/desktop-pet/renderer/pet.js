@@ -153,9 +153,9 @@
 
   function onWake(word) {
     armConverseWindow();
-    setStatus(`听到呼唤：${word || "名字"}`);
-    showBubble(`嗯，${word || "我"}在听。`, 2200);
-    speak("我在");
+    setStatus(`听到呼唤：${word || "名字"} · 请直接说`);
+    showBubble(`嗯，${word || "我"}在听，请说。`, 2200);
+    // 不播 TTS，避免录进下一句听写
   }
 
   function onDictate(text) {
@@ -185,7 +185,6 @@
     armConverseWindow();
     setStatus("请直接说…");
     showBubble("点到我啦，说吧。", 2000);
-    speak("我在");
     if (window.nexusPet?.listenAgain) void window.nexusPet.listenAgain();
   });
 

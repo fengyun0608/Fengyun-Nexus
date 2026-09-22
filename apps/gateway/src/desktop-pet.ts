@@ -207,7 +207,21 @@ export class DesktopPetManager {
   status(): DesktopPetStatus {
     const running = Boolean(this.child && this.child.exitCode === null && !this.child.killed);
     const sherpaMarker = join(this.root, "data", "desktop-pet", "voice", "sherpa", "ready.json");
-    const sherpaReady = existsSync(sherpaMarker);
+    let sherpaReady = false;
+    let asrReady = false;
+    if (existsSync(sherpaMarker)) {
+      try {
+        const j = JSON.parse(readFileSync(sherpaMarker, "utf8")) as {
+          microphone?: string;
+          offline?: string;
+          asrParaformer?: string;
+        };
+        sherpaReady = Boolean(j.microphone && existsSync(j.microphone));
+        asrReady = Boolean(j.offline && j.asrParaformer && existsSync(j.offline) && existsSync(j.asrParaformer));
+      } catch {
+        sherpaReady = true;
+      }
+    }
     return {
       enabled: this.cfg.enabled,
       running,
@@ -217,6 +231,7 @@ export class DesktopPetManager {
       voice: {
         preferred: this.cfg.engine,
         sherpaReady,
+        asrReady,
         systemSpeechReady: process.platform === "win32",
       },
       message: this.lastMessage || undefined,
