@@ -33,7 +33,13 @@ export function loadProvidersFile(root: string): LlmProvidersFile {
     if (Array.isArray(local.providers) && local.providers.length) {
       // 发行默认里新增的预设，补进本机列表（不覆盖用户已改过的同 id）
       const seen = new Set(local.providers.map((p) => p.id));
-      const merged = [...local.providers];
+      const merged = local.providers.map((p) => {
+        // 曾误写「千万」→ 纠正为「千问」
+        if (p.id === "qianwen-maas" && p.name === "千万平台") {
+          return { ...p, name: "千问平台" };
+        }
+        return { ...p };
+      });
       for (const p of def.providers) {
         if (!seen.has(p.id)) merged.push({ ...p });
       }
