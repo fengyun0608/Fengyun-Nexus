@@ -21,6 +21,8 @@ import { Readable } from "node:stream";
 
 const MODEL_NAME = "sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01";
 const MODEL_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/${MODEL_NAME}.tar.bz2`;
+const ASR_NAME = "sherpa-onnx-paraformer-zh-small-2024-03-09";
+const ASR_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${ASR_NAME}.tar.bz2`;
 /** 体积较小的 no-tts 共享库包 */
 const BIN_URL =
   "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.14/sherpa-onnx-v1.12.14-win-x64-shared.tar.bz2";
@@ -36,6 +38,11 @@ export type SherpaReady = {
   tokens: string;
   microphone: string;
   binDir: string;
+  /** 离线听写 */
+  offline?: string;
+  asrDir?: string;
+  asrParaformer?: string;
+  asrTokens?: string;
 };
 
 function voiceRoot(root: string): string {
@@ -166,7 +173,11 @@ function resolveModelPaths(modelDir: string): Omit<SherpaReady, "at" | "micropho
   return { modelDir, encoder: enc, decoder: dec, joiner: jn, tokens };
 }
 
-function resolveMicrophone(binExtractDir: string): { microphone: string; binDir: string } {
+function resolveMicrophone(binExtractDir: string): {
+  microphone: string;
+  binDir: string;
+  offline: string | null;
+} {
   const files = walkFiles(binExtractDir);
   const mic =
     findByName(files, /sherpa-onnx-keyword-spotter-microphone\.exe$/i) ||
@@ -174,7 +185,24 @@ function resolveMicrophone(binExtractDir: string): { microphone: string; binDir:
   if (!mic) {
     throw new Error("包内未找到 sherpa-onnx-keyword-spotter-microphone.exe");
   }
-  return { microphone: mic, binDir: dirname(mic) };
+  const offline =
+    findByName(files, /sherpa-onnx-offline\.exe$/i) ||
+    findByName(files, /\/offline\.exe$/i);
+  return { microphone: mic, binDir: dirname(mic), offline };
+}
+
+function resolveAsrPaths(asrDir: string): { asrDir: string; asrParaformer: string; asrTokens: string } {
+  const files = walkFiles(asrDir);
+  const model =
+    findByName(files, /model\.int8\.onnx$/i) ||
+    findByName(files, /model\.onnx$/i) ||
+    findByName(files, /paraformer.*\.int8\.onnx$/i) ||
+    findByName(files, /paraformer.*\.onnx$/i);
+  const tokens = findByName(files, /tokens\.txt$/i);
+  if (!model || !tokens) {
+    throw new Error("ASR 模型不完整（model.onnx / tokens.txt）");
+  }
+  return { asrDir, asrParaformer: model, asrTokens: tokens };
 }
 
 export async function installSherpaVoice(opts: {
@@ -253,18 +281,50 @@ export async function installSherpaVoice(opts: {
     modelDir = sub ? join(modelDest, sub) : modelDest;
   }
   const modelPaths = resolveModelPaths(modelDir);
-  const { microphone, binDir } = resolveMicrophone(binDest);
+  const { microphone, binDir, offline } = resolveMicrophone(binDest);
+
+  onProgress?.(90);
+  onLog("安装中文听写模型 paraformer-zh-small…");
+  const asrArchive = join(dl, `${ASR_NAME}.tar.bz2`);
+  if (!existsSync(asrArchive) || statSync(asrArchive).size < 1024) {
+    await downloadFile(ASR_URL, asrArchive, onLog, signal);
+  } else {
+    onLog("复用已下载的 ASR 模型包");
+  }
+  const asrDest = join(base, "asr");
+  if (existsSync(asrDest)) {
+    try {
+      rmSync(asrDest, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+  mkdirSync(asrDest, { recursive: true });
+  extractTarBz2(asrArchive, asrDest, onLog);
+  let asrDir = join(asrDest, ASR_NAME);
+  if (!existsSync(asrDir)) {
+    const kids = existsSync(asrDest) ? readdirSync(asrDest) : [];
+    const sub = kids.find((k) => existsSync(join(asrDest, k, "tokens.txt")));
+    asrDir = sub ? join(asrDest, sub) : asrDest;
+  }
+  const asrPaths = resolveAsrPaths(asrDir);
+  if (!offline) {
+    onLog("警告：未找到 sherpa-onnx-offline.exe，听写将降级 System.Speech");
+  }
 
   const ready: SherpaReady = {
     at: new Date().toISOString(),
     ...modelPaths,
     microphone,
     binDir,
+    offline: offline || undefined,
+    ...asrPaths,
   };
   writeFileSync(sherpaReadyPath(root), `${JSON.stringify(ready, null, 2)}\n`, "utf8");
   // 兼容 pipeline 旧 marker
   writeFileSync(join(base, "ready"), `${ready.at}\n`, "utf8");
   onLog(`sherpa KWS 就绪：${microphone}`);
+  if (offline) onLog(`sherpa 听写就绪：${asrPaths.asrParaformer}`);
   onProgress?.(95);
   return ready;
 }

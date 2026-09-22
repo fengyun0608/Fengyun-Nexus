@@ -1,9 +1,10 @@
 /**
- * 企业级桌宠语音管线（P0）：可插拔 KWS + 状态机。
- * IdleWake → Listening；（Thinking / Speaking 预留 P2）
+ * 企业级桌宠语音管线：可插拔 KWS + 本地录音听写（sherpa ASR 优先）。
+ * IdleWake → Listening → IdleWake
  */
 const { createSystemSpeechKws } = require("./providers/kws-system-speech.cjs");
 const { createSherpaKws } = require("./providers/kws-sherpa.cjs");
+const { recordAndTranscribe } = require("./dictate-local.cjs");
 
 /**
  * @param {{
@@ -21,19 +22,21 @@ function createVoicePipeline(opts) {
   let lastEngine = "none";
   /** @type {ReturnType<typeof setTimeout> | null} */
   let dictateTimer = null;
+  let dictating = false;
   let cfg = {
     wakeWords: ["喵璃", "小璃", "Nexus", "风云"],
     /** @type {Record<string, string[]> | undefined} */
     aliases: undefined,
     /** @type {'auto' | 'sherpa' | 'system-speech'} */
     engine: /** @type {'auto' | 'sherpa' | 'system-speech'} */ ("auto"),
-    dictateMs: 15000,
+    dictateMs: 8000,
   };
 
   const speech = createSystemSpeechKws({
     petDir,
     onLine: handleLine,
     onExit: (code) => {
+      if (dictating) return;
       active = null;
       state = "idle_wake";
       emitStatus(false, `呼唤引擎退出 code=${code ?? "?"}`);
@@ -44,7 +47,7 @@ function createVoicePipeline(opts) {
     petDir,
     onLine: handleLine,
     onExit: (code) => {
-      // sherpa 在切听写时会停进程，勿当成整管线崩了
+      if (dictating) return;
       if (active?.id === "sherpa" && state === "idle_wake") {
         emitStatus(false, `sherpa 退出 code=${code ?? "?"}`);
       }
@@ -62,7 +65,7 @@ function createVoicePipeline(opts) {
   }
 
   function handleLine(line) {
-    if (!line) return;
+    if (!line || dictating) return;
     if (line.startsWith("READY|")) {
       emitStatus(true, `本机呼唤已就绪 · ${engineLabel(lastEngine)}`);
       onEvent({ type: "ready", engine: lastEngine });
@@ -74,8 +77,9 @@ function createVoicePipeline(opts) {
     }
     if (line.startsWith("MODE|")) {
       const mode = line.slice(5);
-      state = mode === "dictate" ? "listening" : "idle_wake";
-      emitStatus(true, mode === "dictate" ? "请说内容…" : "听呼唤中…");
+      if (mode === "dictate") return; // 听写改走录音 ASR
+      state = "idle_wake";
+      emitStatus(true, "听呼唤中…");
       onEvent({ type: "mode", mode, state });
       return;
     }
@@ -83,13 +87,12 @@ function createVoicePipeline(opts) {
       const word = line.slice(5).trim();
       onEvent({ type: "wake", word });
       onEvent({ type: "metric", name: "wake_hit", value: word });
-      enterDictate(cfg.dictateMs || 15000);
+      void enterDictate(cfg.dictateMs || 8000);
       return;
     }
     if (line.startsWith("TEXT|")) {
       const text = line.slice(5).trim();
       if (text) onEvent({ type: "dictate", text });
-      return;
     }
   }
 
@@ -109,25 +112,14 @@ function createVoicePipeline(opts) {
     return speech.available() ? speech : null;
   }
 
-  function start(next) {
-    stop();
-    cfg = {
-      wakeWords: next.wakeWords?.length ? next.wakeWords : cfg.wakeWords,
-      aliases: next.aliases !== undefined ? next.aliases : cfg.aliases,
-      engine: next.engine || cfg.engine || "auto",
-      dictateMs: next.dictateMs || cfg.dictateMs || 15000,
-    };
+  function startWakeOnly() {
     const preferred = cfg.engine || "auto";
     let runner = pickRunner(preferred);
     let degraded = false;
-    if (preferred === "sherpa" && runner && runner.id !== "sherpa") {
-      degraded = true;
-    }
-    if (preferred === "auto" && (!sherpa.available() || !sherpaRunnable()) && runner) {
-      /* normal P0 path */
-    }
+    if (preferred === "sherpa" && runner && runner.id !== "sherpa") degraded = true;
     if (!runner) {
       lastEngine = "none";
+      active = null;
       emitStatus(
         false,
         process.platform === "win32" ? "无可用呼唤引擎" : "呼唤监听仅支持 Windows",
@@ -138,7 +130,6 @@ function createVoicePipeline(opts) {
     active = runner;
     let ok = runner.start({ wakeWords: cfg.wakeWords, aliases: cfg.aliases });
     if (!ok && runner.id === "sherpa" && speech.available()) {
-      emitStatus(true, "sherpa 启动失败，降级 System.Speech");
       runner = speech;
       lastEngine = speech.id;
       active = speech;
@@ -152,15 +143,26 @@ function createVoicePipeline(opts) {
       return;
     }
     onEvent({ type: "metric", name: "engine", value: lastEngine });
-    if (degraded || (preferred === "sherpa" && lastEngine === "system-speech")) {
-      emitStatus(true, lastEngine === "system-speech" ? "已降级 System.Speech" : `正在启动 · ${engineLabel(lastEngine)}`);
-    } else {
-      emitStatus(true, `正在启动 · ${engineLabel(lastEngine)}`);
-    }
+    if (degraded) emitStatus(true, "已降级 System.Speech 呼唤");
     state = "idle_wake";
   }
 
+  function start(next) {
+    stop();
+    cfg = {
+      wakeWords: next.wakeWords?.length ? next.wakeWords : cfg.wakeWords,
+      aliases: next.aliases !== undefined ? next.aliases : cfg.aliases,
+      engine: next.engine || cfg.engine || "auto",
+      dictateMs: next.dictateMs || cfg.dictateMs || 8000,
+    };
+    startWakeOnly();
+    if (active) {
+      emitStatus(true, `正在启动 · ${engineLabel(lastEngine)}`);
+    }
+  }
+
   function stop() {
+    dictating = false;
     if (dictateTimer) {
       clearTimeout(dictateTimer);
       dictateTimer = null;
@@ -174,31 +176,67 @@ function createVoicePipeline(opts) {
     state = "idle_wake";
   }
 
-  function enterDictate(ms) {
-    if (!active) return;
-    active.enterDictate();
+  /**
+   * 停呼唤 → 录音 → sherpa ASR → 恢复呼唤
+   * @param {number} ms
+   */
+  async function enterDictate(ms) {
+    if (dictating) return;
+    dictating = true;
     state = "listening";
-    if (dictateTimer) clearTimeout(dictateTimer);
-    dictateTimer = setTimeout(() => {
-      try {
-        active?.enterWake();
-      } catch {
-        /* ignore */
+    const seconds = Math.min(10, Math.max(4, Math.round((ms || 8000) / 1000)));
+    emitStatus(true, `请说内容…（约 ${seconds} 秒）`);
+    onEvent({ type: "mode", mode: "dictate", state });
+
+    try {
+      active?.stop();
+    } catch {
+      /* ignore */
+    }
+    active = null;
+
+    // 等桌宠「我在」播完，避免录进 TTS
+    await new Promise((r) => setTimeout(r, 1200));
+    if (!dictating) return;
+
+    try {
+      const result = await recordAndTranscribe({
+        petDir,
+        dataRoot,
+        seconds,
+        onStatus: (msg) => emitStatus(true, msg),
+      });
+      if (result.text) {
+        onEvent({ type: "dictate", text: result.text });
+        onEvent({ type: "metric", name: "stt_engine", value: result.engine });
+        if (result.message && result.engine === "system-speech") {
+          emitStatus(true, result.message);
+        }
+      } else {
+        emitStatus(false, result.message || "没听清");
       }
+    } catch (e) {
+      emitStatus(false, e instanceof Error ? e.message.slice(0, 120) : String(e));
+    } finally {
+      dictating = false;
+      startWakeOnly();
+      if (active) emitStatus(true, "听呼唤中…");
       state = "idle_wake";
-    }, ms);
+      onEvent({ type: "mode", mode: "wake", state });
+    }
   }
 
   function setWakeWords(words, aliases) {
     if (words?.length) cfg.wakeWords = words;
     if (aliases !== undefined) cfg.aliases = aliases;
+    if (dictating) return true;
     if (active?.setWords(cfg.wakeWords, cfg.aliases)) return true;
     start(cfg);
     return true;
   }
 
   function listenAgain() {
-    enterDictate(cfg.dictateMs || 15000);
+    void enterDictate(cfg.dictateMs || 8000);
   }
 
   function getStatus() {

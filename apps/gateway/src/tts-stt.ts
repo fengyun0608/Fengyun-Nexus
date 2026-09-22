@@ -1,11 +1,12 @@
 /**
  * 本机语音：文字转语音气泡文件；语音文件尽量听写成文字。
- * Windows 优先 System.Speech；没有引擎就老实报失败，不编结果。
+ * Windows：优先 sherpa paraformer；否则 System.Speech（中文自由听写不准）。
  */
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { readSherpaReady } from "./desktop-pet-voice-setup.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -17,6 +18,60 @@ function mediaDir(root: string): string {
   const dir = join(root, "data", "agent-media");
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function findRepoRootFromCwd(): string {
+  // gateway 运行时 cwd 多为仓库根
+  const cwd = process.cwd();
+  if (existsSync(join(cwd, "package.json")) && existsSync(join(cwd, "apps", "gateway"))) {
+    return cwd;
+  }
+  return cwd;
+}
+
+async function speechFileToTextSherpa(
+  filePath: string,
+  root: string,
+): Promise<{ ok: boolean; text?: string; message: string } | null> {
+  const ready = readSherpaReady(root);
+  if (!ready?.offline || !ready.asrParaformer || !ready.asrTokens) return null;
+  if (!existsSync(ready.offline) || !existsSync(ready.asrParaformer)) return null;
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      ready.offline,
+      [
+        `--tokens=${ready.asrTokens}`,
+        `--paraformer=${ready.asrParaformer}`,
+        "--num-threads=2",
+        "--decoding-method=greedy_search",
+        filePath,
+      ],
+      {
+        cwd: ready.binDir,
+        windowsHide: true,
+        timeout: 120_000,
+        env: { ...process.env, PATH: `${ready.binDir};${process.env.PATH || ""}` },
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    );
+    const raw = `${stdout || ""}\n${stderr || ""}`;
+    const lines = raw
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!;
+      if (/^(OK\||err|error|loading|num_|sample|Elapsed|Rtf)/i.test(line)) continue;
+      const m = line.match(/(?:text|result)\s*[=:：]\s*(.+)$/i);
+      if (m?.[1]) return { ok: true, text: m[1].trim(), message: "sherpa 已听写" };
+      if (/[\u4e00-\u9fff]/.test(line) && line.length < 80) {
+        return { ok: true, text: line.replace(/^["']|["']$/g, ""), message: "sherpa 已听写" };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** 文字 → wav。成功返回本地路径。 */
@@ -66,6 +121,7 @@ try {
 /** 本地音频 → 文字。听写失败时返回 ok:false，由上层决定怎么说。 */
 export async function speechFileToText(
   filePath: string,
+  root?: string,
 ): Promise<{ ok: boolean; text?: string; message: string }> {
   const path = String(filePath || "").trim();
   if (!path || !existsSync(path)) return { ok: false, message: "语音文件不存在" };
@@ -75,6 +131,11 @@ export async function speechFileToText(
   if (!/\.(wav|wave)$/i.test(path)) {
     return { ok: false, message: "暂只听写 wav；请先发文字，或等转码就绪" };
   }
+
+  const repo = root || findRepoRootFromCwd();
+  const sherpa = await speechFileToTextSherpa(path, repo);
+  if (sherpa?.ok && sherpa.text) return sherpa;
+
   const script = `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Speech
@@ -105,7 +166,11 @@ try {
     if (!b64) return { ok: false, message: "没有听出文字" };
     const text = Buffer.from(b64, "base64").toString("utf8").trim();
     if (!text) return { ok: false, message: "没有听出文字" };
-    return { ok: true, text, message: "已听写" };
+    return {
+      ok: true,
+      text,
+      message: sherpa === null ? "系统听写（未装 sherpa 中文模型，可能不准）" : "系统听写兜底",
+    };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message.slice(0, 160) : String(e) };
   }

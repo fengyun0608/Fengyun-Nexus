@@ -2001,7 +2001,7 @@ async function bootstrap(): Promise<void> {
         texts.push("（收到语音，下载失败）");
         continue;
       }
-      const stt = await speechFileToText(dl.path);
+      const stt = await speechFileToText(dl.path, ROOT);
       if (stt.ok && stt.text) texts.push(stt.text);
       else texts.push(`（收到语音，未能听写：${stt.message}）`);
     }
@@ -2266,7 +2266,7 @@ async function bootstrap(): Promise<void> {
         });
         return;
       }
-      const stt = await speechFileToText(filePath);
+      const stt = await speechFileToText(filePath, ROOT);
       res.json({
         ok: Boolean(stt.ok && stt.text),
         text: stt.text || "",

@@ -163,6 +163,7 @@
     if (!raw || busy || speaking) return;
     armConverseWindow();
     setStatus(`听到：${raw.slice(0, 28)}`);
+    showBubble(`你说：${raw.slice(0, 40)}${raw.length > 40 ? "…" : ""}`, 2500);
     void askGateway(raw);
   }
 

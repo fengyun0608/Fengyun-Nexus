@@ -220,11 +220,11 @@ onUnmounted(() => {
             <a href="https://napneko.github.io/guide/boot/Shell" target="_blank" rel="noreferrer">Shell 说明</a>
           </p>
           <p v-if="r.id === 'desktop-pet'" class="hint">
-            会装 Electron，并尽量装 sherpa 本机呼唤（失败则降级 System.Speech）。国内走镜像。装好后到
+            会装 Electron、sherpa 呼唤，以及中文听写模型（约 70MB+）。装好后到
             <button type="button" class="linkish" @click="router.push('/channels/desktop-pet')">
               消息通道 · 桌面桌宠
             </button>
-            打开开关。
+            打开开关。听写乱码请重装本项以补 ASR。
           </p>
         </n-card>
       </div>
