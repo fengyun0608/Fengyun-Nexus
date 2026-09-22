@@ -355,19 +355,22 @@ async function load() {
 async function saveSettings() {
   saving.value = true;
   try {
+    const body: Record<string, unknown> = {
+      label: label.value,
+      systemPrompt: systemPrompt.value,
+      note: note.value,
+    };
+    if (id.value === "onebot11") {
+      body.coreMasters = coreMasters.value;
+      body.newMasters = newMasters.value;
+      body.normalMasters = normalMasters.value;
+      body.onlyMasters = onlyMasters.value;
+      body.replyGroupIds = replyGroupIds.value;
+    }
     await api(`/v1/channels/${encodeURIComponent(id.value)}/settings`, {
       method: "PUT",
       token: auth.token,
-      body: JSON.stringify({
-        label: label.value,
-        coreMasters: coreMasters.value,
-        newMasters: newMasters.value,
-        normalMasters: normalMasters.value,
-        onlyMasters: onlyMasters.value,
-        replyGroupIds: replyGroupIds.value,
-        systemPrompt: systemPrompt.value,
-        note: note.value,
-      }),
+      body: JSON.stringify(body),
     });
     message.success("已修改成功，立即生效");
     showSettings.value = false;
@@ -631,7 +634,7 @@ watch(showOnebot, (open) => {
         <div class="layer-grid tight">
           <button type="button" class="layer-card" @click="showSettings = true">
             <strong>通道设置</strong>
-            <span>主人、AI 回复群、人设等</span>
+            <span>{{ id === "onebot11" ? "主人、AI 回复群、人设等" : "人设与备注（自用通道无需主人）" }}</span>
           </button>
           <button type="button" class="layer-card" @click="showPlugins = true">
             <strong>本通道插件</strong>
@@ -702,23 +705,26 @@ watch(showOnebot, (open) => {
       :style="{ width: 'min(520px, 94vw)' }"
     >
       <label class="field">显示名 <n-input v-model:value="label" /></label>
-      <label class="field">
-        核心主人 QQ
-        <n-input v-model:value="coreMasters" placeholder="逗号分隔；仅控制台可改" />
-      </label>
-      <label class="field">
-        新主人 QQ
-        <n-input v-model:value="newMasters" placeholder="逗号分隔；仅控制台可改" />
-      </label>
-      <label class="field">
-        普通主人 QQ
-        <n-input v-model:value="normalMasters" placeholder="逗号分隔；仅控制台可改" />
-      </label>
-      <label class="field row-switch">仅主人可用管理指令 <n-switch v-model:value="onlyMasters" /></label>
-      <label class="field">
-        AI 回复群
-        <n-input v-model:value="replyGroupIds" placeholder="空=不限；# 指令不受此限" />
-      </label>
+      <template v-if="id === 'onebot11'">
+        <label class="field">
+          核心主人 QQ
+          <n-input v-model:value="coreMasters" placeholder="逗号分隔；仅控制台可改" />
+        </label>
+        <label class="field">
+          新主人 QQ
+          <n-input v-model:value="newMasters" placeholder="逗号分隔；仅控制台可改" />
+        </label>
+        <label class="field">
+          普通主人 QQ
+          <n-input v-model:value="normalMasters" placeholder="逗号分隔；仅控制台可改" />
+        </label>
+        <label class="field row-switch">仅主人可用管理指令 <n-switch v-model:value="onlyMasters" /></label>
+        <label class="field">
+          AI 回复群
+          <n-input v-model:value="replyGroupIds" placeholder="空=不限；# 指令不受此限" />
+        </label>
+      </template>
+      <p v-else class="hint">本通道自用，无需主人。主人与回复群只在 QQ / OneBot 通道设置。</p>
       <label class="field">人设 / 系统提示 <n-input v-model:value="systemPrompt" type="textarea" :rows="4" /></label>
       <label class="field">备注 <n-input v-model:value="note" /></label>
       <template #footer>

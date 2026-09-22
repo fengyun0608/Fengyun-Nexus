@@ -2,7 +2,7 @@
  * Fengyun Nexus 桌面桌宠 — Electron 主进程
  * 透明置顶无边框窗口，钉在桌面右下角。
  */
-const { app, BrowserWindow, screen, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, screen, ipcMain, shell, session } = require("electron");
 const { existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
 
@@ -40,6 +40,28 @@ function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const w = 300;
   const h = 420;
+
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (
+      permission === "media" ||
+      permission === "microphone" ||
+      permission === "audioCapture" ||
+      permission === "mediaKeySystem"
+    ) {
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+    return (
+      permission === "media" ||
+      permission === "microphone" ||
+      permission === "audioCapture" ||
+      permission === "mediaKeySystem"
+    );
+  });
+
   win = new BrowserWindow({
     width: w,
     height: h,
@@ -57,6 +79,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      autoplayPolicy: "no-user-gesture-required",
     },
   });
   win.setAlwaysOnTop(true, "screen-saver");

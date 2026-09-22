@@ -1,12 +1,13 @@
 /**
- * 桌宠渲染：本地麦克风呼唤 + 对话，请求本机网关。
+ * 桌宠渲染：系统麦克风采集 + 本机听写（网关 Windows System.Speech）。
+ * 不依赖网页在线 SpeechRecognition。
  */
 (() => {
   /** @type {{ gatewayUrl: string; token: string; wakeWords: string[]; chatId: string; userId: string }} */
   let runtime = {
     gatewayUrl: "http://127.0.0.1:8787",
     token: "",
-    wakeWords: ["喵璃", "小璃", "Nexus", "风云"],
+    wakeWords: ["喵璃", "小璃", "小璃璃", "Nexus", "风云", "风云枢纽"],
     chatId: "desktop-pet",
     userId: "desktop-pet",
   };
@@ -17,17 +18,18 @@
   const btnMic = document.getElementById("btnMic");
   const btnQuit = document.getElementById("btnQuit");
 
-  let mood = "idle";
   let listening = false;
   let conversing = false;
   let busy = false;
-  /** @type {SpeechRecognition | null} */
-  let recog = null;
+  let speaking = false;
   let converseTimer = 0;
   let bubbleTimer = 0;
+  let lastWakeAt = 0;
+  let loopTimer = 0;
+  /** @type {MediaStream | null} */
+  let micStream = null;
 
   function setMood(next) {
-    mood = next;
     if (pet) pet.dataset.mood = next;
   }
 
@@ -50,36 +52,50 @@
     }, ms);
   }
 
-  function speak(text) {
-    try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(String(text || "").slice(0, 400));
-      u.lang = "zh-CN";
-      u.rate = 1.05;
-      setMood("talk");
-      u.onend = () => {
-        if (!listening) setMood("idle");
-        else setMood(conversing ? "listen" : "idle");
-      };
-      window.speechSynthesis.speak(u);
-    } catch {
-      setMood(listening ? "listen" : "idle");
+  function normalizeHeard(text) {
+    return String(text || "")
+      .toLowerCase()
+      .replace(/[^\u4e00-\u9fff a-z0-9]/gi, "")
+      .replace(/\s+/g, "");
+  }
+
+  function wakeAliases(word) {
+    const w = String(word || "").trim();
+    if (!w) return [];
+    const map = {
+      喵璃: ["喵璃", "喵哩", "喵里", "苗璃", "秒璃", "妙璃", "喵梨"],
+      小璃: ["小璃", "小哩", "小里", "小梨", "小丽"],
+      风云: ["风云", "疯云", "丰云"],
+      nexus: ["nexus", "neksus", "耐克瑟斯"],
+    };
+    const key = w.toLowerCase();
+    const extras = map[w] || map[key] || [];
+    return [...new Set([w, ...extras])];
+  }
+
+  function hitWake(text) {
+    const raw = normalizeHeard(text);
+    if (!raw) return false;
+    for (const w of runtime.wakeWords || []) {
+      for (const a of wakeAliases(w)) {
+        const n = normalizeHeard(a);
+        if (n && raw.includes(n)) return true;
+      }
     }
+    if (/喵[璃哩里梨丽]|小[璃哩里梨丽]/.test(raw)) return true;
+    return false;
   }
 
   function stripWake(text) {
     let t = String(text || "").trim();
     for (const w of runtime.wakeWords || []) {
-      if (!w) continue;
-      const re = new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig");
-      t = t.replace(re, " ");
+      for (const a of wakeAliases(w)) {
+        if (!a) continue;
+        const re = new RegExp(a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig");
+        t = t.replace(re, " ");
+      }
     }
     return t.replace(/\s+/g, " ").trim();
-  }
-
-  function hitWake(text) {
-    const raw = String(text || "");
-    return (runtime.wakeWords || []).some((w) => w && raw.includes(w));
   }
 
   function armConverseWindow() {
@@ -88,7 +104,30 @@
     converseTimer = window.setTimeout(() => {
       conversing = false;
       if (listening) setStatus("听呼唤中…");
-    }, 25_000);
+    }, 28_000);
+  }
+
+  function speak(text) {
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(String(text || "").slice(0, 400));
+      u.lang = "zh-CN";
+      u.rate = 1.05;
+      speaking = true;
+      setMood("talk");
+      u.onend = () => {
+        speaking = false;
+        if (listening) setMood("listen");
+        else setMood("idle");
+      };
+      u.onerror = () => {
+        speaking = false;
+      };
+      window.speechSynthesis.speak(u);
+    } catch {
+      speaking = false;
+      setMood(listening ? "listen" : "idle");
+    }
   }
 
   async function askGateway(userText) {
@@ -161,10 +200,15 @@
   }
 
   function handleHeard(text) {
+    if (speaking || busy) return;
     const raw = String(text || "").trim();
     if (!raw) return;
+    setStatus(`听到：${raw.slice(0, 28)}`);
     if (!conversing) {
       if (!hitWake(raw)) return;
+      const now = Date.now();
+      if (now - lastWakeAt < 1800) return;
+      lastWakeAt = now;
       armConverseWindow();
       setStatus("我在，请说…");
       showBubble("嗯？我在听。", 2500);
@@ -179,62 +223,180 @@
     void askGateway(ask);
   }
 
-  function makeRecognition() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return null;
-    const r = new SR();
-    r.lang = "zh-CN";
-    r.continuous = true;
-    r.interimResults = true;
-    r.maxAlternatives = 1;
-    let lastFinal = "";
-    r.onresult = (ev) => {
-      let finalText = "";
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const row = ev.results[i];
-        if (row.isFinal) finalText += row[0].transcript;
-      }
-      finalText = finalText.trim();
-      if (!finalText || finalText === lastFinal) return;
-      lastFinal = finalText;
-      handleHeard(finalText);
-    };
-    r.onerror = (ev) => {
-      if (ev.error === "not-allowed") {
-        setStatus("麦克风被拒绝");
-        listening = false;
-        btnMic.textContent = "开麦";
-        setMood("idle");
-      }
-    };
-    r.onend = () => {
-      if (listening) {
-        try {
-          r.start();
-        } catch {
-          /* ignore */
-        }
-      }
-    };
-    return r;
+  async function ensureMic() {
+    if (micStream) return micStream;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("打不开系统麦克风");
+    }
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
+    return micStream;
   }
 
-  function startListen() {
-    if (!recog) recog = makeRecognition();
-    if (!recog) {
-      setStatus("本机不支持语音识别");
-      showBubble("当前环境没有语音识别。可点角色后用键盘…（请用呼唤+说话）");
-      return;
+  function encodeWav(float32, sampleRate) {
+    const len = float32.length;
+    const buffer = new ArrayBuffer(44 + len * 2);
+    const view = new DataView(buffer);
+    const writeStr = (off, s) => {
+      for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+    };
+    writeStr(0, "RIFF");
+    view.setUint32(4, 36 + len * 2, true);
+    writeStr(8, "WAVE");
+    writeStr(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, "data");
+    view.setUint32(40, len * 2, true);
+    let off = 44;
+    for (let i = 0; i < len; i++) {
+      const s = Math.max(-1, Math.min(1, float32[i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      off += 2;
     }
+    return new Blob([buffer], { type: "audio/wav" });
+  }
+
+  function downsample(float32, fromRate, toRate) {
+    if (toRate >= fromRate) return { data: float32, rate: fromRate };
+    const ratio = fromRate / toRate;
+    const newLen = Math.floor(float32.length / ratio);
+    const out = new Float32Array(newLen);
+    for (let i = 0; i < newLen; i++) {
+      out[i] = float32[Math.floor(i * ratio)] || 0;
+    }
+    return { data: out, rate: toRate };
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const buf = reader.result;
+        if (!(buf instanceof ArrayBuffer)) {
+          reject(new Error("读录音失败"));
+          return;
+        }
+        const bytes = new Uint8Array(buf);
+        let bin = "";
+        const step = 0x8000;
+        for (let i = 0; i < bytes.length; i += step) {
+          bin += String.fromCharCode(...bytes.subarray(i, i + step));
+        }
+        resolve(btoa(bin));
+      };
+      reader.onerror = () => reject(reader.error || new Error("读录音失败"));
+      reader.readAsArrayBuffer(blob);
+    });
+  }
+
+  async function recordOnce(ms) {
+    const stream = await ensureMic();
+    const ctx = new AudioContext();
+    const src = ctx.createMediaStreamSource(stream);
+    const proc = ctx.createScriptProcessor(4096, 1, 1);
+    const mute = ctx.createGain();
+    mute.gain.value = 0;
+    /** @type {Float32Array[]} */
+    const chunks = [];
+    proc.onaudioprocess = (e) => {
+      chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    };
+    src.connect(proc);
+    proc.connect(mute);
+    mute.connect(ctx.destination);
+    await new Promise((r) => window.setTimeout(r, ms));
+    proc.disconnect();
+    src.disconnect();
+    mute.disconnect();
+    const total = chunks.reduce((n, c) => n + c.length, 0);
+    const merged = new Float32Array(total);
+    let o = 0;
+    for (const c of chunks) {
+      merged.set(c, o);
+      o += c.length;
+    }
+    const fromRate = ctx.sampleRate || 48000;
+    await ctx.close().catch(() => undefined);
+    const { data, rate } = downsample(merged, fromRate, 16000);
+    return encodeWav(data, rate);
+  }
+
+  async function sttChunk(blob) {
+    if (!runtime.token) return "";
+    const b64 = await blobToBase64(blob);
+    const res = await fetch(`${runtime.gatewayUrl}/v1/admin/desktop-pet/stt`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${runtime.token}`,
+      },
+      body: JSON.stringify({ audioBase64: b64, mime: "audio/wav" }),
+    });
+    if (!res.ok) {
+      const tip = await res.text().catch(() => "");
+      throw new Error(tip || `听写 HTTP ${res.status}`);
+    }
+    const data = await res.json().catch(() => ({}));
+    return String(data.text || "").trim();
+  }
+
+  function stopListenLoop() {
+    window.clearTimeout(loopTimer);
+    loopTimer = 0;
+  }
+
+  async function startListenLoop() {
+    if (loopTimer) return;
+    setStatus("本机听写中…呼唤名字");
+    const tick = async () => {
+      if (!listening) return;
+      if (speaking || busy) {
+        loopTimer = window.setTimeout(tick, 500);
+        return;
+      }
+      try {
+        const blob = await recordOnce(2000);
+        if (!listening) return;
+        const text = await sttChunk(blob);
+        if (text) handleHeard(text);
+        else if (listening && !conversing) setStatus("听呼唤中…");
+      } catch (e) {
+        setStatus(e instanceof Error ? e.message.slice(0, 40) : "听写失败");
+      }
+      if (listening) loopTimer = window.setTimeout(tick, 200);
+    };
+    loopTimer = window.setTimeout(tick, 100);
+  }
+
+  async function startListen() {
     listening = true;
     btnMic.textContent = "关麦";
     setMood("listen");
-    setStatus("听呼唤中…");
+    setStatus("打开系统麦克风…");
     try {
-      recog.start();
-    } catch {
-      /* already started */
+      await ensureMic();
+    } catch (e) {
+      listening = false;
+      btnMic.textContent = "开麦";
+      setMood("idle");
+      const tip = e instanceof Error ? e.message : String(e);
+      setStatus(tip);
+      showBubble(`麦克风打不开：${tip}`);
+      return;
     }
+    void startListenLoop();
   }
 
   function stopListen() {
@@ -243,27 +405,28 @@
     btnMic.textContent = "开麦";
     setMood("idle");
     setStatus("待命 · 呼唤名字或点我");
-    try {
-      recog?.stop();
-    } catch {
-      /* ignore */
+    stopListenLoop();
+    if (micStream) {
+      for (const t of micStream.getTracks()) t.stop();
+      micStream = null;
     }
   }
 
   btnMic?.addEventListener("click", (e) => {
     e.stopPropagation();
     if (listening) stopListen();
-    else startListen();
+    else void startListen();
   });
 
   btnQuit?.addEventListener("click", (e) => {
     e.stopPropagation();
+    stopListen();
     if (window.nexusPet?.quit) void window.nexusPet.quit();
     else window.close();
   });
 
   pet?.addEventListener("click", () => {
-    if (!listening) startListen();
+    if (!listening) void startListen();
     else {
       armConverseWindow();
       setStatus("我在，请说…");
@@ -278,16 +441,17 @@
       runtime = {
         gatewayUrl: String(data.gatewayUrl || runtime.gatewayUrl).replace(/\/$/, ""),
         token: String(data.token || ""),
-        wakeWords: Array.isArray(data.wakeWords) && data.wakeWords.length
-          ? data.wakeWords.map(String)
-          : runtime.wakeWords,
+        wakeWords:
+          Array.isArray(data.wakeWords) && data.wakeWords.length
+            ? data.wakeWords.map(String)
+            : runtime.wakeWords,
         chatId: String(data.chatId || "desktop-pet"),
         userId: String(data.userId || "desktop-pet"),
       };
-      setStatus("已连接网关 · 自动开麦");
-      startListen();
+      setStatus("已连接 · 用系统麦克风听呼唤");
+      void startListen();
     });
   } else {
-    setStatus("未注入运行时，仍可试麦");
+    setStatus("未注入运行时");
   }
 })();

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, statSync, mkdirSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, join, resolve, sep, basename } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -2224,6 +2224,51 @@ async function bootstrap(): Promise<void> {
     } catch (e) {
       const tip = e instanceof Error ? e.message : String(e);
       res.status(500).json({ error: tip, errorType: "desktop_pet" });
+    }
+  });
+
+  app.post("/v1/admin/desktop-pet/stt", authMiddleware, async (req, res) => {
+    if (profile.id !== "desktop") {
+      res.status(400).json({ error: "当前环境无法部署", errorType: "env_unsupported" });
+      return;
+    }
+    try {
+      const body = (req.body ?? {}) as { audioBase64?: string; mime?: string };
+      const b64 = String(body.audioBase64 || "").trim();
+      if (!b64) {
+        res.status(400).json({ error: "没有音频" });
+        return;
+      }
+      const mime = String(body.mime || "audio/wav");
+      const buf = Buffer.from(b64, "base64");
+      if (!buf.length) {
+        res.status(400).json({ error: "音频为空" });
+        return;
+      }
+      const ext = /wav/i.test(mime) ? "wav" : /webm/i.test(mime) ? "webm" : "bin";
+      const dir = join(ROOT, "data", "agent-media");
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const filePath = join(dir, `pet-stt-${Date.now()}.${ext}`);
+      writeFileSync(filePath, buf);
+      if (ext !== "wav") {
+        res.json({
+          ok: false,
+          text: "",
+          message: "请传 wav；浏览器应先在本地转成 wav",
+        });
+        return;
+      }
+      const stt = await speechFileToText(filePath);
+      res.json({
+        ok: Boolean(stt.ok && stt.text),
+        text: stt.text || "",
+        message: stt.message,
+      });
+    } catch (e) {
+      res.status(500).json({
+        error: e instanceof Error ? e.message : String(e),
+        errorType: "desktop_pet_stt",
+      });
     }
   });
 
