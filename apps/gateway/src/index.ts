@@ -500,6 +500,8 @@ function frameworkSystemPrompt(opts?: {
       "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。snapshot 里有字和坐标。不要只用 web_read 只读摘要。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。能直接调工具就别连查五六个再动手。",
       "对用户说人话。思考必须写在 <think> 与 </think> 之间；标签外面必须有结果，只有思考不算做完。回话要短，按空行分成多段。不要甩工具名、JSON、DSML。",
+      "分清谁说了什么：系统会标注说话人、引用对象、图片归属。引用别人的图绝不是当前说话人发的。",
+      "需要点名某人时可以自愿 @：在正文写 [CQ:at,qq=对方QQ号]，不要每句都 @，有必要再 @。",
       "工具必须走正式 function call。禁止把 tool_calls、DSML、invoke、XML 写进回复正文。",
       "先列出能力再调用，不要编造没有安装的名字。需要查状态、插件、工作流或 MCP 时用工具，不要编造。",
       "现成工具/指令能用就用；没有再写短脚本。别空口说不会，也别为已有能力再写一套插件。",
@@ -513,6 +515,7 @@ function frameworkSystemPrompt(opts?: {
       "禁止改服务器、装插件、开软件、截屏、跑命令、禁言、发文件操控等。那些只有主人能做。",
       "只做普通对话加便民查询。需要说明来源时，直接说这条消息是谁发的。",
       "对用户说人话。思考写在 <think></think> 里；标签外必须有结果。回话要短。",
+      "分清谁说了什么；引用别人的图不要说成当前用户发的。需要点名时可写 [CQ:at,qq=QQ号]，不必句句都 @。",
       "工具必须走正式 function call，不要把工具名或 JSON 甩进正文。",
     );
   } else {
@@ -1673,10 +1676,40 @@ async function bootstrap(): Promise<void> {
     const imageAtts = (msg.attachments || []).filter(
       (a) => a.kind === "image" && a.localPath,
     );
+    const speaker = msg.meta?.senderName
+      ? `${msg.meta.senderName}（${msg.userId}）`
+      : String(msg.userId);
+    const ctxLines: string[] = [`【本条消息】说话人：${speaker}`];
+    if (msg.meta?.quoteMessageId) {
+      const qWho =
+        msg.meta.quoteSenderName || msg.meta.quoteUserId
+          ? `${msg.meta.quoteSenderName || "某人"}${msg.meta.quoteUserId ? `（${msg.meta.quoteUserId}）` : ""}`
+          : "某人";
+      ctxLines.push(`【引用】引用的是 ${qWho} 之前发的消息，不是 ${speaker} 本人发的。`);
+      if (msg.meta.quoteText) ctxLines.push(`【引用原文摘要】${msg.meta.quoteText}`);
+    }
+    for (const a of imageAtts) {
+      if (a.source === "quote") {
+        const who = a.fromName || a.fromUserId || msg.meta?.quoteSenderName || "原作者";
+        const uid = a.fromUserId || msg.meta?.quoteUserId || "";
+        ctxLines.push(
+          `【图片归属】有一张图来自引用消息，作者是 ${who}${uid ? `（${uid}）` : ""}。不要说成「你发的图 / 当前用户发的图」。`,
+        );
+      } else {
+        ctxLines.push(`【图片归属】有一张图是 ${speaker} 本条消息里发的。`);
+      }
+    }
+    if (Array.isArray(msg.meta?.atQqs) && msg.meta.atQqs.length) {
+      const others = msg.meta.atQqs.filter((q) => q && q !== msg.meta?.selfId);
+      if (others.length) ctxLines.push(`【本条还 @ 了】${others.join("、")}`);
+    }
     if (!userAsk.trim() && imageAtts.length) {
       userAsk = imageAtts.some((a) => a.source === "quote")
-        ? "请看我引用的图片，并按我的问题回答；若没写问题就说明图里是什么、像不像梗图、能否查出处。"
+        ? "请看我引用的那张图（注意是别人发的），并按我的问题回答；若没写问题就说明图里是什么、像不像梗图、能否查出处。"
         : "请看图回答；若没写问题就说明图里是什么、像不像梗图、能否查出处。";
+    }
+    if (ctxLines.length > 1 || imageAtts.length || msg.meta?.quoteMessageId) {
+      userAsk = `${ctxLines.join("\n")}\n【用户说】${userAsk || "（无文字）"}`;
     }
     if ((!userAsk || isJunkAiText(userAsk)) && !imageAtts.length) return [];
 
@@ -2135,6 +2168,7 @@ async function bootstrap(): Promise<void> {
     const pushImages = async (
       imgs: Array<{ file: string; url?: string }>,
       source: "direct" | "quote",
+      from?: { userId?: string; name?: string },
     ) => {
       for (const img of imgs.slice(0, 3)) {
         if (attachments.length >= 4) break;
@@ -2148,23 +2182,38 @@ async function bootstrap(): Promise<void> {
           url: img.url || dl.path,
           localPath: dl.path,
           source,
+          fromUserId: from?.userId,
+          fromName: from?.name,
         });
       }
     };
-    await pushImages(extractOb11Images(ev.message, ev.raw_message), "direct");
+    await pushImages(extractOb11Images(ev.message, ev.raw_message), "direct", {
+      userId: msg.userId,
+      name: msg.meta?.senderName,
+    });
 
     const quoteId =
       String(msg.meta?.quoteMessageId || "").trim() ||
       extractOb11QuoteMessageId(ev.message, ev.raw_message);
+    let quoteUserId = "";
+    let quoteSenderName = "";
+    let quoteText = "";
     if (quoteId) {
       const quoted = await onebot.fetchQuotedMessage(quoteId);
       if (quoted.ok) {
+        quoteUserId = String(quoted.senderUserId || "").trim();
+        quoteSenderName = String(quoted.senderName || "").trim();
+        quoteText = String(quoted.raw || quoted.messageText || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 200);
         await pushImages(
           extractOb11Images(
             quoted.message as Parameters<typeof extractOb11Images>[0],
             quoted.raw,
           ),
           "quote",
+          { userId: quoteUserId || undefined, name: quoteSenderName || undefined },
         );
       } else {
         log.warn(`拉取引用消息失败 id=${quoteId}`);
@@ -2188,6 +2237,9 @@ async function bootstrap(): Promise<void> {
       meta: {
         ...msg.meta,
         quoteMessageId: quoteId || msg.meta?.quoteMessageId,
+        quoteUserId: quoteUserId || msg.meta?.quoteUserId,
+        quoteSenderName: quoteSenderName || msg.meta?.quoteSenderName,
+        quoteText: quoteText || msg.meta?.quoteText,
         rawMessage: msg.meta?.rawMessage || ev.raw_message,
       },
     };

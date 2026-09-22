@@ -17,6 +17,9 @@ export interface NexusMessage {
     mime?: string;
     /** direct=本条消息；quote=引用消息里的图 */
     source?: "direct" | "quote";
+    /** 图来自谁（引用时是原消息发送者） */
+    fromUserId?: string;
+    fromName?: string;
   }>;
   meta?: {
     tenantId?: string;
@@ -24,6 +27,11 @@ export interface NexusMessage {
     replyTo?: string;
     /** 被引用消息的 OneBot message_id */
     quoteMessageId?: string;
+    /** 被引用消息发送者 */
+    quoteUserId?: string;
+    quoteSenderName?: string;
+    /** 被引用消息文本摘要 */
+    quoteText?: string;
     /** OneBot 11 */
     messageType?: "private" | "group" | string;
     groupId?: string;
