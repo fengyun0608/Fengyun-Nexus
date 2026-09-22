@@ -1,4 +1,4 @@
-# 录制若干秒 16kHz 单声道 wav（MCI）
+# Record N seconds 16kHz mono wav via MCI (ASCII-only for Windows PowerShell 5.x)
 param(
   [Parameter(Mandatory = $true)][string]$OutPath,
   [Parameter(Mandatory = $false)][int]$Seconds = 6
@@ -19,27 +19,34 @@ public static class NexusMci {
 "@
 
 $dir = Split-Path -Parent $OutPath
-if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-if (Test-Path $OutPath) { Remove-Item -Force $OutPath }
+if ($dir -and -not (Test-Path $dir)) {
+  New-Item -ItemType Directory -Path $dir -Force | Out-Null
+}
+if (Test-Path $OutPath) {
+  Remove-Item -Force $OutPath
+}
 
 $alias = "nexusrec"
 $sb = New-Object System.Text.StringBuilder 256
-function Mci([string]$cmd) {
+function Invoke-Mci([string]$cmd) {
   $code = [NexusMci]::mciSendString($cmd, $sb, $sb.Capacity, [IntPtr]::Zero)
-  if ($code -ne 0) { throw "MCI 失败 code=$code cmd=$cmd" }
+  if ($code -ne 0) {
+    throw ("MCI failed code=" + $code + " cmd=" + $cmd)
+  }
 }
 
 try {
-  Mci "open new type waveaudio alias $alias"
-  Mci "set $alias time format ms bitspersample 16 channels 1 samplespersec 16000 alignment 2 bytespersec 32000"
-  Mci "record $alias"
+  Invoke-Mci ("open new type waveaudio alias " + $alias)
+  Invoke-Mci ("set " + $alias + " time format ms bitspersample 16 channels 1 samplespersec 16000 alignment 2 bytespersec 32000")
+  Invoke-Mci ("record " + $alias)
   Start-Sleep -Seconds $Seconds
-  Mci "stop $alias"
-  $esc = $OutPath.Replace("\", "\\")
-  Mci "save $alias `"$OutPath`""
+  Invoke-Mci ("stop " + $alias)
+  Invoke-Mci ('save ' + $alias + ' "' + $OutPath + '"')
 } finally {
-  try { Mci "close $alias" } catch { }
+  try { Invoke-Mci ("close " + $alias) } catch { }
 }
 
-if (-not (Test-Path $OutPath)) { throw "录音文件未生成" }
-Write-Output "OK|$OutPath"
+if (-not (Test-Path $OutPath)) {
+  throw "wav file not created"
+}
+Write-Output ("OK|" + $OutPath)

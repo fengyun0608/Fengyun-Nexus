@@ -43,7 +43,12 @@ async function recordWav(opts) {
       "-Seconds",
       String(opts.seconds),
     ],
-    { windowsHide: true, timeout: (opts.seconds + 15) * 1000 },
+    {
+      windowsHide: true,
+      timeout: (opts.seconds + 15) * 1000,
+      // UTF-8 path: force console UTF-8 so -File resolves under CJK directories
+      env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+    },
   );
   if (!existsSync(opts.outPath)) throw new Error("录音失败");
 }

@@ -130,13 +130,32 @@ function which(bin: string): string | null {
       windowsHide: true,
     })
       .trim()
-      .split(/\r?\n/)[0];
-    if (!out) return null;
-    if (process.platform === "win32" && /WindowsApps/i.test(out)) return null;
-    return out;
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (!out.length) return null;
+    // Windows：where 常先给出无扩展名 npm shim（不能 spawn），优先 .cmd/.exe
+    if (process.platform === "win32") {
+      const preferred =
+        out.find((p) => /\.cmd$/i.test(p)) ||
+        out.find((p) => /\.exe$/i.test(p)) ||
+        out.find((p) => /\.bat$/i.test(p)) ||
+        out[0];
+      if (!preferred || /WindowsApps/i.test(preferred)) return null;
+      return preferred;
+    }
+    return out[0] || null;
   } catch {
     return null;
   }
+}
+
+/** 解析可 spawn 的包管理器：Windows 强制 pnpm.cmd */
+function resolvePnpm(): string | null {
+  if (process.platform === "win32") {
+    return which("pnpm.cmd") || which("pnpm");
+  }
+  return which("pnpm");
 }
 
 function isTermux(): boolean {
@@ -559,9 +578,9 @@ function runCmd(
   return new Promise((resolve, reject) => {
     appendLog(task, `$ ${command} ${args.join(" ")}`);
     const win = process.platform === "win32";
-    // Windows：不要手写 "path" 再塞进 cmd /c（会双重转义成 \"…\"，带空格路径直接炸）。
-    // .cmd/.bat 走 shell；.exe 用参数数组直调。
-    const isBatch = win && /\.(cmd|bat)$/i.test(command);
+    // Windows：.cmd/.bat 以及无扩展名 npm shim 都走 shell；.exe 直调
+    const isBatch =
+      win && (/\.(cmd|bat)$/i.test(command) || !/\.[a-z0-9]+$/i.test(command));
     const child = spawn(command, args, {
       cwd: opts?.cwd || rootDir,
       env: { ...process.env, ...opts?.env },
@@ -644,8 +663,8 @@ async function installDesktopPetTask(task: EnvTask): Promise<void> {
   if (!existsSync(join(petDir, "package.json"))) {
     throw new Error("缺少 apps/desktop-pet，请先更新框架");
   }
-  const pnpmBin = which("pnpm") || which("pnpm.cmd");
-  const nodeBin = which("node") || which("node.exe") || process.execPath;
+  const pnpmBin = resolvePnpm();
+  const nodeBin = which("node.exe") || which("node") || process.execPath;
   const mirror = process.env.ELECTRON_MIRROR || "https://npmmirror.com/mirrors/electron/";
 
   setProgress(task, 25);
@@ -769,8 +788,8 @@ async function installBrowser(task: EnvTask): Promise<void> {
   appendLog(task, "准备 Playwright Chromium（生图 / 截菜单用）");
   mkdirSync(runtimeHome("browser"), { recursive: true });
 
-  const pnpmBin = which("pnpm") || which("pnpm.cmd");
-  const nodeBin = which("node") || which("node.exe") || process.execPath;
+  const pnpmBin = resolvePnpm();
+  const nodeBin = which("node.exe") || which("node") || process.execPath;
 
   // 1) 确保工作区装有 playwright 包（挂在 z-draw）
   if (pnpmBin) {
