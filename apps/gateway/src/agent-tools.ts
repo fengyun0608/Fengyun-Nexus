@@ -108,8 +108,7 @@ const MASTER_TOOLS = new Set([
   "nexus_web_keys",
   "nexus_web_screenshot",
   "nexus_web_close",
-  "nexus_web_search",
-  "nexus_web_read",
+  // nexus_web_search / nexus_web_read：便民只读查询，非主人也可用（见 PUBLIC_LOOKUP_TOOLS）
   "nexus_list_caps",
   "nexus_call_cap",
   "nexus_plugin_switch",
@@ -136,6 +135,9 @@ const MASTER_TOOLS = new Set([
   "nexus_onebot_get",
   "nexus_onebot_patch",
 ]);
+
+/** 群友也能用：只读公开网页，不碰本机与内网 */
+export const PUBLIC_LOOKUP_TOOLS = new Set(["nexus_web_search", "nexus_web_read"]);
 
 function tool(
   name: string,
@@ -225,6 +227,24 @@ function resolveSendCtx(bag: AgentToolBag, args: Record<string, unknown>): Nexus
   return base;
 }
 
+/** 非主人便民查询：天气、百科、公开资料等只读搜网 */
+export function buildPublicLookupToolDefs(): LlmToolDef[] {
+  return [
+    tool(
+      "nexus_web_search",
+      "搜索公开网页。查天气、新闻、百科、公开资料时必须用这个，不要说没法联网。",
+      { query: { type: "string", description: "搜索词，如「南昌天气」" } },
+      ["query"],
+    ),
+    tool(
+      "nexus_web_read",
+      "读取一个公开网页的标题和正文摘要。只传 http/https，不要读内网。",
+      { url: { type: "string", description: "公开网址" } },
+      ["url"],
+    ),
+  ];
+}
+
 export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
   return [
     tool("nexus_status", "查看 Fengyun Nexus 运行状态摘要", {}),
@@ -254,18 +274,7 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
       },
       ["name"],
     ),
-    tool(
-      "nexus_web_search",
-      "搜索公开网页。有人说搜、查一下、网上看看时必须用这个。",
-      { query: { type: "string", description: "搜索词" } },
-      ["query"],
-    ),
-    tool(
-      "nexus_web_read",
-      "读取一个公开网页的标题和正文摘要。只传 http/https。",
-      { url: { type: "string", description: "公开网址" } },
-      ["url"],
-    ),
+    ...buildPublicLookupToolDefs(),
     tool("nexus_host_info", "查看本机系统信息：系统、处理器、内存、磁盘、开机时长", {}),
     tool("nexus_host_uptime", "查看这台电脑开机运行了多久", {}),
     tool(

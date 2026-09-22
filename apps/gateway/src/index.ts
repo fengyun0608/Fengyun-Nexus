@@ -109,7 +109,7 @@ import {
 } from "./workflow-files.js";
 import { makePluginCtx, setPluginRuntime, setPluginChannelBag, setPluginOneBot } from "./plugin-ctx.js";
 import { loadAgentSkills, skillsPromptBlock } from "./agent-skills.js";
-import { buildAgentToolDefs, runAgentTool } from "./agent-tools.js";
+import { buildAgentToolDefs, buildPublicLookupToolDefs, runAgentTool } from "./agent-tools.js";
 import { listOpenDesktopApps, hostInfo, hostUptime } from "./desktop-inspect.js";
 import { webRead, webSearch } from "./web-lookup.js";
 import { speechFileToText } from "./tts-stt.js";
@@ -483,8 +483,12 @@ function frameworkSystemPrompt(opts?: {
     );
   } else if (opts?.userId) {
     lines.push(
-      `当前说话的人不是主人（${who || opts.userId}）。禁止调用任何能力、工具、安装和操控。`,
-      "只做普通对话。需要说明来源时，直接说这条消息是谁发的。",
+      `当前说话的人不是主人（${who || opts.userId}）。`,
+      "便民查询可以：天气、新闻、百科、公开资料——调用 nexus_web_search 或 nexus_web_read，查完用人话答。不要说没法联网、不要让对方自己去天气 App。",
+      "禁止改服务器、装插件、开软件、截屏、跑命令、禁言、发文件操控等。那些只有主人能做。",
+      "只做普通对话加便民查询。需要说明来源时，直接说这条消息是谁发的。",
+      "对用户说人话。思考写在 <think></think> 里；标签外必须有结果。回话要短。",
+      "工具必须走正式 function call，不要把工具名或 JSON 甩进正文。",
     );
   }
   return lines.join("\n");
@@ -1652,7 +1656,11 @@ async function bootstrap(): Promise<void> {
     }
 
     const who = msg.meta?.senderName ? `${msg.meta.senderName}/${msg.userId}` : msg.userId;
-    log.info(capabilityMode ? `对话鉴权 主人·能力模式  ${who}` : `对话鉴权 非主人·禁止能力  ${who}`);
+    log.info(
+      capabilityMode
+        ? `对话鉴权 主人·能力模式  ${who}`
+        : `对话鉴权 非主人·便民查询  ${who}`,
+    );
 
     const capSink: string[] = [];
     const toolBag = {
@@ -1835,30 +1843,31 @@ async function bootstrap(): Promise<void> {
     };
 
     const llmDeadlineMs = capabilityMode ? 0 : 90_000;
-    const toolRun = capabilityMode
-      ? llm.chatWithTools(
-          history,
-          buildAgentToolDefs(mcp),
-          async (name, args) => {
-            const hint =
-              name === "nexus_shell"
-                ? ` ${String((args as { command?: string }).command || "")
-                    .replace(/\s+/g, " ")
-                    .slice(0, 160)}`
-                : "";
-            log.info(`工具 ${name}${hint}`);
-            const result = await runAgentTool(name, args, toolBag);
-            const raw = typeof result === "string" ? result : JSON.stringify(result ?? "");
-            log.info(`工具回执 ${name}  ${raw.replace(/\s+/g, " ").slice(0, 180) || "空"}`);
-            return result;
-          },
-          {
-            ...(opts?.onDelta ? { onDelta: opts.onDelta } : {}),
-            onTrace: (line) => log.info(line),
-            maxRounds: 0,
-          },
-        )
-      : llm.chat(history, opts?.onDelta ? { onDelta: opts.onDelta } : undefined);
+    const toolDefs = capabilityMode ? buildAgentToolDefs(mcp) : buildPublicLookupToolDefs();
+    const toolRun = llm.chatWithTools(
+      history,
+      toolDefs,
+      async (name, args) => {
+        const hint =
+          name === "nexus_shell"
+            ? ` ${String((args as { command?: string }).command || "")
+                .replace(/\s+/g, " ")
+                .slice(0, 160)}`
+            : name === "nexus_web_search"
+              ? ` ${String((args as { query?: string }).query || "").slice(0, 80)}`
+              : "";
+        log.info(`工具 ${name}${hint}`);
+        const result = await runAgentTool(name, args, toolBag);
+        const raw = typeof result === "string" ? result : JSON.stringify(result ?? "");
+        log.info(`工具回执 ${name}  ${raw.replace(/\s+/g, " ").slice(0, 180) || "空"}`);
+        return result;
+      },
+      {
+        ...(opts?.onDelta ? { onDelta: opts.onDelta } : {}),
+        onTrace: (line) => log.info(line),
+        maxRounds: capabilityMode ? 0 : 4,
+      },
+    );
     const assistant = (
       await (llmDeadlineMs > 0
         ? Promise.race([
