@@ -1,0 +1,10 @@
+{
+  "id": "z.summon.owner",
+  "name": "唤群主秘诀",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "priority": 900,
+  "hooks": ["onReady"],
+  "permissions": ["channel.send", "onebot.api"],
+  "category": "standard"
+}
