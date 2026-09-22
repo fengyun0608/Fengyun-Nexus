@@ -33,6 +33,14 @@ type LlmInfo = {
   message?: string;
 };
 
+/** 挡浏览器/Edge 把供应商表单当成登录框自动填账号密码 */
+const noAutofill = {
+  autocomplete: "off",
+  "data-lpignore": "true",
+  "data-1p-ignore": "true",
+  "data-form-type": "other",
+} as const;
+
 const auth = useAuthStore();
 const message = useMessage();
 const loading = ref(true);
@@ -43,10 +51,10 @@ const info = ref<LlmInfo | null>(null);
 const activeId = ref("");
 const showEdit = ref(false);
 
-const name = ref("");
-const baseUrl = ref("");
-const model = ref("");
-const apiKey = ref("");
+const providerName = ref("");
+const endpointUrl = ref("");
+const modelId = ref("");
+const secretKey = ref("");
 const modelIds = ref<string[]>([]);
 const modelsHint = ref("");
 
@@ -56,17 +64,22 @@ const active = computed(() =>
 
 const modelOptions = computed(() => {
   const ids = [...modelIds.value];
-  const cur = model.value.trim();
+  const cur = modelId.value.trim();
   if (cur && !ids.includes(cur)) ids.unshift(cur);
   return ids.map((id) => ({ label: id, value: id }));
 });
 
+function onModelUpdate(v: string | null) {
+  // clearable 会写成 null，tag 模式下整框会塌掉，统一收回空串
+  modelId.value = v == null ? "" : String(v);
+}
+
 function fillFrom(p?: Provider) {
   if (!p) return;
-  name.value = p.name;
-  baseUrl.value = p.baseUrl;
-  model.value = p.model;
-  apiKey.value = "";
+  providerName.value = p.name;
+  endpointUrl.value = p.baseUrl;
+  modelId.value = p.model || "";
+  secretKey.value = "";
   modelIds.value = p.model ? [p.model] : [];
   modelsHint.value = "";
 }
@@ -115,9 +128,9 @@ async function fetchModels() {
   try {
     const body: Record<string, unknown> = {
       id: activeId.value,
-      baseUrl: baseUrl.value.trim(),
+      baseUrl: endpointUrl.value.trim(),
     };
-    if (apiKey.value.trim()) body.apiKey = apiKey.value.trim();
+    if (secretKey.value.trim()) body.apiKey = secretKey.value.trim();
     const res = await api<{
       ok?: boolean;
       models?: string[];
@@ -135,7 +148,7 @@ async function fetchModels() {
       message.warning(res.message || res.error || "拉取失败");
     } else {
       message.success(res.message || `已拉取 ${list.length} 个模型`);
-      if (list.length && !model.value.trim()) model.value = list[0]!;
+      if (list.length && !modelId.value.trim()) modelId.value = list[0]!;
     }
   } catch (e) {
     const tip = e instanceof Error ? e.message : String(e);
@@ -151,12 +164,12 @@ async function save() {
   try {
     const body: Record<string, unknown> = {
       id: activeId.value,
-      name: name.value,
-      baseUrl: baseUrl.value,
-      model: model.value,
+      name: providerName.value,
+      baseUrl: endpointUrl.value,
+      model: modelId.value,
       activate: true,
     };
-    if (apiKey.value.trim()) body.apiKey = apiKey.value.trim();
+    if (secretKey.value.trim()) body.apiKey = secretKey.value.trim();
     info.value = await api<LlmInfo>("/v1/admin/llm", {
       method: "POST",
       token: auth.token,
@@ -164,7 +177,7 @@ async function save() {
     });
     message.success(info.value.message || "已保存");
     fillFrom(active.value);
-    apiKey.value = "";
+    secretKey.value = "";
     showEdit.value = false;
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
@@ -225,22 +238,42 @@ onMounted(() => void load());
     <n-modal
       v-model:show="showEdit"
       preset="card"
-      :title="`编辑 · ${name || activeId}`"
+      :title="`编辑 · ${providerName || activeId}`"
       :style="{ width: 'min(520px, 94vw)' }"
     >
-      <label class="field">名称 <n-input v-model:value="name" /></label>
-      <label class="field">Base URL <n-input v-model:value="baseUrl" /></label>
-      <label class="field">
-        模型
+      <!-- 诱饵字段：把 Edge/Chrome 密码管家引开，别盖到供应商配置上 -->
+      <div class="autofill-trap" aria-hidden="true">
+        <input tabindex="-1" type="text" name="username" autocomplete="username" />
+        <input tabindex="-1" type="password" name="password" autocomplete="current-password" />
+      </div>
+      <div class="field">
+        <span class="field-label">名称</span>
+        <n-input
+          v-model:value="providerName"
+          :input-props="{ ...noAutofill, name: 'nexus-llm-provider-name', autocomplete: 'off' }"
+        />
+      </div>
+      <div class="field">
+        <span class="field-label">Base URL</span>
+        <n-input
+          v-model:value="endpointUrl"
+          :input-props="{ ...noAutofill, name: 'nexus-llm-base-url', autocomplete: 'url' }"
+        />
+      </div>
+      <div class="field">
+        <span class="field-label">模型</span>
         <n-space vertical :size="8" style="width: 100%">
           <n-select
-            v-model:value="model"
+            :value="modelId"
             filterable
             tag
             clearable
             :options="modelOptions"
             :loading="modelsLoading"
             placeholder="搜索选择，或直接输入模型名"
+            :consistent-menu-width="true"
+            :input-props="{ ...noAutofill, name: 'nexus-llm-model-id', autocomplete: 'off' }"
+            @update:value="onModelUpdate"
           />
           <n-space>
             <n-button size="small" :loading="modelsLoading" @click="fetchModels">
@@ -249,16 +282,21 @@ onMounted(() => void load());
             <span v-if="modelsHint" class="hint">{{ modelsHint }}</span>
           </n-space>
         </n-space>
-      </label>
-      <label class="field">
-        API Key
+      </div>
+      <div class="field">
+        <span class="field-label">API Key</span>
         <n-input
-          v-model:value="apiKey"
+          v-model:value="secretKey"
           type="password"
           show-password-on="click"
           :placeholder="active?.apiKeyMasked || '留空不改；拉模型需已填密钥'"
+          :input-props="{
+            ...noAutofill,
+            name: 'nexus-llm-secret-key',
+            autocomplete: 'new-password',
+          }"
         />
-      </label>
+      </div>
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">关闭</n-button>
@@ -290,5 +328,19 @@ onMounted(() => void load());
   flex-direction: column;
   gap: 6px;
   margin: 10px 0;
+}
+.field-label {
+  font-size: 13px;
+  color: var(--ink-muted, #5a6b63);
+}
+.autofill-trap {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 </style>
