@@ -9,11 +9,21 @@ export interface NexusMessage {
   userId: string;
   type: MessageType;
   content: string;
-  attachments?: Array<{ kind: string; url: string }>;
+  attachments?: Array<{
+    kind: string;
+    url: string;
+    /** 本机已下载路径，给视觉 / 反查用 */
+    localPath?: string;
+    mime?: string;
+    /** direct=本条消息；quote=引用消息里的图 */
+    source?: "direct" | "quote";
+  }>;
   meta?: {
     tenantId?: string;
     personaId?: string;
     replyTo?: string;
+    /** 被引用消息的 OneBot message_id */
+    quoteMessageId?: string;
     /** OneBot 11 */
     messageType?: "private" | "group" | string;
     groupId?: string;

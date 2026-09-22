@@ -118,6 +118,8 @@ export {
   OneBot11Channel,
   extractOb11Text,
   extractOb11Records,
+  extractOb11Images,
+  extractOb11QuoteMessageId,
   type Ob11MessageEvent,
   type Ob11Segment,
 } from "./onebot11.js";

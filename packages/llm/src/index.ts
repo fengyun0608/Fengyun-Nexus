@@ -1,6 +1,19 @@
+export interface LlmContentPartText {
+  type: "text";
+  text: string;
+}
+
+export interface LlmContentPartImage {
+  type: "image_url";
+  image_url: { url: string; detail?: "auto" | "low" | "high" };
+}
+
+export type LlmContentPart = LlmContentPartText | LlmContentPartImage;
+
 export interface LlmMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  /** 纯文本，或 OpenAI 兼容多模态 parts（看图） */
+  content: string | LlmContentPart[];
   name?: string;
   tool_call_id?: string;
   tool_calls?: LlmToolCall[];

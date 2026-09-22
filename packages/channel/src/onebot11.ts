@@ -26,12 +26,55 @@ export function extractOb11Text(message: string | Ob11Segment[] | undefined, raw
         if (seg.type === "text") return String(seg.data?.text ?? "");
         if (seg.type === "at") return `@${seg.data?.qq ?? ""}`;
         if (seg.type === "record") return "[语音]";
+        if (seg.type === "image") return "[图片]";
+        if (seg.type === "reply") return "";
         return "";
       })
       .join("")
       .trim();
   }
   return String(raw ?? "").trim();
+}
+
+/** 入站图片段：file / url */
+export function extractOb11Images(
+  message: string | Ob11Segment[] | undefined,
+  raw?: string,
+): Array<{ file: string; url?: string }> {
+  const out: Array<{ file: string; url?: string }> = [];
+  if (Array.isArray(message)) {
+    for (const seg of message) {
+      if (seg.type !== "image") continue;
+      const file = String(seg.data?.file || seg.data?.file_id || "").trim();
+      const url = seg.data?.url != null ? String(seg.data.url) : undefined;
+      if (file || url) out.push({ file: file || url || "", url });
+    }
+  }
+  const blob = `${typeof message === "string" ? message : ""} ${raw ?? ""}`;
+  for (const m of blob.matchAll(/\[CQ:image,([^\]]+)\]/gi)) {
+    const body = m[1] || "";
+    const file = body.match(/file=([^,\]]+)/i)?.[1]?.trim() || "";
+    const url = body.match(/url=([^,\]]+)/i)?.[1]?.trim();
+    if (file || url) out.push({ file: file || url || "", url });
+  }
+  return out;
+}
+
+/** 引用/回复的目标 message_id */
+export function extractOb11QuoteMessageId(
+  message: string | Ob11Segment[] | undefined,
+  raw?: string,
+): string {
+  if (Array.isArray(message)) {
+    for (const seg of message) {
+      if (seg.type !== "reply") continue;
+      const id = String(seg.data?.id ?? seg.data?.message_id ?? "").trim();
+      if (id) return id;
+    }
+  }
+  const blob = `${typeof message === "string" ? message : ""} ${raw ?? ""}`;
+  const m = blob.match(/\[CQ:reply,id=([^\]]+)\]/i);
+  return m?.[1]?.trim() || "";
 }
 
 /** 入站语音段：file / url，供下载听写 */
@@ -123,6 +166,7 @@ export class OneBot11Channel {
     const chatId = isGroup
       ? `group:${ev.group_id ?? "0"}`
       : `private:${ev.user_id ?? "0"}`;
+    const quoteMessageId = extractOb11QuoteMessageId(ev.message, ev.raw_message);
     return {
       id: newId("msg"),
       channel: this.id,
@@ -132,6 +176,7 @@ export class OneBot11Channel {
       content: text,
       meta: {
         replyTo: ev.message_id != null ? String(ev.message_id) : undefined,
+        quoteMessageId: quoteMessageId || undefined,
         messageType: isGroup ? "group" : "private",
         groupId: ev.group_id != null ? String(ev.group_id) : undefined,
         selfId,

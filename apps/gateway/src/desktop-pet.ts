@@ -46,6 +46,7 @@ export type DesktopPetStatus = {
   voice: {
     preferred: DesktopPetEngine;
     sherpaReady: boolean;
+    asrReady: boolean;
     systemSpeechReady: boolean;
   };
   message?: string;

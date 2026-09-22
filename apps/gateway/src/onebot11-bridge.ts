@@ -748,7 +748,7 @@ export class OneBot11Bridge {
         log.warn(`入站增强失败：${e instanceof Error ? e.message : String(e)}`);
       }
     }
-    if (!msg.content.trim()) return 0;
+    if (!msg.content.trim() && !(msg.attachments || []).length) return 0;
     if (!this.onInbound) return 0;
     if (sid) {
       msg.meta = { ...msg.meta, botId: sid, selfId: sid };
@@ -946,6 +946,94 @@ export class OneBot11Bridge {
       return { ok: true, path, message: "已拉取语音" };
     }
     return { ok: false, message: "语音接口无文件" };
+  }
+
+  /** 下载入站图片到本地路径（url / base64 / get_image） */
+  async downloadImageFile(
+    img: { file: string; url?: string },
+    destDir: string,
+  ): Promise<{ ok: boolean; path?: string; message: string }> {
+    mkdirSync(destDir, { recursive: true });
+    const botId = this.selfId || undefined;
+    const tryWrite = (buf: Buffer, hint: string) => {
+      const ext =
+        hint.includes("png") || hint.endsWith(".png")
+          ? ".png"
+          : hint.includes("gif") || hint.endsWith(".gif")
+            ? ".gif"
+            : hint.includes("webp") || hint.endsWith(".webp")
+              ? ".webp"
+              : ".jpg";
+      const path = join(destDir, `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}${ext}`);
+      writeFileSync(path, buf);
+      return path;
+    };
+    if (img.url && /^https?:\/\//i.test(img.url)) {
+      try {
+        const res = await fetch(img.url, { signal: AbortSignal.timeout(25_000) });
+        if (!res.ok) return { ok: false, message: `下载图片失败 ${res.status}` };
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length < 32) return { ok: false, message: "图片太小或空" };
+        if (buf.length > 8_000_000) return { ok: false, message: "图片过大" };
+        const ct = res.headers.get("content-type") || img.url;
+        return { ok: true, path: tryWrite(buf, ct), message: "已下载图片" };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+    }
+    const file = String(img.file || "").trim();
+    if (!file) return { ok: false, message: "没有图片文件标识" };
+    if (/^base64:\/\//i.test(file)) {
+      const b64 = file.replace(/^base64:\/\//i, "");
+      try {
+        const buf = Buffer.from(b64, "base64");
+        if (buf.length > 8_000_000) return { ok: false, message: "图片过大" };
+        return { ok: true, path: tryWrite(buf, "jpg"), message: "已解码图片" };
+      } catch {
+        return { ok: false, message: "base64 图片解码失败" };
+      }
+    }
+    if (existsSync(file)) return { ok: true, path: file, message: "本地图片" };
+    const r = await this.callAction("get_image", { file }, { botId, timeoutMs: 25_000 });
+    if (r.ok) {
+      const data = (r.data || {}) as Record<string, unknown>;
+      const local = String(data.file || data.path || "");
+      if (local && existsSync(local)) return { ok: true, path: local, message: "已拉取图片" };
+      const b64 = String(data.base64 || "");
+      if (b64) {
+        const buf = Buffer.from(b64, "base64");
+        return { ok: true, path: tryWrite(buf, String(data.file || "jpg")), message: "已拉取图片" };
+      }
+    }
+    const r2 = await this.callAction("get_file", { file }, { botId, timeoutMs: 25_000 });
+    if (!r2.ok) return { ok: false, message: r.message || r2.message || "拉取图片失败" };
+    const data = (r2.data || {}) as Record<string, unknown>;
+    const local = String(data.file || data.path || "");
+    if (local && existsSync(local)) return { ok: true, path: local, message: "已拉取图片" };
+    const b64 = String(data.base64 || "");
+    if (b64) {
+      return { ok: true, path: tryWrite(Buffer.from(b64, "base64"), "bin"), message: "已拉取图片" };
+    }
+    return { ok: false, message: "图片接口无文件" };
+  }
+
+  /** 取被引用消息原文（含图片段） */
+  async fetchQuotedMessage(
+    messageId: string,
+  ): Promise<{ ok: boolean; message?: string | unknown[]; raw?: string; messageText?: string }> {
+    const id = String(messageId || "").trim();
+    if (!id) return { ok: false };
+    const botId = this.selfId || undefined;
+    const r = await this.callAction(
+      "get_msg",
+      { message_id: Number(id) || id },
+      { botId, timeoutMs: 15_000 },
+    );
+    if (!r.ok) return { ok: false };
+    const data = (r.data || {}) as Record<string, unknown>;
+    const message = data.message as string | unknown[] | undefined;
+    const raw = data.raw_message != null ? String(data.raw_message) : undefined;
+    return { ok: true, message: message as string | unknown[], raw, messageText: raw };
   }
 
   /**

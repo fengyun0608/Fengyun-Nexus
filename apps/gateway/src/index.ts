@@ -11,10 +11,12 @@ import {
   WebhookChannel,
   DesktopPetChannel,
   extractOb11Records,
+  extractOb11Images,
+  extractOb11QuoteMessageId,
 } from "@fengyun/nexus-channel";
 import { MessageRouter, SessionManager } from "@fengyun/nexus-core";
 import { NexusDatabase } from "@fengyun/nexus-db";
-import { LlmRouter } from "@fengyun/nexus-llm";
+import { LlmRouter, type LlmContentPart, type LlmMessage } from "@fengyun/nexus-llm";
 import { McpHost } from "@fengyun/nexus-mcp-host";
 import { loadPluginsFromDir } from "@fengyun/nexus-plugin-loader";
 import { PluginHost } from "@fengyun/nexus-plugin-sdk";
@@ -113,6 +115,7 @@ import { buildAgentToolDefs, buildPublicLookupToolDefs, runAgentTool } from "./a
 import { listOpenDesktopApps, hostInfo, hostUptime } from "./desktop-inspect.js";
 import { webRead, webSearch } from "./web-lookup.js";
 import { speechFileToText } from "./tts-stt.js";
+import { localImageToDataUrl } from "./image-trace.js";
 import { agentWorkspaceRoot, workspaceList } from "./agent-workspace.js";
 import {
   uiaClick,
@@ -467,6 +470,7 @@ function frameworkSystemPrompt(opts?: {
       "问内存、处理器、磁盘、系统版本或系统信息，调用 nexus_host_info。不要说还要去装这个能力。",
       "问报错、掉线、日志文件：调用 nexus_shell 用系统命令查 data/logs/gateway.log。Windows 例：Get-Content -Tail 80 data\\logs\\gateway.log | Select-String ERROR,WARN。这是本机系统命令，不是框架 # 指令。整台服务器都可以查、可以操作。不要说没有工具，也不要只翻沙箱。",
       "有人要搜网页、查资料、看某个网址，调用 nexus_web_search 或 nexus_web_read。不要说没有搜索。",
+      "用户发了图或引用图：你能看见图。先分清 person_photo（真人/自拍）/ meme（梗图表情包）/ screenshot / art / other。查出处用 nexus_image_trace（先填 kind、description、ocr_text）。真人照默认不公开反搜，除非主人明确说反查人像。",
       "要发图、发文件、发语音到 QQ：用 nexus_qq_send_image / nexus_qq_send_file / nexus_qq_send_voice。",
       "主人说戳我、戳一下：有 nexus_qq_poke 就调；没有就自己查 OneBot 地址（nexus_onebot_get），用 shell 调 send_poke / group_poke。不要只文字假装戳，也不要为此新建插件。",
       "有人说截图、截屏、截个图、电脑画面发群里：调用 nexus_screen。那是本机真实屏幕，不是状态卡片。不要用 nexus_shot 充数。没有显示器就照工具结果说明截不了。",
@@ -485,6 +489,7 @@ function frameworkSystemPrompt(opts?: {
     lines.push(
       `当前说话的人不是主人（${who || opts.userId}）。`,
       "便民查询可以：天气、新闻、百科、公开资料——调用 nexus_web_search 或 nexus_web_read，查完用人话答。不要说没法联网、不要让对方自己去天气 App。",
+      "用户发图或引用图时你能看见。先分清真人照还是梗图：梗图可 nexus_image_trace 查出处；真人照只描述、不公开反搜（除非对方明确说要反查且你是主人会话）。",
       "禁止改服务器、装插件、开软件、截屏、跑命令、禁言、发文件操控等。那些只有主人能做。",
       "只做普通对话加便民查询。需要说明来源时，直接说这条消息是谁发的。",
       "对用户说人话。思考写在 <think></think> 里；标签外必须有结果。回话要短。",
@@ -1610,7 +1615,7 @@ async function bootstrap(): Promise<void> {
       return [];
     }
 
-    const history: Array<{ role: "user" | "assistant" | "system"; content: string }> = [
+    const history: LlmMessage[] = [
       {
         role: "system",
         content: frameworkSystemPrompt({
@@ -1625,11 +1630,19 @@ async function bootstrap(): Promise<void> {
     const persona = String(chSettings.systemPrompt || "").trim();
     if (persona) history.push({ role: "system", content: persona });
     // 给模型：去掉 @ 和呼唤前缀
-    const userAsk = stripAtMentions(
+    let userAsk = stripAtMentions(
       stripWakeForChat(trimmedRaw, botCfg),
       msg.meta?.selfId as string | undefined,
     );
-    if (!userAsk || isJunkAiText(userAsk)) return [];
+    const imageAtts = (msg.attachments || []).filter(
+      (a) => a.kind === "image" && a.localPath,
+    );
+    if (!userAsk.trim() && imageAtts.length) {
+      userAsk = imageAtts.some((a) => a.source === "quote")
+        ? "请看我引用的图片，并按我的问题回答；若没写问题就说明图里是什么、像不像梗图、能否查出处。"
+        : "请看图回答；若没写问题就说明图里是什么、像不像梗图、能否查出处。";
+    }
+    if ((!userAsk || isJunkAiText(userAsk)) && !imageAtts.length) return [];
 
     sessions.append(session, "user", userAsk);
     writeMsg({
@@ -1649,6 +1662,29 @@ async function bootstrap(): Promise<void> {
         content: t.content,
       })),
     );
+    if (imageAtts.length) {
+      const parts: LlmContentPart[] = [{ type: "text", text: userAsk }];
+      let attached = 0;
+      for (const a of imageAtts.slice(0, 3)) {
+        const dataUrl = localImageToDataUrl(String(a.localPath));
+        if (!dataUrl) continue;
+        parts.push({ type: "image_url", image_url: { url: dataUrl, detail: "auto" } });
+        attached += 1;
+      }
+      if (attached) {
+        for (let i = history.length - 1; i >= 0; i--) {
+          if (history[i]?.role === "user") {
+            history[i] = { role: "user", content: parts };
+            break;
+          }
+        }
+        log.info(
+          `入站看图 ${attached} 张  quote=${imageAtts.some((a) => a.source === "quote") ? "是" : "否"}`,
+        );
+      } else {
+        log.warn("入站有图但转 data URL 失败（过大或读盘失败）");
+      }
+    }
     const resumeHint = sessions.takeResumeHint(session);
     if (resumeHint) {
       history.splice(1, 0, { role: "system", content: resumeHint });
@@ -2000,29 +2036,84 @@ async function bootstrap(): Promise<void> {
   }
 
   onebot.setEnrichInbound(async (msg, ev) => {
-    const records = extractOb11Records(ev.message, ev.raw_message);
-    if (!records.length) return msg;
     const dest = join(ROOT, "data", "agent-media");
-    const texts: string[] = [];
+    mkdirSync(dest, { recursive: true });
+
+    // 语音 → 听写并入正文
+    const records = extractOb11Records(ev.message, ev.raw_message);
+    const voiceBits: string[] = [];
     for (const rec of records.slice(0, 2)) {
       const dl = await onebot.downloadRecordFile(rec, dest);
       if (!dl.ok || !dl.path) {
-        texts.push("（收到语音，下载失败）");
+        voiceBits.push("（收到语音，下载失败）");
         continue;
       }
       const stt = await speechFileToText(dl.path, ROOT);
-      if (stt.ok && stt.text) texts.push(stt.text);
-      else texts.push(`（收到语音，未能听写：${stt.message}）`);
+      if (stt.ok && stt.text) voiceBits.push(stt.text);
+      else voiceBits.push(`（收到语音，未能听写：${stt.message}）`);
     }
-    const voiceText = texts.filter(Boolean).join(" ").trim();
-    const merged = [msg.content.replace(/\[语音\]/g, "").trim(), voiceText]
+
+    // 本条图片 + 引用消息里的图
+    type ImgAtt = NonNullable<NexusMessage["attachments"]>[number];
+    const attachments: ImgAtt[] = [...(msg.attachments || [])];
+    const pushImages = async (
+      imgs: Array<{ file: string; url?: string }>,
+      source: "direct" | "quote",
+    ) => {
+      for (const img of imgs.slice(0, 3)) {
+        if (attachments.length >= 4) break;
+        const dl = await onebot.downloadImageFile(img, dest);
+        if (!dl.ok || !dl.path) {
+          log.warn(`入站图片下载失败：${dl.message}`);
+          continue;
+        }
+        attachments.push({
+          kind: "image",
+          url: img.url || dl.path,
+          localPath: dl.path,
+          source,
+        });
+      }
+    };
+    await pushImages(extractOb11Images(ev.message, ev.raw_message), "direct");
+
+    const quoteId =
+      String(msg.meta?.quoteMessageId || "").trim() ||
+      extractOb11QuoteMessageId(ev.message, ev.raw_message);
+    if (quoteId) {
+      const quoted = await onebot.fetchQuotedMessage(quoteId);
+      if (quoted.ok) {
+        await pushImages(
+          extractOb11Images(
+            quoted.message as Parameters<typeof extractOb11Images>[0],
+            quoted.raw,
+          ),
+          "quote",
+        );
+      } else {
+        log.warn(`拉取引用消息失败 id=${quoteId}`);
+      }
+    }
+
+    const voiceText = voiceBits.filter(Boolean).join(" ").trim();
+    let content = [msg.content.replace(/\[语音\]/g, "").trim(), voiceText]
       .filter(Boolean)
       .join("\n")
       .trim();
+    if (!content && attachments.length) content = "[图片]";
+    else if (attachments.length && !/\[图片\]/.test(content)) {
+      content = `${content}\n[图片]`.trim();
+    }
+
     return {
       ...msg,
-      content: merged || voiceText || "（语音消息）",
-      meta: { ...msg.meta, rawMessage: msg.meta?.rawMessage || ev.raw_message },
+      content: content || msg.content || (attachments.length ? "[图片]" : msg.content),
+      attachments: attachments.length ? attachments : msg.attachments,
+      meta: {
+        ...msg.meta,
+        quoteMessageId: quoteId || msg.meta?.quoteMessageId,
+        rawMessage: msg.meta?.rawMessage || ev.raw_message,
+      },
     };
   });
   onebot.setInboundHandler(async (msg) => processInbound(msg));

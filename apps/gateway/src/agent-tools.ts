@@ -13,6 +13,7 @@ import type { ChannelSettings } from "./channel-settings.js";
 import { isChannelMaster, masterLevelOf } from "./channel-settings.js";
 import { hostInfo, hostUptime, launchDesktopApp, listOpenDesktopApps } from "./desktop-inspect.js";
 import { webRead, webSearch } from "./web-lookup.js";
+import { traceImageOrigin, type ImageKind } from "./image-trace.js";
 import {
   runSafeCommand,
   workspaceDelete,
@@ -137,7 +138,11 @@ const MASTER_TOOLS = new Set([
 ]);
 
 /** 群友也能用：只读公开网页，不碰本机与内网 */
-export const PUBLIC_LOOKUP_TOOLS = new Set(["nexus_web_search", "nexus_web_read"]);
+export const PUBLIC_LOOKUP_TOOLS = new Set([
+  "nexus_web_search",
+  "nexus_web_read",
+  "nexus_image_trace",
+]);
 
 function tool(
   name: string,
@@ -241,6 +246,23 @@ export function buildPublicLookupToolDefs(): LlmToolDef[] {
       "读取一个公开网页的标题和正文摘要。只传 http/https，不要读内网。",
       { url: { type: "string", description: "公开网址" } },
       ["url"],
+    ),
+    tool(
+      "nexus_image_trace",
+      "查图出处/梗源。先看图分清真人照还是梗图：真人照默认不公开反搜；梗图用画面文字+特征搜网，可配 SauceNAO。path 可空，默认用本条入站已下载的图。",
+      {
+        path: { type: "string", description: "本机图片路径；可空=用入站附件" },
+        kind: {
+          type: "string",
+          description: "person_photo|meme|screenshot|art|other|unknown",
+        },
+        description: { type: "string", description: "画面简述" },
+        ocr_text: { type: "string", description: "图上文字" },
+        allow_person_reverse: {
+          type: "boolean",
+          description: "仅主人明确要求反查人像时为 true",
+        },
+      },
     ),
   ];
 }
@@ -673,6 +695,28 @@ export async function runAgentTool(
     const url = String(args.url || "").trim();
     if (!url) return { error: "缺少网址" };
     return webRead(url);
+  }
+  if (name === "nexus_image_trace") {
+    let path = String(args.path || "").trim();
+    if (!path) {
+      const att = (bag.messageCtx?.attachments || []).find((a) => a.localPath);
+      path = String(att?.localPath || "").trim();
+    }
+    if (!path) return { error: "没有可查的图片。请用户发图或引用图再 @。" };
+    const kindRaw = String(args.kind || "").trim() as ImageKind | "";
+    const kind = (
+      ["person_photo", "meme", "screenshot", "art", "other", "unknown"] as ImageKind[]
+    ).includes(kindRaw as ImageKind)
+      ? (kindRaw as ImageKind)
+      : undefined;
+    const allowPerson =
+      Boolean(args.allow_person_reverse) && (bag.isMaster || bag.isAdminConsole);
+    return traceImageOrigin(path, {
+      kind,
+      description: String(args.description || "").trim() || undefined,
+      ocrText: String(args.ocr_text || args.ocrText || "").trim() || undefined,
+      allowPersonReverse: allowPerson,
+    });
   }
   if (name === "nexus_list_plugins") {
     return {
