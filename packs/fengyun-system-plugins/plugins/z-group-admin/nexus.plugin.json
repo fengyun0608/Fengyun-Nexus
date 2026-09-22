@@ -1,7 +1,7 @@
 {
   "id": "z.group.admin",
   "name": "群管",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "main": "index.ts",
   "priority": 850,
   "hooks": ["onMessage", "onReady"],

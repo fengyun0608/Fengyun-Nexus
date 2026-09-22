@@ -76,6 +76,25 @@ function kickFailTip(message?: string): string {
   return m;
 }
 
+function msgTimeMs(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < 1e12 ? n * 1000 : n;
+}
+
+function historyMessages(data: unknown): Array<Record<string, unknown>> {
+  if (!data) return [];
+  if (Array.isArray(data)) return data as Array<Record<string, unknown>>;
+  const d = data as Record<string, unknown>;
+  if (Array.isArray(d.messages)) return d.messages as Array<Record<string, unknown>>;
+  if (Array.isArray(d.message)) return d.message as Array<Record<string, unknown>>;
+  return [];
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 const TEASE = [
   "欸？你怎么被禁言了呀～是不是干了什么坏事了，杂鱼？",
   "哼哼，主人也被禁言啦？做了什么坏事被抓住了吗～",
@@ -87,19 +106,25 @@ export class ZGroupAdminPlugin extends Plugin {
   manifest = {
     id: "z.group.admin",
     name: "群管",
-    version: "0.2.0",
+    version: "0.2.1",
     priority: 850,
     category: "standard" as const,
     kind: "channel" as const,
     adapterScope: "channel" as const,
     channels: ["onebot11"],
     permissions: ["channel.send" as const, "onebot.api" as const],
-    description: "踢人、踢黑、禁言、全体禁言、群公告、群文件；发 #群管 看菜单",
+    description: "踢人、踢黑、踢片姐、禁言、全体禁言、群公告、群文件；发 #群管 看菜单",
   };
 
   rule = [
     { reg: "^#群管菜单$", fnc: "menu", describe: "群管菜单" },
     { reg: "^#群管$", fnc: "menu", describe: "群管菜单" },
+    {
+      reg: "^#踢片姐",
+      fnc: "kickPurge",
+      permission: "master" as const,
+      describe: "踢黑并撤回对方24小时内消息",
+    },
     { reg: "^#踢黑", fnc: "kickBan", permission: "master" as const, describe: "踢出并拉黑" },
     { reg: "^#踢", fnc: "kick", permission: "master" as const, describe: "踢出群" },
     { reg: "^#禁言", fnc: "ban", permission: "master" as const, describe: "禁言" },
@@ -151,6 +176,7 @@ export class ZGroupAdminPlugin extends Plugin {
         lines: [
           "#踢 @对方 — 踢出",
           "#踢黑 @对方 — 踢出并拉黑",
+          "#踢片姐 @对方 — 踢黑并撤回其24小时内消息",
           "#禁言 @对方 10分 — 禁言",
           "#解禁 @对方 — 解除禁言",
         ],
@@ -210,6 +236,121 @@ export class ZGroupAdminPlugin extends Plugin {
 
   async kickBan(e: NexusEvent, ctx: PluginContext) {
     await this.doKick(e, ctx, true);
+  }
+
+  /** 踢黑 + 撤回对方 24 小时内消息（QQ 管理员可撤回窗口） */
+  async kickPurge(e: NexusEvent, ctx: PluginContext) {
+    if (!ctx.ob11) {
+      await e.reply("当前通道不支持群管");
+      return;
+    }
+    const gid = this.needGroup(e);
+    if (!gid) {
+      await e.reply("请在群里使用");
+      return;
+    }
+    const qq = firstTarget(e);
+    if (!qq) {
+      await e.reply("用法：#踢片姐 @对方");
+      return;
+    }
+    if (ctx.isMaster?.(qq) && ctx.masterLevel?.(e.userId) !== "core") {
+      await e.reply("不能踢主人");
+      return;
+    }
+
+    const botId = botIdOf(e);
+    await e.reply("正在清理对方近24小时消息…");
+    const { deleted, scanned, failed } = await this.purgeUserMessages24h(ctx, gid, qq, botId);
+
+    const kick = await ctx.ob11.call(
+      "set_group_kick",
+      {
+        group_id: String(gid),
+        user_id: String(qq),
+        reject_add_request: true,
+      },
+      { botId },
+    );
+
+    const bits = [`已撤回 ${deleted} 条`];
+    if (scanned) bits.push(`扫过历史 ${scanned} 条`);
+    if (failed) bits.push(`撤回失败 ${failed} 条`);
+    if (!kick.ok) {
+      await e.reply(`${bits.join("，")}；踢黑失败：${kickFailTip(kick.message)}`);
+      return;
+    }
+    await e.reply(`${bits.join("，")}；已踢黑`);
+  }
+
+  private async purgeUserMessages24h(
+    ctx: PluginContext,
+    gid: string,
+    qq: string,
+    botId?: string,
+  ): Promise<{ deleted: number; scanned: number; failed: number }> {
+    const ob11 = ctx.ob11!;
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const msgIds: string[] = [];
+    let scanned = 0;
+    let messageSeq: number | string | undefined;
+    let hitOlder = false;
+
+    for (let page = 0; page < 40; page++) {
+      const params: Record<string, unknown> = {
+        group_id: String(gid),
+        count: 40,
+      };
+      if (messageSeq != null) params.message_seq = messageSeq;
+      const r = await ob11.call("get_group_msg_history", params, { botId });
+      if (!r.ok) {
+        ctx.log(`踢片姐拉历史失败：${r.message || "未知"}`);
+        break;
+      }
+      const list = historyMessages(r.data);
+      if (!list.length) break;
+
+      let oldestSeq: number | undefined;
+      let pageMinTime = Number.POSITIVE_INFINITY;
+      for (const m of list) {
+        scanned += 1;
+        const time = msgTimeMs(m.time);
+        if (time > 0 && time < pageMinTime) pageMinTime = time;
+        const seqRaw = m.message_seq ?? m.real_seq ?? m.real_id;
+        if (seqRaw != null && Number.isFinite(Number(seqRaw))) {
+          const seq = Number(seqRaw);
+          if (oldestSeq == null || seq < oldestSeq) oldestSeq = seq;
+        }
+        if (time > 0 && time < cutoff) {
+          hitOlder = true;
+          continue;
+        }
+        const uid = String(
+          m.user_id ??
+            (m.sender as { user_id?: unknown } | undefined)?.user_id ??
+            "",
+        );
+        const mid = m.message_id ?? m.messageId;
+        if (uid === qq && mid != null && String(mid)) msgIds.push(String(mid));
+      }
+
+      if (hitOlder || pageMinTime < cutoff) break;
+      if (oldestSeq == null) break;
+      if (messageSeq != null && String(oldestSeq) === String(messageSeq)) break;
+      messageSeq = oldestSeq;
+      await sleep(60);
+    }
+
+    const uniq = [...new Set(msgIds)];
+    let deleted = 0;
+    let failed = 0;
+    for (const mid of uniq) {
+      const r = await ob11.call("delete_msg", { message_id: mid }, { botId });
+      if (r.ok) deleted += 1;
+      else failed += 1;
+      await sleep(120);
+    }
+    return { deleted, scanned, failed };
   }
 
   private async doKick(e: NexusEvent, ctx: PluginContext, reject: boolean) {
