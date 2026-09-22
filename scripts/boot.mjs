@@ -241,18 +241,38 @@ async function detectDeps() {
 }
 
 async function ensureBuild() {
-  const sharedDist = join(root, "packages/shared/dist/index.js");
-  const dbDist = join(root, "packages/db/dist/index.js");
-  const loaderDist = join(root, "packages/plugin-loader/dist/index.js");
-  const sdkSrc = join(root, "packages/plugin-sdk/src/index.ts");
-  const sdkDist = join(root, "packages/plugin-sdk/dist/index.js");
-  let sdkStale = !existsSync(sdkDist);
-  try {
-    if (!sdkStale && existsSync(sdkSrc)) sdkStale = statSync(sdkSrc).mtimeMs > statSync(sdkDist).mtimeMs;
-  } catch {
-    sdkStale = true;
+  // 与 package.json build:packages 对齐；任一包源码新于 dist 就整编，避免 llm 等方法未进 dist
+  const packageDirs = [
+    "packages/shared",
+    "packages/core",
+    "packages/channel",
+    "packages/plugin-sdk",
+    "packages/browser-shot",
+    "packages/db",
+    "packages/plugin-loader",
+    "packages/llm",
+    "packages/workflow",
+    "packages/mcp-host",
+  ];
+  let packagesStale = false;
+  for (const rel of packageDirs) {
+    const distJs = join(root, rel, "dist/index.js");
+    const srcDir = join(root, rel, "src");
+    if (!existsSync(distJs)) {
+      packagesStale = true;
+      break;
+    }
+    try {
+      if (existsSync(srcDir) && latestMtime(srcDir) > statSync(distJs).mtimeMs) {
+        packagesStale = true;
+        break;
+      }
+    } catch {
+      packagesStale = true;
+      break;
+    }
   }
-  if (!existsSync(sharedDist) || !existsSync(dbDist) || !existsSync(loaderDist) || sdkStale) {
+  if (packagesStale || process.env.NEXUS_FORCE_PKG_BUILD === "1") {
     bootLog("INFO", ANSI.cyan, "building internal packages…");
     await run(["run", "build:packages"]);
     bootLog("OK", ANSI.green, "packages built");
