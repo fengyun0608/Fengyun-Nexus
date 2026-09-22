@@ -99,10 +99,62 @@ function clipLine(text: string, n = 180): string {
   return t.length > n ? `${t.slice(0, n)}…` : t;
 }
 
+/** 模型把推理写进 content（「思考：」或大段英文），从正文抠出来当 reasoning */
+function peelPlainThinkingFromContent(content: string): { think: string; speak: string } {
+  let raw = String(content || "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return { think: "", speak: "" };
+
+  // 已有标签的留给 composeSpeak / 下游拆
+  if (/<think(?:ing)?>/i.test(raw)) return { think: "", speak: raw };
+
+  let body = raw;
+  const prefixed = /^思考[：:]\s*/.test(body);
+  if (prefixed) body = body.replace(/^思考[：:]\s*/, "").trim();
+
+  const paras = body
+    .split(/\n{2,}/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!paras.length) return { think: "", speak: "" };
+
+  const looksThink = (p: string) => {
+    if (/^(The user|I should|I need|Let me|My (?:plan|response)|Acknowledge|Explain why)/i.test(p)) {
+      return true;
+    }
+    if (/^(用户|我需要|让我|接下来|策略|计划)/.test(p)) return true;
+    const cn = (p.match(/[\u4e00-\u9fff]/g) || []).length;
+    const en = (p.match(/[A-Za-z]/g) || []).length;
+    return en >= 40 && cn < Math.max(8, en * 0.25);
+  };
+  const looksSpeak = (p: string) => {
+    if (/^(呜|喵|哼|哈|哎|哇|好|这|那|看|笑|啊|诶|欸|本猫|小璃)/.test(p)) return true;
+    const cn = (p.match(/[\u4e00-\u9fff]/g) || []).length;
+    const en = (p.match(/[A-Za-z]/g) || []).length;
+    return cn >= 6 && cn >= en * 0.4;
+  };
+
+  if (!(prefixed || looksThink(paras[0]!) || paras.every(looksThink))) {
+    return { think: "", speak: raw };
+  }
+
+  let speakAt = paras.length;
+  for (let i = 0; i < paras.length; i++) {
+    if (looksSpeak(paras[i]!) && !looksThink(paras[i]!)) {
+      speakAt = i;
+      break;
+    }
+  }
+  return {
+    think: paras.slice(0, speakAt).join("\n\n").trim(),
+    speak: paras.slice(speakAt).join("\n\n").trim(),
+  };
+}
+
 /** API 的 reasoning 也包进 think 标签，外面只留给人看的正文。 */
 function composeSpeak(reasoning: string, content: string): string {
-  const body = stripToolMarkup(String(content || ""));
-  const apiThink = String(reasoning || "").trim();
+  const peeled = peelPlainThinkingFromContent(String(content || ""));
+  const body = stripToolMarkup(peeled.speak || (peeled.think ? "" : String(content || "")));
+  const apiThink = [String(reasoning || "").trim(), peeled.think].filter(Boolean).join("\n\n");
   const tagged = apiThink ? `<think>\n${apiThink}\n</think>` : "";
   return [tagged, body].filter(Boolean).join("\n\n").trim();
 }
@@ -324,14 +376,18 @@ export class LlmRouter {
     let emptySpeak = 0;
     const oneTurn = async (round: number): Promise<string | null> => {
       const turn = await this.chatTurn(history, tools);
-      if (turn.reasoning?.trim()) thoughts.push(turn.reasoning.trim());
-      const leaked = turn.tool_calls?.length ? [] : leakedToolCalls(turn.content);
+      const peeled = peelPlainThinkingFromContent(turn.content || "");
+      const turnThink = [turn.reasoning?.trim(), peeled.think].filter(Boolean).join("\n\n");
+      const turnSpeak = peeled.think ? peeled.speak : turn.content || "";
+      if (turnThink) thoughts.push(turnThink);
+      const contentForTools = turnSpeak || turn.content || "";
+      const leaked = turn.tool_calls?.length ? [] : leakedToolCalls(contentForTools);
       const calls = turn.tool_calls?.length ? turn.tool_calls : leaked;
       trace(
-        `AI 回合 ${round}  工具 ${calls.map((c) => c.function.name).join("、") || "无"}  正文 ${clipLine(speakOutsideTags(turn.content || "")) || "空"}  思考 ${clipLine(turn.reasoning || "") || "无"}`,
+        `AI 回合 ${round}  工具 ${calls.map((c) => c.function.name).join("、") || "无"}  正文 ${clipLine(speakOutsideTags(turnSpeak)) || "空"}  思考 ${clipLine(turnThink || "") || "无"}`,
       );
       if (!calls.length) {
-        const text = composeSpeak(thoughts.join("\n\n"), turn.content);
+        const text = composeSpeak(thoughts.join("\n\n"), turnSpeak);
         if (speakOutsideTags(text)) return text;
         emptySpeak += 1;
         if (emptySpeak >= 2) {
@@ -350,13 +406,13 @@ export class LlmRouter {
         history.push({
           role: "user",
           content:
-            "刚才只有思考、标签外面一行都没有。请直接用一两句回答用户刚才的问题，写在 <think> 外面；不要提插件、工具名或 JSON。",
+            "刚才只有思考、没有给人看的回话。请用中文一两句直接回答用户刚才的问题，写在 <think> 标签外面；不要再写「思考：」前缀，不要提插件、工具名或 JSON。",
         });
         trace("AI 空回话  继续，不因轮次结束");
         return null;
       }
       emptySpeak = 0;
-      await runCalls(calls, turn.content || "", leaked.length > 0);
+      await runCalls(calls, contentForTools, leaked.length > 0);
       return null;
     };
 
