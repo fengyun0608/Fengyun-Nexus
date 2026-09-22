@@ -3,8 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Fengyun Nexus 本机桌面桌宠（猫娘，麦克风呼唤）",
-  "main": "main.mjs",
-  "type": "module",
+  "main": "main.cjs",
   "scripts": {
     "start": "electron .",
     "typecheck": "node -e \"process.exit(0)\""

@@ -203,7 +203,7 @@ export class DesktopPetManager {
   async start(opts: { gatewayUrl: string; token: string }): Promise<void> {
     await this.stop();
     const petDir = petAppDir(this.root);
-    const mainJs = join(petDir, "main.mjs");
+    const mainJs = join(petDir, "main.cjs");
     if (!existsSync(mainJs)) {
       this.lastMessage = "桌宠程序缺失（apps/desktop-pet）";
       this.log.warn(this.lastMessage);

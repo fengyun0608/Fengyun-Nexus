@@ -2,14 +2,11 @@
  * Fengyun Nexus 桌面桌宠 — Electron 主进程
  * 透明置顶无边框窗口，钉在桌面右下角。
  */
-import { app, BrowserWindow, screen, ipcMain, shell } from "electron";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+const { app, BrowserWindow, screen, ipcMain, shell } = require("electron");
+const { existsSync, readFileSync } = require("node:fs");
+const { join } = require("node:path");
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-function runtimePathFromArgv(): string {
+function runtimePathFromArgv() {
   const fromEnv = String(process.env.NEXUS_DESKTOP_PET_RUNTIME || "").trim();
   if (fromEnv) return fromEnv;
   const arg = process.argv.find((a) => a.startsWith("--runtime="));
@@ -19,30 +16,23 @@ function runtimePathFromArgv(): string {
 
 function loadRuntime() {
   const p = runtimePathFromArgv();
-  if (!existsSync(p)) {
-    return {
-      enabled: true,
-      gatewayUrl: "http://127.0.0.1:8787",
-      token: "",
-      wakeWords: ["喵璃", "小璃", "Nexus", "风云"],
-      chatId: "desktop-pet",
-      userId: "desktop-pet",
-    };
-  }
+  const fallback = {
+    enabled: true,
+    gatewayUrl: "http://127.0.0.1:8787",
+    token: "",
+    wakeWords: ["喵璃", "小璃", "Nexus", "风云"],
+    chatId: "desktop-pet",
+    userId: "desktop-pet",
+  };
+  if (!existsSync(p)) return fallback;
   try {
     return JSON.parse(readFileSync(p, "utf8"));
   } catch {
-    return {
-      enabled: true,
-      gatewayUrl: "http://127.0.0.1:8787",
-      token: "",
-      wakeWords: ["喵璃", "小璃", "Nexus", "风云"],
-      chatId: "desktop-pet",
-      userId: "desktop-pet",
-    };
+    return fallback;
   }
 }
 
+/** @type {import('electron').BrowserWindow | null} */
 let win = null;
 
 function createWindow() {
@@ -73,7 +63,7 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(join(__dirname, "renderer", "index.html"));
   win.webContents.on("did-finish-load", () => {
-    win?.webContents.send("pet-runtime", runtime);
+    if (win) win.webContents.send("pet-runtime", runtime);
   });
 }
 
