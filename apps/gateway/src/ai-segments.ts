@@ -33,6 +33,7 @@ function isLikelyThinkingPara(p: string): boolean {
   ) {
     return true;
   }
+  if (/\b(IDENTITY|DEMO\s*\d|TIMELINE|3-LINE VALUE|root confirmed)\b/i.test(t)) return true;
   if (/^(用户|我需要|让我|接下来|策略|计划|分析一下)/.test(t)) return true;
   const { cn, en } = countScript(t);
   if (en >= 40 && cn < Math.max(8, en * 0.25)) return true;

@@ -77,6 +77,17 @@ function speakOutsideTags(text: string): string {
     .trim();
 }
 
+/** 回话是否几乎全是英文（技术报告刷屏） */
+function isMostlyEnglishSpeak(text: string): boolean {
+  const s = speakOutsideTags(text);
+  if (!s.trim()) return false;
+  if (/\b(IDENTITY|DEMO\s*\d|TIMELINE|3-LINE VALUE|root confirmed)\b/i.test(s)) return true;
+  if (/^\*\*[A-Z][A-Z0-9 _-]{2,}\*\*/m.test(s) && /[A-Za-z]{30,}/.test(s)) return true;
+  const cn = (s.match(/[\u4e00-\u9fff]/g) || []).length;
+  const en = (s.match(/[A-Za-z]/g) || []).length;
+  return en >= 60 && cn < Math.max(12, en * 0.35);
+}
+
 /** 模型把答复塞进思考时，尽量捞一句能给人看的话 */
 function rescueSpeakFromThoughts(thoughts: string[]): string {
   const blob = thoughts.join("\n");
@@ -121,6 +132,7 @@ function peelPlainThinkingFromContent(content: string): { think: string; speak: 
     if (/^(The user|I should|I need|Let me|My (?:plan|response)|Acknowledge|Explain why)/i.test(p)) {
       return true;
     }
+    if (/\b(IDENTITY|DEMO\s*\d|TIMELINE|3-LINE VALUE|root confirmed)\b/i.test(p)) return true;
     if (/^(用户|我需要|让我|接下来|策略|计划)/.test(p)) return true;
     const cn = (p.match(/[\u4e00-\u9fff]/g) || []).length;
     const en = (p.match(/[A-Za-z]/g) || []).length;
@@ -388,11 +400,18 @@ export class LlmRouter {
       );
       if (!calls.length) {
         const text = composeSpeak(thoughts.join("\n\n"), turnSpeak);
-        if (speakOutsideTags(text)) return text;
+        const speak = speakOutsideTags(text);
+        if (speak && !isMostlyEnglishSpeak(text)) return text;
+
+        // 空回话，或整段英文报告当成没回话
+        if (speak && isMostlyEnglishSpeak(text)) {
+          thoughts.push(speak);
+          trace(`AI 英文回话  已收进思考，催中文概括`);
+        }
         emptySpeak += 1;
         if (emptySpeak >= 2) {
           const rescued = rescueSpeakFromThoughts(thoughts);
-          if (rescued) {
+          if (rescued && !isMostlyEnglishSpeak(rescued)) {
             trace(`AI 空回话  从思考捞出一句：${clipLine(rescued)}`);
             return composeSpeak(thoughts.join("\n\n"), rescued);
           }
@@ -406,7 +425,7 @@ export class LlmRouter {
         history.push({
           role: "user",
           content:
-            "刚才只有思考、没有给人看的回话。请用中文一两句直接回答用户刚才的问题，写在 <think> 标签外面；不要再写「思考：」前缀，不要提插件、工具名或 JSON。",
+            "回话必须用简体中文。刚才若只有思考或大段英文报告，请用两三句中文直接回答用户，写在 <think> 标签外面；不要 IDENTITY/DEMO/TIMELINE 英文标题，不要「思考：」前缀，不要工具名或 JSON。",
         });
         trace("AI 空回话  继续，不因轮次结束");
         return null;
