@@ -1,6 +1,6 @@
 /**
- * 企业级图片出处线索：先分类（真人照 / 梗图 / 截图 / 其它），
- * 再按类别走不同反查策略。不碰内网；真人照默认不做人脸搜索。
+ * 企业级图片出处线索：有视觉则识图分类；无视觉则走相似度/以图搜图。
+ * 不碰内网；真人照默认不做人脸公开反搜。
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -28,6 +28,16 @@ export function localImageToDataUrl(filePath: string, maxBytes = 2_500_000): str
   }
 }
 
+/** 模型名是否像带视觉（千问 VL / GPT-4o 等） */
+export function modelSupportsVision(model?: string): boolean {
+  const m = String(model || "").toLowerCase();
+  if (!m) return false;
+  if (/no[-_]?vision|text[-_]?only/.test(m)) return false;
+  return /vl\b|vision|gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|\bo1\b|\bo3\b|\bo4\b|gemini|claude-3|claude-4|llava|qwen2\.5-vl|qwen3-vl|qwen-vl|internvl|minicpm-v|phi-4-multimodal|step-1v|glm-4v|skywork-vl|doubao.*vision|seed-?1\.5|seed-?1\.6/.test(
+    m,
+  );
+}
+
 export type ImageKind = "person_photo" | "meme" | "screenshot" | "art" | "other" | "unknown";
 
 export type ImageTraceResult = {
@@ -36,7 +46,6 @@ export type ImageTraceResult = {
   kindHint?: ImageKind;
   sha256?: string;
   bytes?: number;
-  /** 给模型看的中文流程说明 */
   playbook: string[];
   searchQuery?: string;
   items: WebHit[];
@@ -56,7 +65,6 @@ function fileSha256(path: string): string {
   return h.digest("hex");
 }
 
-/** 粗分：仅靠文件名/描述启发式；精细分类交给视觉模型 */
 export function hintImageKind(opts: {
   path?: string;
   description?: string;
@@ -72,15 +80,16 @@ export function hintImageKind(opts: {
 
 async function sauceNaoSearch(
   path: string,
-  apiKey: string,
+  apiKey?: string,
 ): Promise<ImageTraceResult["sauceNao"]> {
   try {
     const buf = readFileSync(path);
     if (buf.length > 6_000_000) return [];
     const form = new FormData();
-    form.set("api_key", apiKey);
+    if (apiKey) form.set("api_key", apiKey);
     form.set("output_type", "2");
-    form.set("numres", "6");
+    form.set("numres", "8");
+    form.set("minsim", "50");
     form.set(
       "file",
       new Blob([new Uint8Array(buf)], { type: "application/octet-stream" }),
@@ -89,7 +98,7 @@ async function sauceNaoSearch(
     const res = await fetch("https://saucenao.com/search.php", {
       method: "POST",
       body: form,
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(35_000),
     });
     if (!res.ok) return [];
     const data = (await res.json()) as {
@@ -100,6 +109,8 @@ async function sauceNaoSearch(
     };
     const out: NonNullable<ImageTraceResult["sauceNao"]> = [];
     for (const row of data.results || []) {
+      const sim = Number(row.header?.similarity || 0);
+      if (sim > 0 && sim < 50) continue;
       const title = clip(
         row.data?.title || row.data?.member_name || row.header?.index_name || "匹配",
         120,
@@ -112,7 +123,7 @@ async function sauceNaoSearch(
         similarity: row.header?.similarity,
         source: row.header?.index_name,
       });
-      if (out.length >= 6) break;
+      if (out.length >= 8) break;
     }
     return out;
   } catch {
@@ -120,12 +131,33 @@ async function sauceNaoSearch(
   }
 }
 
+/** 把反查结果压成给无视觉模型看的中文线索 */
+export function formatTraceForLlm(r: ImageTraceResult): string {
+  const lines: string[] = [];
+  lines.push(`线索摘要：${r.message}`);
+  if (r.kindHint && r.kindHint !== "unknown") lines.push(`粗分类：${r.kindHint}`);
+  if (r.sha256) lines.push(`文件指纹 sha256前12：${r.sha256.slice(0, 12)}`);
+  for (const p of (r.playbook || []).slice(0, 6)) lines.push(`· ${p}`);
+  if (r.sauceNao?.length) {
+    lines.push("相似度匹配（以图搜源）：");
+    for (const s of r.sauceNao.slice(0, 5)) {
+      lines.push(
+        `  - 相似度${s.similarity || "?"} ${s.title}${s.url ? ` → ${s.url}` : ""}${s.source ? `（${s.source}）` : ""}`,
+      );
+    }
+  }
+  if (r.items?.length) {
+    lines.push("相关网页：");
+    for (const it of r.items.slice(0, 4)) {
+      lines.push(`  - ${it.title}${it.url ? ` → ${it.url}` : ""}`);
+    }
+  }
+  if (r.privacyNote) lines.push(`注意：${r.privacyNote}`);
+  return lines.join("\n");
+}
+
 /**
- * @param path 本机图片
- * @param opts.kind 视觉已分好的类；不传则启发式
- * @param opts.description / ocrText 视觉或 OCR 抽出的字，用于搜网
- * @param opts.publicImageUrl 若已有公网可访问地址，可附在搜词里
- * @param opts.allowPersonReverse 主人明确要求时才对真人照做公开反查
+ * @param opts.blindSimilarity 无视觉：不依赖 OCR，直接相似度/以图搜图
  */
 export async function traceImageOrigin(
   path: string,
@@ -135,6 +167,7 @@ export async function traceImageOrigin(
     ocrText?: string;
     publicImageUrl?: string;
     allowPersonReverse?: boolean;
+    blindSimilarity?: boolean;
   },
 ): Promise<ImageTraceResult> {
   const file = String(path || "").trim();
@@ -154,6 +187,7 @@ export async function traceImageOrigin(
     return { ok: false, items: [], playbook: [], message: "图片过大，请压缩后再查" };
   }
 
+  const blind = Boolean(opts?.blindSimilarity);
   const kind =
     opts?.kind && opts.kind !== "unknown"
       ? opts.kind
@@ -167,12 +201,15 @@ export async function traceImageOrigin(
   const ocr = clip(opts?.ocrText || "", 160);
   const desc = clip(opts?.description || "", 160);
 
-  if (kind === "person_photo") {
+  if (blind) {
     playbook.push(
-      "分类：真人/自拍类照片。",
-      "默认不做公开以图搜图（隐私）。只描述画面、是否像本人、是否证件照风格。",
-      "若主人明确要求溯源，再开 allowPersonReverse 或自行搜公开新闻图。",
+      "模式：当前模型无视觉，已走「相似度 / 以图搜图」代查。",
+      "优先按图匹配；再用命中标题搜网页。",
     );
+  }
+
+  if (kind === "person_photo" && !blind) {
+    playbook.push("分类：真人/自拍。默认不做公开反搜。");
     if (!opts?.allowPersonReverse) {
       return {
         ok: true,
@@ -183,35 +220,40 @@ export async function traceImageOrigin(
         playbook,
         items: [],
         message: "已判定为真人照：未做公开反查（隐私保护）",
-        privacyNote: "真人照默认不上传到反搜引擎。需要溯源请主人明确说「反查这张人像」。",
+        privacyNote: "真人照默认不上传反搜引擎。主人明确说「反查这张人像」才开。",
       };
     }
     playbook.push("主人已允许对真人照做公开线索检索。");
-  } else if (kind === "meme") {
+  } else if (kind === "meme") playbook.push("分类：梗图/表情包。");
+  else if (kind === "screenshot") playbook.push("分类：界面截图。");
+  else if (kind === "art") playbook.push("分类：插画/二次元。");
+  else if (!blind) playbook.push("分类未定。");
+
+  let sauceNao: ImageTraceResult["sauceNao"];
+  const sauceKey = String(process.env.SAUCENAO_API_KEY || "").trim();
+  const skipPerson =
+    kind === "person_photo" && !opts?.allowPersonReverse && !blind;
+  if (!skipPerson) {
+    sauceNao = await sauceNaoSearch(file, sauceKey || undefined);
     playbook.push(
-      "分类：梗图/表情包。",
-      "流程：①读图面文案/角色特征 → ②用文案+特征搜网页 → ③有 SauceNAO 密钥则再以图搜源站。",
-    );
-  } else if (kind === "screenshot") {
-    playbook.push(
-      "分类：界面截图。",
-      "流程：OCR 关键按钮/标题 → 搜产品名或错误原文；一般不是「梗」出处。",
-    );
-  } else if (kind === "art") {
-    playbook.push(
-      "分类：插画/二次元。",
-      "流程：优先 SauceNAO / 画师署名 / 角色名搜；勿误当成真人。",
-    );
-  } else {
-    playbook.push(
-      "分类未定。先用视觉分清：person_photo / meme / screenshot / art / other，再按类反查。",
+      sauceNao?.length
+        ? `相似度引擎命中 ${sauceNao.length} 条${sauceKey ? "" : "（未配密钥，额度有限）"}`
+        : sauceKey
+          ? "SauceNAO 无结果或请求失败"
+          : "SauceNAO 无结果；可配 SAUCENAO_API_KEY 提高额度",
     );
   }
 
+  const titleHints = (sauceNao || [])
+    .map((s) => s.title)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(" ");
   const queryParts = [
-    kind === "meme" ? "梗图 出处" : kind === "art" ? "插画 来源" : "图片",
+    kind === "meme" ? "梗图 出处" : kind === "art" ? "插画 来源" : blind ? "图片 出处 梗" : "图片",
     ocr,
     desc,
+    titleHints,
   ].filter(Boolean);
   const searchQuery = clip(queryParts.join(" "), 120);
   let items: WebHit[] = [];
@@ -219,28 +261,18 @@ export async function traceImageOrigin(
     const hit = await webSearch(searchQuery);
     items = hit.items || [];
     playbook.push(hit.ok ? `网页线索：${hit.message}` : `网页搜索：${hit.message}`);
-  } else {
-    playbook.push("缺少 OCR/描述，无法有效搜网页；请先让视觉读出画面文字或特征。");
+  } else if (!blind) {
+    playbook.push("缺少 OCR/描述，网页搜索较弱。");
   }
 
-  const pub = opts?.publicImageUrl && publicHttpUrl(opts.publicImageUrl)
-    ? String(opts.publicImageUrl)
-    : "";
+  const pub =
+    opts?.publicImageUrl && publicHttpUrl(opts.publicImageUrl)
+      ? String(opts.publicImageUrl)
+      : "";
   if (pub) {
-    playbook.push(`可人工打开以图搜图：https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:${encodeURIComponent(pub)}`);
-  }
-
-  let sauceNao: ImageTraceResult["sauceNao"];
-  const sauceKey = String(process.env.SAUCENAO_API_KEY || "").trim();
-  if (sauceKey && (kind === "meme" || kind === "art" || kind === "other" || kind === "unknown" || opts?.allowPersonReverse)) {
-    sauceNao = await sauceNaoSearch(file, sauceKey);
     playbook.push(
-      sauceNao?.length
-        ? `SauceNAO 命中 ${sauceNao.length} 条`
-        : "SauceNAO 无结果或请求失败",
+      `Bing 以图搜图：https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:${encodeURIComponent(pub)}`,
     );
-  } else if (!sauceKey) {
-    playbook.push("未配置 SAUCENAO_API_KEY，跳过专业以图搜源；可配环境变量增强。");
   }
 
   return {
@@ -253,9 +285,19 @@ export async function traceImageOrigin(
     searchQuery: searchQuery || undefined,
     items,
     sauceNao,
-    message: items.length || sauceNao?.length
-      ? "已收集出处线索，请用人话汇总给用户"
-      : "已走完流程，但公开线索很少；把视觉描述说清楚再问一次",
-    privacyNote: kind === "person_photo" ? "真人照线索需谨慎传播。" : undefined,
+    message:
+      items.length || sauceNao?.length
+        ? blind
+          ? "无视觉模式下已用相似度搜到线索，请据此用人话回答"
+          : "已收集出处线索，请用人话汇总给用户"
+        : blind
+          ? "无视觉已搜过，相似度线索很少；可换视觉模型或配 SAUCENAO_API_KEY"
+          : "线索很少；把视觉描述说清楚再问一次",
+    privacyNote:
+      kind === "person_photo"
+        ? "真人照线索需谨慎传播。"
+        : blind
+          ? "无视觉无法可靠区分真人照；若像私人自拍请勿公开传播反搜结果。"
+          : undefined,
   };
 }

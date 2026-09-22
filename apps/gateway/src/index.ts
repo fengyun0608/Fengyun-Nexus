@@ -41,7 +41,7 @@ import {
 } from "./admin-security.js";
 import { bootGroup, bootLine, installProcessGuard, printBootBanner, printBootSuccess, quietNodeSqliteWarning } from "./boot-banner.js";
 import { warnBootGaps } from "./boot-check.js";
-import { resolveOb11Media, setOb11MediaHost, setOb11MediaRoot } from "./ob11-media.js";
+import { publishLocalImage, resolveOb11Media, setOb11MediaHost, setOb11MediaRoot } from "./ob11-media.js";
 import { checkPluginUpdates, applyPluginUpdates, ensurePluginSdkLinks } from "./registry-check.js";
 import { installEcosystemPack, installUploadedZip, listExtraInstalls, loadEcosystemCatalog, removeInstalledPack } from "./ecosystem-catalog.js";
 import { listOpenReviews, listOwnRepos, loginGitAccount, submitEcosystemPr } from "./ecosystem-submit.js";
@@ -115,7 +115,7 @@ import { buildAgentToolDefs, buildPublicLookupToolDefs, runAgentTool } from "./a
 import { listOpenDesktopApps, hostInfo, hostUptime } from "./desktop-inspect.js";
 import { webRead, webSearch } from "./web-lookup.js";
 import { speechFileToText } from "./tts-stt.js";
-import { localImageToDataUrl } from "./image-trace.js";
+import { localImageToDataUrl, modelSupportsVision, formatTraceForLlm, traceImageOrigin } from "./image-trace.js";
 import { agentWorkspaceRoot, workspaceList } from "./agent-workspace.js";
 import {
   uiaClick,
@@ -488,6 +488,7 @@ function frameworkSystemPrompt(opts?: {
       "问报错、掉线、日志文件：调用 nexus_shell 用系统命令查 data/logs/gateway.log。Windows 例：Get-Content -Tail 80 data\\logs\\gateway.log | Select-String ERROR,WARN。这是本机系统命令，不是框架 # 指令。整台服务器都可以查、可以操作。不要说没有工具，也不要只翻沙箱。",
       "有人要搜网页、查资料、看某个网址，调用 nexus_web_search 或 nexus_web_read。不要说没有搜索。",
       "用户发了图或引用图：你能看见图。先分清 person_photo（真人/自拍）/ meme（梗图表情包）/ screenshot / art / other。查出处用 nexus_image_trace（先填 kind、description、ocr_text）。真人照默认不公开反搜，除非主人明确说反查人像。",
+      "若系统提示写了「无视觉」并附上相似度线索：不要假装看见图，按线索回答即可。",
       "要发图、发文件、发语音到 QQ：用 nexus_qq_send_image / nexus_qq_send_file / nexus_qq_send_voice。",
       "主人说戳我、戳一下：有 nexus_qq_poke 就调；没有就自己查 OneBot 地址（nexus_onebot_get），用 shell 调 send_poke / group_poke。不要只文字假装戳，也不要为此新建插件。",
       "有人说截图、截屏、截个图、电脑画面发群里：调用 nexus_screen。那是本机真实屏幕，不是状态卡片。不要用 nexus_shot 充数。没有显示器就照工具结果说明截不了。",
@@ -507,7 +508,7 @@ function frameworkSystemPrompt(opts?: {
       `当前说话的人不是主人（${who || opts.userId}）。`,
       "有人问你是谁、是什么模型、谁做的：只说 Fengyun Nexus，不要报具体供应商或模型名，也不要报中文出品方。",
       "便民查询可以：天气、新闻、百科、公开资料——调用 nexus_web_search 或 nexus_web_read，查完用人话答。不要说没法联网、不要让对方自己去天气 App。",
-      "用户发图或引用图时你能看见。先分清真人照还是梗图：梗图可 nexus_image_trace 查出处；真人照只描述、不公开反搜（除非对方明确说要反查且你是主人会话）。",
+      "用户发图或引用图时：若系统已附相似度线索，按线索答；不要说自己看见图。有视觉时才描述像素内容。梗图可 nexus_image_trace；真人照只描述、不公开反搜。",
       "禁止改服务器、装插件、开软件、截屏、跑命令、禁言、发文件操控等。那些只有主人能做。",
       "只做普通对话加便民查询。需要说明来源时，直接说这条消息是谁发的。",
       "对用户说人话。思考写在 <think></think> 里；标签外必须有结果。回话要短。",
@@ -1697,26 +1698,62 @@ async function bootstrap(): Promise<void> {
       })),
     );
     if (imageAtts.length) {
-      const parts: LlmContentPart[] = [{ type: "text", text: userAsk }];
-      let attached = 0;
-      for (const a of imageAtts.slice(0, 3)) {
-        const dataUrl = localImageToDataUrl(String(a.localPath));
-        if (!dataUrl) continue;
-        parts.push({ type: "image_url", image_url: { url: dataUrl, detail: "auto" } });
-        attached += 1;
-      }
-      if (attached) {
+      const snapModel = llm.snapshot().model || activeProvider(llmStore)?.model || "";
+      const canSee = modelSupportsVision(snapModel);
+      if (canSee) {
+        const parts: LlmContentPart[] = [{ type: "text", text: userAsk }];
+        let attached = 0;
+        for (const a of imageAtts.slice(0, 3)) {
+          const dataUrl = localImageToDataUrl(String(a.localPath));
+          if (!dataUrl) continue;
+          parts.push({ type: "image_url", image_url: { url: dataUrl, detail: "auto" } });
+          attached += 1;
+        }
+        if (attached) {
+          for (let i = history.length - 1; i >= 0; i--) {
+            if (history[i]?.role === "user") {
+              history[i] = { role: "user", content: parts };
+              break;
+            }
+          }
+          log.info(
+            `入站看图 ${attached} 张  模型=${snapModel}  quote=${imageAtts.some((a) => a.source === "quote") ? "是" : "否"}`,
+          );
+        } else {
+          log.warn("入站有图但转 data URL 失败（过大或读盘失败）");
+        }
+      } else {
+        // 无视觉：相似度 / 以图搜图，把线索写成文字塞进提问
+        const clueBlocks: string[] = [];
+        for (const a of imageAtts.slice(0, 2)) {
+          const local = String(a.localPath || "");
+          if (!local) continue;
+          let pub = "";
+          try {
+            pub = publishLocalImage(local) || "";
+          } catch {
+            pub = "";
+          }
+          const traced = await traceImageOrigin(local, {
+            blindSimilarity: true,
+            publicImageUrl: pub && !/127\.0\.0\.1|localhost|192\.168\.|10\./i.test(pub) ? pub : undefined,
+            allowPersonReverse: false,
+          });
+          clueBlocks.push(formatTraceForLlm(traced));
+        }
+        const clueText = clueBlocks.filter(Boolean).join("\n---\n");
+        const mergedAsk = clueText
+          ? `${userAsk}\n\n【系统提示：当前模型「${snapModel || "未命名"}」无视觉能力，已用相似度/以图搜图代查，你看不到像素，请根据下列线索回答；不要说自己看见图。】\n${clueText}`
+          : `${userAsk}\n\n【系统提示：当前模型无视觉，且相似度反查暂无结果。请如实说明看不了图，并建议换视觉模型或稍后再试。】`;
         for (let i = history.length - 1; i >= 0; i--) {
           if (history[i]?.role === "user") {
-            history[i] = { role: "user", content: parts };
+            history[i] = { role: "user", content: mergedAsk };
             break;
           }
         }
         log.info(
-          `入站看图 ${attached} 张  quote=${imageAtts.some((a) => a.source === "quote") ? "是" : "否"}`,
+          `入站无视觉反查  模型=${snapModel || "?"}  图=${imageAtts.length}  线索=${clueBlocks.length}`,
         );
-      } else {
-        log.warn("入站有图但转 data URL 失败（过大或读盘失败）");
       }
     }
     const resumeHint = sessions.takeResumeHint(session);
