@@ -1,6 +1,5 @@
 /**
- * Preload：把运行时配置与退出能力暴露给渲染进程。
- * 使用 CJS，便于 Electron preload 稳定加载。
+ * Preload：运行时 + 本机呼唤引擎事件。
  */
 const { contextBridge, ipcRenderer } = require("electron");
 
@@ -13,6 +12,39 @@ contextBridge.exposeInMainWorld("nexusPet", {
         /* ignore */
       }
     });
+  },
+  onWake(cb) {
+    ipcRenderer.on("pet-wake", (_e, data) => {
+      try {
+        cb(data);
+      } catch {
+        /* ignore */
+      }
+    });
+  },
+  onDictate(cb) {
+    ipcRenderer.on("pet-dictate", (_e, data) => {
+      try {
+        cb(data);
+      } catch {
+        /* ignore */
+      }
+    });
+  },
+  onWakeStatus(cb) {
+    ipcRenderer.on("pet-wake-status", (_e, data) => {
+      try {
+        cb(data);
+      } catch {
+        /* ignore */
+      }
+    });
+  },
+  setWakeWords(words) {
+    return ipcRenderer.invoke("pet-set-wake-words", words);
+  },
+  listenAgain() {
+    return ipcRenderer.invoke("pet-listen-again");
   },
   quit() {
     return ipcRenderer.invoke("pet-quit");
