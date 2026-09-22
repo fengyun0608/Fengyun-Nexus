@@ -1,8 +1,8 @@
 {
   "name": "fengyun-nexus",
-  "version": "0.2.161",
+  "version": "0.2.162",
   "private": true,
-  "description": "风云枢纽 Fengyun Nexus �?风云网络出品的本�?AI 对话与自动化枢纽",
+  "description": "é£äºæ¢çº½ Fengyun Nexus â?é£äºç½ç»åºåçæ¬å?AI å¯¹è¯ä¸èªå¨åæ¢çº½",
   "license": "MIT",
   "packageManager": "pnpm@9.15.0",
   "scripts": {

@@ -38,7 +38,7 @@ export function modelSupportsVision(model?: string): boolean {
   );
 }
 
-/** 从可用模型列表里挑一个适合入站看图的视觉模型（偏小/快） */
+/** 从可用模型列表里挑最低价视觉模型（偏 flash / mini，避开 max / ocr 专线） */
 export function pickPreferredVisionModel(models: string[]): string | undefined {
   const vis = [...new Set(models.map((m) => String(m || "").trim()).filter(Boolean))].filter((m) =>
     modelSupportsVision(m),
@@ -47,16 +47,27 @@ export function pickPreferredVisionModel(models: string[]): string | undefined {
   const score = (name: string) => {
     const x = name.toLowerCase();
     let s = 0;
-    if (/qwen.*vl|vl.*qwen/.test(x)) s += 60;
-    if (/gpt-4o/.test(x)) s += 50;
-    if (/gemini.*flash|gemini-2/.test(x)) s += 45;
-    if (/claude-3[.-]?5-sonnet|claude-4/.test(x)) s += 40;
-    if (/flash|mini|plus|lite|small|turbo/.test(x)) s += 25;
-    if (/instruct|chat/.test(x)) s += 5;
-    if (/72b|max|large|pro|opus|405b/.test(x)) s -= 8;
+    // 便宜档拉满
+    if (/vl-?flash|flash.*vl/.test(x)) s += 100;
+    if (/omni.*flash|flash.*omni/.test(x)) s += 90;
+    if (/\bflash\b/.test(x)) s += 50;
+    if (/\b(mini|lite|nano|tiny|small)\b/.test(x)) s += 45;
+    // 同厂 VL 优先
+    if (/qwen.*vl|vl.*qwen/.test(x)) s += 40;
+    if (/gpt-4o-mini/.test(x)) s += 55;
+    if (/gpt-4o/.test(x)) s += 30;
+    if (/gemini.*flash/.test(x)) s += 50;
+    // 中档
+    if (/\bplus\b/.test(x) && !/flash/.test(x)) s += 15;
+    // 贵 / 不合适的扣分
+    if (/ocr/.test(x)) s -= 80;
+    if (/realtime|live|character/.test(x)) s -= 40;
+    if (/\b(max|pro|large|opus|72b|405b|235b)\b/.test(x)) s -= 50;
+    // 带日期的快照略扣，优先无日期别名
+    if (/\d{4}-\d{2}-\d{2}/.test(x)) s -= 5;
     return s;
   };
-  return [...vis].sort((a, b) => score(b) - score(a) || a.localeCompare(b))[0];
+  return [...vis].sort((a, b) => score(b) - score(a) || a.length - b.length || a.localeCompare(b))[0];
 }
 
 export type ImageKind = "person_photo" | "meme" | "screenshot" | "art" | "other" | "unknown";
