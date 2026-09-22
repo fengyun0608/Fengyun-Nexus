@@ -150,7 +150,12 @@ async function loadDesktopPet() {
         };
         wakeWords?: string[];
         engine?: string;
-        voice?: { preferred?: string; sherpaReady?: boolean; systemSpeechReady?: boolean };
+        voice?: {
+          preferred?: string;
+          sherpaReady?: boolean;
+          asrReady?: boolean;
+          systemSpeechReady?: boolean;
+        };
         deployable?: boolean;
         unavailableReason?: string;
       }>("/v1/admin/desktop-pet", { token: auth.token }),
@@ -170,7 +175,8 @@ async function loadDesktopPet() {
     if (v) {
       const bits = [
         `偏好 ${v.preferred || eng}`,
-        v.sherpaReady ? "sherpa 就绪" : "sherpa 未装",
+        v.sherpaReady ? "呼唤 sherpa" : "呼唤降级",
+        v.asrReady ? "中文听写OK" : "听写模型未装",
         v.systemSpeechReady ? "System.Speech 可用" : "System.Speech 不可用",
       ];
       petEngineHint.value = bits.join(" · ");
