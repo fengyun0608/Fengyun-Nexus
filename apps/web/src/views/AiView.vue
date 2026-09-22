@@ -285,11 +285,15 @@ onMounted(() => void load());
       </div>
       <div class="field">
         <span class="field-label">API Key</span>
+        <p v-if="active?.hasKey" class="key-kept">
+          已保存：{{ active.apiKeyMasked || "********" }}（下方留空则继续用这份；填新值才会覆盖）
+        </p>
+        <p v-else class="hint">尚未保存密钥，拉模型或对话前请先填写。</p>
         <n-input
           v-model:value="secretKey"
           type="password"
           show-password-on="click"
-          :placeholder="active?.apiKeyMasked || '留空不改；拉模型需已填密钥'"
+          :placeholder="active?.hasKey ? '留空不改' : '粘贴 API Key'"
           :input-props="{
             ...noAutofill,
             name: 'nexus-llm-secret-key',
@@ -342,5 +346,11 @@ onMounted(() => void load());
   overflow: hidden;
   opacity: 0;
   pointer-events: none;
+}
+.key-kept {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ok, #2f9b78);
+  word-break: break-all;
 }
 </style>
