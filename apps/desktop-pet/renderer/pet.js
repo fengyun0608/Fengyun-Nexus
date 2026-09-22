@@ -220,7 +220,7 @@
       engineOk = Boolean(data?.ok);
       const msg = String(data?.message || "");
       if (msg) setStatus(msg);
-      if (data?.ok === false && msg) showBubble(msg, 5000);
+      if (data?.ok === false && msg) showBubble(msg, 6000);
     });
   }
 

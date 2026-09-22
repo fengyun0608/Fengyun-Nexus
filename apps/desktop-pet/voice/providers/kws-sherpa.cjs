@@ -8,6 +8,7 @@ const { spawn } = require("node:child_process");
 const { expandWakeWords } = require("../expand-words.cjs");
 const { buildKeywordsFile } = require("../ppinyin.cjs");
 const { createSystemSpeechKws } = require("./kws-system-speech.cjs");
+const { sherpaDir } = require("../paths.cjs");
 
 const ID = "sherpa";
 
@@ -16,7 +17,7 @@ const ID = "sherpa";
  */
 function createSherpaKws(opts) {
   const { dataRoot, petDir, onLine, onExit } = opts;
-  const base = join(dataRoot, "desktop-pet", "voice", "sherpa");
+  const base = sherpaDir(dataRoot);
   const readyJson = join(base, "ready.json");
   const readyMarker = join(base, "ready");
 

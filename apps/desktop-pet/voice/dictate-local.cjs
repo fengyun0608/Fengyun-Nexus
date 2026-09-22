@@ -6,11 +6,12 @@ const { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } = requi
 const { join, dirname } = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const { sherpaReadyPath, voiceTmpDir } = require("./paths.cjs");
 
 const execFileAsync = promisify(execFile);
 
 function loadReady(dataRoot) {
-  const p = join(dataRoot, "desktop-pet", "voice", "sherpa", "ready.json");
+  const p = sherpaReadyPath(dataRoot);
   if (!existsSync(p)) return null;
   try {
     const j = JSON.parse(readFileSync(p, "utf8"));
@@ -135,7 +136,7 @@ try {
  */
 async function recordAndTranscribe(opts) {
   const seconds = Math.min(10, Math.max(3, opts.seconds || 6));
-  const dir = join(opts.dataRoot, "desktop-pet", "voice", "tmp");
+  const dir = voiceTmpDir(opts.dataRoot);
   mkdirSync(dir, { recursive: true });
   const wavPath = join(dir, `dictate-${Date.now()}.wav`);
   opts.onStatus?.(`请说…（约 ${seconds} 秒）`);
@@ -143,25 +144,24 @@ async function recordAndTranscribe(opts) {
     await recordWav({ petDir: opts.petDir, outPath: wavPath, seconds });
     opts.onStatus?.("正在听写…");
     const ready = loadReady(opts.dataRoot);
-    if (ready) {
-      try {
-        const text = (await transcribeSherpa({ ready, wavPath })).trim();
-        if (text) return { text, engine: "sherpa-asr", message: "ok" };
-      } catch (e) {
-        opts.onStatus?.(
-          `sherpa 听写失败，尝试兜底：${e instanceof Error ? e.message.slice(0, 80) : String(e)}`,
-        );
-      }
-    }
-    const fallback = (await transcribeSystemSpeech(wavPath)).trim();
-    if (fallback) {
+    if (!ready) {
       return {
-        text: fallback,
-        engine: "system-speech",
-        message: ready ? "sherpa 无结果，已用系统听写" : "未装中文听写模型，系统听写可能不准；请重装桌宠运行时",
+        text: "",
+        engine: "none",
+        message: "未装中文听写模型。请到「环境配置」重装桌宠后再说（不要用系统听写乱码）",
       };
     }
-    return { text: "", engine: "none", message: "没听清，请再说一次" };
+    try {
+      const text = (await transcribeSherpa({ ready, wavPath })).trim();
+      if (text) return { text, engine: "sherpa-asr", message: "ok" };
+      return { text: "", engine: "sherpa-asr", message: "没听清，请靠近麦克风再说一次" };
+    } catch (e) {
+      return {
+        text: "",
+        engine: "sherpa-asr",
+        message: `听写失败：${e instanceof Error ? e.message.slice(0, 100) : String(e)}`,
+      };
+    }
   } finally {
     try {
       if (existsSync(wavPath)) unlinkSync(wavPath);

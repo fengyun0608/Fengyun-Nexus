@@ -209,11 +209,9 @@ function createVoicePipeline(opts) {
       if (result.text) {
         onEvent({ type: "dictate", text: result.text });
         onEvent({ type: "metric", name: "stt_engine", value: result.engine });
-        if (result.message && result.engine === "system-speech") {
-          emitStatus(true, result.message);
-        }
       } else {
         emitStatus(false, result.message || "没听清");
+        onEvent({ type: "status", ok: false, message: result.message || "没听清", engine: lastEngine, state });
       }
     } catch (e) {
       emitStatus(false, e instanceof Error ? e.message.slice(0, 120) : String(e));
