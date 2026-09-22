@@ -1,5 +1,6 @@
 {
   "enabled": false,
   "wakeWords": ["喵璃", "小璃", "Nexus", "风云"],
-  "note": "桌面桌宠。网页控制台只负责开关与呼唤词；真正监听在本机 System.Speech 语法表，可配置多个呼唤词。"
+  "engine": "auto",
+  "note": "桌面桌宠。呼唤管线本机运行：auto 优先 sherpa（未装降级 System.Speech）。控制台可配多个关联呼唤词。"
 }

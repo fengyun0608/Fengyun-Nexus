@@ -1,6 +1,6 @@
 /**
  * 桌宠渲染层：UI / 对话。
- * 呼唤监听在主进程 wake-engine.ps1（System.Speech 语法表），不在这里瞎切录音。
+ * 呼唤在主进程 voice/pipeline（可插拔 KWS），不在网页里听写。
  */
 (() => {
   /** @type {{ gatewayUrl: string; token: string; wakeWords: string[]; chatId: string; userId: string }} */

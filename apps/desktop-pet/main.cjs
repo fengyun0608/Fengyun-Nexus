@@ -1,11 +1,11 @@
 /**
  * Fengyun Nexus 桌宠 — Electron 主进程
- * 系统麦克风 + System.Speech 呼唤词语法表持续监听（不走网页在线听写）。
+ * 企业级语音管线：可插拔 KWS（auto → sherpa 预留 / System.Speech 兜底）
  */
 const { app, BrowserWindow, screen, ipcMain, shell, session } = require("electron");
 const { existsSync, readFileSync } = require("node:fs");
-const { join } = require("node:path");
-const { spawn } = require("node:child_process");
+const { join, resolve, dirname } = require("node:path");
+const { createVoicePipeline } = require("./voice/pipeline.cjs");
 
 function runtimePathFromArgv() {
   const fromEnv = String(process.env.NEXUS_DESKTOP_PET_RUNTIME || "").trim();
@@ -15,6 +15,11 @@ function runtimePathFromArgv() {
   return join(__dirname, "..", "..", "data", "desktop-pet-runtime.json");
 }
 
+function dataRootFromRuntime(runtimeFile) {
+  // .../data/desktop-pet-runtime.json → 仓库根（含 data/）
+  return resolve(dirname(runtimeFile), "..");
+}
+
 function loadRuntime() {
   const p = runtimePathFromArgv();
   const fallback = {
@@ -22,146 +27,78 @@ function loadRuntime() {
     gatewayUrl: "http://127.0.0.1:8787",
     token: "",
     wakeWords: ["喵璃", "小璃", "Nexus", "风云"],
+    aliases: undefined,
+    engine: "auto",
     chatId: "desktop-pet",
     userId: "desktop-pet",
   };
-  if (!existsSync(p)) return fallback;
+  if (!existsSync(p)) return { ...fallback, _runtimePath: p };
   try {
-    return { ...fallback, ...JSON.parse(readFileSync(p, "utf8")) };
+    return { ...fallback, ...JSON.parse(readFileSync(p, "utf8")), _runtimePath: p };
   } catch {
-    return fallback;
+    return { ...fallback, _runtimePath: p };
   }
 }
 
 /** @type {import('electron').BrowserWindow | null} */
 let win = null;
-/** @type {import('node:child_process').ChildProcess | null} */
-let wakeProc = null;
-/** @type {ReturnType<typeof setTimeout> | null} */
-let dictateTimer = null;
 let currentRuntime = loadRuntime();
+/** @type {ReturnType<typeof createVoicePipeline> | null} */
+let pipeline = null;
 
 function sendToRenderer(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
-function stopWakeEngine() {
-  if (dictateTimer) {
-    clearTimeout(dictateTimer);
-    dictateTimer = null;
-  }
-  const p = wakeProc;
-  wakeProc = null;
-  if (!p) return;
-  try {
-    p.stdin?.write("STOP\n");
-  } catch {
-    /* ignore */
-  }
-  try {
-    p.kill();
-  } catch {
-    /* ignore */
-  }
-}
-
-function startWakeEngine(words) {
-  stopWakeEngine();
-  if (process.platform !== "win32") {
-    sendToRenderer("pet-wake-status", { ok: false, message: "呼唤监听仅支持 Windows" });
-    return;
-  }
-  const script = join(__dirname, "wake-engine.ps1");
-  if (!existsSync(script)) {
-    sendToRenderer("pet-wake-status", { ok: false, message: "缺少 wake-engine.ps1" });
-    return;
-  }
-  const list = Array.isArray(words) && words.length ? words.map(String) : ["喵璃", "小璃", "Nexus", "风云"];
-  const child = spawn(
-    "powershell.exe",
-    [
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-File",
-      script,
-      "-WordsJson",
-      JSON.stringify(list),
-    ],
-    {
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
+function ensurePipeline() {
+  if (pipeline) return pipeline;
+  const rtPath = currentRuntime._runtimePath || runtimePathFromArgv();
+  pipeline = createVoicePipeline({
+    petDir: __dirname,
+    dataRoot: dataRootFromRuntime(rtPath),
+    onEvent: (ev) => {
+      const type = String(ev.type || "");
+      if (type === "status") {
+        sendToRenderer("pet-wake-status", {
+          ok: Boolean(ev.ok),
+          message: String(ev.message || ""),
+          engine: ev.engine,
+          state: ev.state,
+        });
+        return;
+      }
+      if (type === "wake") {
+        sendToRenderer("pet-wake", { word: ev.word });
+        return;
+      }
+      if (type === "dictate") {
+        sendToRenderer("pet-dictate", { text: ev.text });
+        return;
+      }
+      if (type === "ready" || type === "mode" || type === "state" || type === "metric") {
+        sendToRenderer("pet-voice-meta", ev);
+      }
     },
-  );
-  wakeProc = child;
-  let buf = "";
-  const onChunk = (chunk) => {
-    buf += chunk.toString("utf8");
-    const lines = buf.split(/\r?\n/);
-    buf = lines.pop() || "";
-    for (const line of lines) handleWakeLine(line.trim());
-  };
-  child.stdout?.on("data", onChunk);
-  child.stderr?.on("data", (d) => {
-    const tip = String(d || "").trim();
-    if (tip) sendToRenderer("pet-wake-status", { ok: false, message: tip.slice(0, 120) });
   });
-  child.on("exit", (code) => {
-    if (wakeProc === child) wakeProc = null;
-    sendToRenderer("pet-wake-status", {
-      ok: false,
-      message: `呼唤引擎退出 code=${code ?? "?"}`,
-    });
-  });
-  sendToRenderer("pet-wake-status", { ok: true, message: "正在启动本机呼唤引擎…" });
+  return pipeline;
 }
 
-function handleWakeLine(line) {
-  if (!line) return;
-  if (line.startsWith("READY|")) {
-    sendToRenderer("pet-wake-status", { ok: true, message: "本机呼唤已就绪，直接喊名字" });
-    return;
-  }
-  if (line.startsWith("ERR|")) {
-    sendToRenderer("pet-wake-status", { ok: false, message: line.slice(4) });
-    return;
-  }
-  if (line.startsWith("MODE|")) {
-    sendToRenderer("pet-wake-status", {
-      ok: true,
-      message: line.slice(5) === "dictate" ? "请说内容…" : "听呼唤中…",
-      mode: line.slice(5),
-    });
-    return;
-  }
-  if (line.startsWith("WAKE|")) {
-    const word = line.slice(5).trim();
-    sendToRenderer("pet-wake", { word });
-    enterDictate(15000);
-    return;
-  }
-  if (line.startsWith("TEXT|")) {
-    const text = line.slice(5).trim();
-    if (text) sendToRenderer("pet-dictate", { text });
-    return;
-  }
+function startVoiceFromRuntime() {
+  const p = ensurePipeline();
+  p.start({
+    wakeWords: currentRuntime.wakeWords || [],
+    aliases: currentRuntime.aliases,
+    engine: currentRuntime.engine || "auto",
+    dictateMs: 15000,
+  });
 }
 
-function enterDictate(ms) {
-  if (!wakeProc?.stdin) return;
+function stopVoice() {
   try {
-    wakeProc.stdin.write("DICTATE\n");
+    pipeline?.stop();
   } catch {
     /* ignore */
   }
-  if (dictateTimer) clearTimeout(dictateTimer);
-  dictateTimer = setTimeout(() => {
-    try {
-      wakeProc?.stdin?.write("WAKE\n");
-    } catch {
-      /* ignore */
-    }
-  }, ms);
 }
 
 function createWindow() {
@@ -215,17 +152,21 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(join(__dirname, "renderer", "index.html"));
   win.webContents.on("did-finish-load", () => {
-    if (win) win.webContents.send("pet-runtime", currentRuntime);
-    startWakeEngine(currentRuntime.wakeWords || []);
+    if (win) {
+      win.webContents.send("pet-runtime", currentRuntime);
+      const st = ensurePipeline().getStatus();
+      win.webContents.send("pet-voice-meta", { type: "status_snapshot", ...st });
+    }
+    startVoiceFromRuntime();
   });
   win.on("closed", () => {
     win = null;
-    stopWakeEngine();
+    stopVoice();
   });
 }
 
 ipcMain.handle("pet-quit", () => {
-  stopWakeEngine();
+  stopVoice();
   app.quit();
 });
 
@@ -238,30 +179,26 @@ ipcMain.handle("pet-open-external", (_e, url) => {
 ipcMain.handle("pet-set-wake-words", (_e, words) => {
   const list = Array.isArray(words) ? words.map(String).filter(Boolean) : [];
   currentRuntime.wakeWords = list.length ? list : currentRuntime.wakeWords;
-  if (wakeProc?.stdin) {
-    try {
-      wakeProc.stdin.write(`WORDS|${JSON.stringify(currentRuntime.wakeWords)}\n`);
-      return { ok: true };
-    } catch {
-      /* restart */
-    }
-  }
-  startWakeEngine(currentRuntime.wakeWords);
-  return { ok: true };
+  ensurePipeline().setWakeWords(currentRuntime.wakeWords, currentRuntime.aliases);
+  return { ok: true, ...ensurePipeline().getStatus() };
 });
 
 ipcMain.handle("pet-listen-again", () => {
-  enterDictate(15000);
+  ensurePipeline().listenAgain();
   return { ok: true };
+});
+
+ipcMain.handle("pet-voice-status", () => {
+  return { ok: true, ...ensurePipeline().getStatus() };
 });
 
 app.whenReady().then(createWindow);
 
 app.on("window-all-closed", () => {
-  stopWakeEngine();
+  stopVoice();
   if (process.platform !== "darwin") app.quit();
 });
 
 app.on("before-quit", () => {
-  stopWakeEngine();
+  stopVoice();
 });

@@ -2196,6 +2196,8 @@ async function bootstrap(): Promise<void> {
       const body = (req.body ?? {}) as {
         enabled?: boolean;
         wakeWords?: string[] | string;
+        aliases?: Record<string, string[]>;
+        engine?: string;
       };
       const wakeWords = Array.isArray(body.wakeWords)
         ? body.wakeWords.map((x) => String(x).trim()).filter(Boolean)
@@ -2205,11 +2207,17 @@ async function bootstrap(): Promise<void> {
               .map((x) => x.trim())
               .filter(Boolean)
           : undefined;
+      const engine =
+        body.engine === "sherpa" || body.engine === "system-speech" || body.engine === "auto"
+          ? body.engine
+          : undefined;
       const enabled =
         typeof body.enabled === "boolean" ? body.enabled : desktopPet.getConfig().enabled;
       const st = await desktopPet.apply({
         enabled,
         wakeWords,
+        aliases: body.aliases,
+        engine,
         gatewayUrl: petGatewayUrl(),
         issueToken: () => issueToken(adminCfg.username || "admin"),
       });

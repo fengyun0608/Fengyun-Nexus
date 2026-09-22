@@ -106,11 +106,13 @@ const showPet = ref(false);
 const petEnabled = ref(false);
 const petRunning = ref(false);
 const petWake = ref("喵璃, 小璃, Nexus, 风云");
+const petEngine = ref<"auto" | "sherpa" | "system-speech">("auto");
 const petBusy = ref(false);
 const petHint = ref("");
 const petEnvInstalled = ref(false);
 const petDeployable = ref(true);
 const petUnavailable = ref("");
+const petEngineHint = ref("");
 
 const plugins = ref<PluginItem[]>([]);
 const devItems = ref<DevPlugin[]>([]);
@@ -142,8 +144,13 @@ async function loadDesktopPet() {
         enabled?: boolean;
         running?: boolean;
         message?: string;
-        config?: { wakeWords?: string[] };
+        config?: {
+          wakeWords?: string[];
+          engine?: "auto" | "sherpa" | "system-speech";
+        };
         wakeWords?: string[];
+        engine?: string;
+        voice?: { preferred?: string; sherpaReady?: boolean; systemSpeechReady?: boolean };
         deployable?: boolean;
         unavailableReason?: string;
       }>("/v1/admin/desktop-pet", { token: auth.token }),
@@ -156,7 +163,20 @@ async function loadDesktopPet() {
     petRunning.value = Boolean(pet.running);
     const words = pet.config?.wakeWords || pet.wakeWords || [];
     if (words.length) petWake.value = words.join(", ");
+    const eng = pet.config?.engine || pet.engine || "auto";
+    if (eng === "sherpa" || eng === "system-speech" || eng === "auto") petEngine.value = eng;
     petHint.value = pet.message || "";
+    const v = pet.voice;
+    if (v) {
+      const bits = [
+        `偏好 ${v.preferred || eng}`,
+        v.sherpaReady ? "sherpa 就绪" : "sherpa 未装",
+        v.systemSpeechReady ? "System.Speech 可用" : "System.Speech 不可用",
+      ];
+      petEngineHint.value = bits.join(" · ");
+    } else {
+      petEngineHint.value = "";
+    }
     petDeployable.value = pet.deployable !== false;
     petUnavailable.value = pet.unavailableReason || "";
     const rt = (env.runtimes || []).find((r) => r.id === "desktop-pet");
@@ -184,7 +204,7 @@ async function onPetSwitch(v: boolean) {
     }>("/v1/admin/desktop-pet", {
       method: "PUT",
       token: auth.token,
-      body: JSON.stringify({ enabled: v, wakeWords: petWake.value }),
+      body: JSON.stringify({ enabled: v, wakeWords: petWake.value, engine: petEngine.value }),
     });
     petEnabled.value = Boolean(res.enabled ?? v);
     petRunning.value = Boolean(res.running);
@@ -209,6 +229,7 @@ async function savePetWake() {
         body: JSON.stringify({
           enabled: petEnabled.value,
           wakeWords: petWake.value,
+          engine: petEngine.value,
         }),
       },
     );
@@ -889,7 +910,7 @@ watch(showOnebot, (open) => {
       :style="{ width: 'min(480px, 94vw)' }"
     >
       <p class="hint">
-        桌宠是消息通道。Electron 等资源在「环境配置」安装；麦克风呼唤与对话在本机桌宠窗口完成。
+        桌宠是消息通道。Electron 在「环境配置」安装。呼唤走本机管线：auto 优先 sherpa（未装则降级 System.Speech），可配多个关联呼唤词。
       </p>
       <p v-if="!petDeployable" class="hint">{{ petUnavailable || "当前环境无法部署" }}</p>
       <p v-else-if="!petEnvInstalled" class="hint">
@@ -906,13 +927,26 @@ watch(showOnebot, (open) => {
         />
       </label>
       <label class="field">
-        呼唤词（逗号分隔）
+        呼唤引擎
+        <n-select
+          v-model:value="petEngine"
+          :disabled="!petDeployable"
+          :options="[
+            { label: '自动（推荐）', value: 'auto' },
+            { label: 'sherpa-onnx（需安装语音运行时）', value: 'sherpa' },
+            { label: 'System.Speech（Windows 兜底）', value: 'system-speech' },
+          ]"
+        />
+      </label>
+      <label class="field">
+        呼唤词（逗号分隔，可多个关联词）
         <n-input
           v-model:value="petWake"
           :disabled="!petDeployable"
-          placeholder="喵璃, 小璃, Nexus"
+          placeholder="喵璃, 小璃, Nexus, 风云"
         />
       </label>
+      <p v-if="petEngineHint" class="hint">{{ petEngineHint }}</p>
       <p v-if="petHint" class="hint">{{ petHint }}{{ petRunning ? " · 进程在跑" : "" }}</p>
       <template #footer>
         <n-space justify="end">

@@ -40,11 +40,23 @@ contextBridge.exposeInMainWorld("nexusPet", {
       }
     });
   },
+  onVoiceMeta(cb) {
+    ipcRenderer.on("pet-voice-meta", (_e, data) => {
+      try {
+        cb(data);
+      } catch {
+        /* ignore */
+      }
+    });
+  },
   setWakeWords(words) {
     return ipcRenderer.invoke("pet-set-wake-words", words);
   },
   listenAgain() {
     return ipcRenderer.invoke("pet-listen-again");
+  },
+  voiceStatus() {
+    return ipcRenderer.invoke("pet-voice-status");
   },
   quit() {
     return ipcRenderer.invoke("pet-quit");

@@ -13,9 +13,15 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
+export type DesktopPetEngine = "auto" | "sherpa" | "system-speech";
+
 export type DesktopPetConfig = {
   enabled: boolean;
   wakeWords: string[];
+  /** 近音别名：主词 → 变体列表 */
+  aliases?: Record<string, string[]>;
+  /** auto：有 sherpa 用 sherpa，否则 System.Speech */
+  engine: DesktopPetEngine;
   note?: string;
 };
 
@@ -24,6 +30,8 @@ export type DesktopPetRuntime = {
   gatewayUrl: string;
   token: string;
   wakeWords: string[];
+  aliases?: Record<string, string[]>;
+  engine: DesktopPetEngine;
   chatId: string;
   userId: string;
   issuedAt: string;
@@ -34,10 +42,40 @@ export type DesktopPetStatus = {
   running: boolean;
   pid: number | null;
   wakeWords: string[];
+  engine: DesktopPetEngine;
+  voice: {
+    preferred: DesktopPetEngine;
+    sherpaReady: boolean;
+    systemSpeechReady: boolean;
+  };
   message?: string;
 };
 
 const DEFAULT_WAKE = ["喵璃", "小璃", "Nexus", "风云"];
+
+function normalizeEngine(raw: unknown): DesktopPetEngine {
+  if (raw === "sherpa" || raw === "system-speech" || raw === "auto") return raw;
+  return "auto";
+}
+
+function normalizeAliases(raw: unknown): Record<string, string[]> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const key = String(k).trim();
+    if (!key) continue;
+    const list = Array.isArray(v)
+      ? v.map((x) => String(x).trim()).filter(Boolean)
+      : typeof v === "string"
+        ? String(v)
+            .split(/[,，\s]+/)
+            .map((x) => x.trim())
+            .filter(Boolean)
+        : [];
+    if (list.length) out[key] = list;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 function normalize(raw: Partial<DesktopPetConfig> | undefined): DesktopPetConfig {
   const words = Array.isArray(raw?.wakeWords)
@@ -51,6 +89,8 @@ function normalize(raw: Partial<DesktopPetConfig> | undefined): DesktopPetConfig
   return {
     enabled: Boolean(raw?.enabled),
     wakeWords: words.length ? words : [...DEFAULT_WAKE],
+    aliases: normalizeAliases(raw?.aliases),
+    engine: normalizeEngine(raw?.engine),
     note: typeof raw?.note === "string" ? raw.note : "",
   };
 }
@@ -157,16 +197,27 @@ export class DesktopPetManager {
   }
 
   getConfig(): DesktopPetConfig {
-    return { ...this.cfg, wakeWords: [...this.cfg.wakeWords] };
+    return {
+      ...this.cfg,
+      wakeWords: [...this.cfg.wakeWords],
+      aliases: this.cfg.aliases ? { ...this.cfg.aliases } : undefined,
+    };
   }
 
   status(): DesktopPetStatus {
     const running = Boolean(this.child && this.child.exitCode === null && !this.child.killed);
+    const sherpaMarker = join(this.root, "data", "desktop-pet", "voice", "sherpa", "ready");
     return {
       enabled: this.cfg.enabled,
       running,
       pid: running && this.child?.pid ? this.child.pid : null,
       wakeWords: [...this.cfg.wakeWords],
+      engine: this.cfg.engine,
+      voice: {
+        preferred: this.cfg.engine,
+        sherpaReady: existsSync(sherpaMarker),
+        systemSpeechReady: process.platform === "win32",
+      },
       message: this.lastMessage || undefined,
     };
   }
@@ -177,6 +228,8 @@ export class DesktopPetManager {
   async apply(opts: {
     enabled: boolean;
     wakeWords?: string[];
+    aliases?: Record<string, string[]>;
+    engine?: DesktopPetEngine;
     gatewayUrl: string;
     issueToken: () => string;
   }): Promise<DesktopPetStatus> {
@@ -184,6 +237,8 @@ export class DesktopPetManager {
       ...this.cfg,
       enabled: opts.enabled,
       wakeWords: opts.wakeWords ?? this.cfg.wakeWords,
+      aliases: opts.aliases !== undefined ? opts.aliases : this.cfg.aliases,
+      engine: opts.engine ?? this.cfg.engine,
     });
     saveDesktopPetConfig(this.root, this.cfg);
 
@@ -215,6 +270,8 @@ export class DesktopPetManager {
       gatewayUrl: opts.gatewayUrl.replace(/\/$/, ""),
       token: opts.token,
       wakeWords: [...this.cfg.wakeWords],
+      aliases: this.cfg.aliases,
+      engine: this.cfg.engine,
       chatId: "desktop-pet",
       userId: "desktop-pet",
       issuedAt: new Date().toISOString(),

@@ -1,10 +1,11 @@
-# Fengyun Nexus 桌宠：本机唤醒词引擎
-# 用 System.Speech 语法表 + Recognize 超时循环（不依赖网页听写）
+# Fengyun Nexus 桌宠：本机唤醒词引擎（System.Speech）
 # 输出：READY|wake / WAKE|词 / TEXT|话 / MODE|wake|dictate / ERR|...
 # 输入：WORDS|json / DICTATE / WAKE / STOP
 param(
   [Parameter(Mandatory = $false)]
-  [string]$WordsJson = '["喵璃","小璃","Nexus","风云"]'
+  [string]$WordsJson = '["喵璃","小璃","Nexus","风云"]',
+  [Parameter(Mandatory = $false)]
+  [string]$AliasesJson = '{}'
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,22 +14,32 @@ try { [Console]::InputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
 Add-Type -AssemblyName System.Speech
 
-function Expand-WakeList([object[]]$raw) {
+function Get-AliasMap([string]$json) {
+  $map = @{}
+  try {
+    $obj = $json | ConvertFrom-Json
+    if ($null -eq $obj) { return $map }
+    foreach ($p in $obj.PSObject.Properties) {
+      $arr = @()
+      foreach ($x in @($p.Value)) { $arr += [string]$x }
+      $map[$p.Name] = $arr
+    }
+  } catch { }
+  return $map
+}
+
+function Expand-WakeList([object[]]$raw, $aliasMap) {
   $set = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
   foreach ($w in $raw) {
     $t = ([string]$w).Trim()
     if ($t) { [void]$set.Add($t) }
   }
-  $aliases = @{
-    "喵璃" = @("喵璃", "喵哩", "喵里", "喵梨", "妙璃", "苗璃")
-    "小璃" = @("小璃", "小哩", "小里", "小梨", "小丽")
-    "风云" = @("风云", "丰云")
-    "Nexus" = @("Nexus", "nexus")
-    "风云枢纽" = @("风云枢纽")
-  }
   foreach ($key in @($set)) {
-    if ($aliases.ContainsKey($key)) {
-      foreach ($a in $aliases[$key]) { [void]$set.Add($a) }
+    if ($aliasMap.ContainsKey($key)) {
+      foreach ($a in $aliasMap[$key]) {
+        $t = ([string]$a).Trim()
+        if ($t) { [void]$set.Add($t) }
+      }
     }
   }
   return @($set)
@@ -42,6 +53,7 @@ function Out-Line([string]$s) {
 $shared = [hashtable]::Synchronized(@{
   Mode = "wake"
   Words = @("喵璃", "小璃", "Nexus", "风云")
+  AliasMap = @{}
   Stop = $false
   ReloadWake = $false
   EnterDictate = $false
@@ -53,6 +65,8 @@ try {
   if ($parsed -is [System.Array]) { $shared.Words = @($parsed) }
   elseif ($parsed) { $shared.Words = @([string]$parsed) }
 } catch { }
+
+$shared.AliasMap = Get-AliasMap $AliasesJson
 
 $stdinReader = {
   param($state)
@@ -72,6 +86,22 @@ $stdinReader = {
           $state.ReloadWake = $true
         } catch { }
       }
+      if ($line.StartsWith("ALIASES|")) {
+        try {
+          $state.AliasMap = & {
+            $map = @{}
+            $obj = $line.Substring(8) | ConvertFrom-Json
+            if ($null -eq $obj) { return $map }
+            foreach ($p in $obj.PSObject.Properties) {
+              $arr = @()
+              foreach ($x in @($p.Value)) { $arr += [string]$x }
+              $map[$p.Name] = $arr
+            }
+            $map
+          }
+          $state.ReloadWake = $true
+        } catch { }
+      }
     }
   } catch {
     $state.Stop = $true
@@ -88,7 +118,7 @@ try {
 
 function Apply-Wake([System.Speech.Recognition.SpeechRecognitionEngine]$eng, $state) {
   $eng.UnloadAllGrammars()
-  $list = Expand-WakeList $state.Words
+  $list = Expand-WakeList $state.Words $state.AliasMap
   if ($list.Count -lt 1) { $list = @("喵璃", "小璃") }
   $choices = New-Object System.Speech.Recognition.Choices
   foreach ($w in $list) { [void]$choices.Add([string]$w) }
