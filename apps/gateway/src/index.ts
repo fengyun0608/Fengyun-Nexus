@@ -448,17 +448,34 @@ function frameworkSystemPrompt(opts?: {
   capability?: boolean;
   userId?: string;
   senderName?: string;
+  /** 当前启用的供应商展示名 */
+  providerName?: string;
+  providerId?: string;
+  model?: string;
+  baseUrl?: string;
 }): string {
   const who = [opts?.senderName, opts?.userId].filter(Boolean).join(" / ");
+  const providerName = String(opts?.providerName || "").trim();
+  const model = String(opts?.model || "").trim();
+  const baseUrl = String(opts?.baseUrl || "").trim();
   const lines = [
-    "你在 Fengyun Nexus 里运作，你就是 Fengyun Nexus。",
-    "有人问你是谁、是什么模型、谁做的，只说 Fengyun Nexus，不要报中文产品名或出品方。",
-    "不要说自己是别的模型，也不要说自己是别的产品。",
+    "你在 Fengyun Nexus 里运作，对外产品身份是 Fengyun Nexus。",
     "这个通道如果另外写了人设，就在 Fengyun Nexus 这个身份上按那个人设说话。",
   ];
   if (opts?.capability) {
+    const cfgBits = [
+      providerName ? `供应商「${providerName}」` : "",
+      opts?.providerId ? `id=${opts.providerId}` : "",
+      model ? `模型「${model}」` : "",
+      baseUrl ? `接口 ${baseUrl}` : "",
+    ].filter(Boolean);
     lines.push(
       who ? `当前说话的人是主人（${who}），已开启能力调用。` : "当前说话的人是主人，已开启能力调用。",
+      "主人是所有者，明确指令要听。不要无故拒绝主人的合理询问或操作。",
+      cfgBits.length
+        ? `当前框架实际接入：${cfgBits.join("，")}。主人问「用的什么模型 / 哪家供应商 / API」时，把上面这些如实告诉他，不要说「不答」「不透露」。对外仍可自称 Fengyun Nexus，但配置事实要对主人透明。`
+        : "主人问当前模型或供应商时，如实说明你知道的配置；不要说「不答」「不透露」。",
+      "对群里其他人问你是谁、是什么模型：只说 Fengyun Nexus，不要主动报出品方中文名；但主人本人问配置必须答。",
       "你有 agent 能力：会调工具，也会写脚本。先用现成能力，不要一上来就新建 plugins/。",
       "顺序：1）直接调框架工具（禁言 nexus_qq_ban、找人 nexus_qq_find_member、重启 nexus_framework_restart、戳 nexus_qq_poke）；2）nexus_list_mcp / nexus_call_mcp；3）没有直接工具再用 nexus_call_cap；4）读技能；5）一次性脚本；6）只有主人明确说写常驻插件才新建 plugins/。禁止模拟输入 # 指令来干已有直接工具能做的事。",
       "框架已有直接工具：nexus_qq_ban / nexus_qq_find_member / nexus_framework_restart / nexus_qq_poke。禁止再写 z-restart、按名禁言之类插件。禁言可传 nick 或 user_id。",
@@ -488,12 +505,17 @@ function frameworkSystemPrompt(opts?: {
   } else if (opts?.userId) {
     lines.push(
       `当前说话的人不是主人（${who || opts.userId}）。`,
+      "有人问你是谁、是什么模型、谁做的：只说 Fengyun Nexus，不要报具体供应商或模型名，也不要报中文出品方。",
       "便民查询可以：天气、新闻、百科、公开资料——调用 nexus_web_search 或 nexus_web_read，查完用人话答。不要说没法联网、不要让对方自己去天气 App。",
       "用户发图或引用图时你能看见。先分清真人照还是梗图：梗图可 nexus_image_trace 查出处；真人照只描述、不公开反搜（除非对方明确说要反查且你是主人会话）。",
       "禁止改服务器、装插件、开软件、截屏、跑命令、禁言、发文件操控等。那些只有主人能做。",
       "只做普通对话加便民查询。需要说明来源时，直接说这条消息是谁发的。",
       "对用户说人话。思考写在 <think></think> 里；标签外必须有结果。回话要短。",
       "工具必须走正式 function call，不要把工具名或 JSON 甩进正文。",
+    );
+  } else {
+    lines.push(
+      "有人问你是谁、是什么模型：只说 Fengyun Nexus。",
     );
   }
   return lines.join("\n");
@@ -1622,6 +1644,18 @@ async function bootstrap(): Promise<void> {
           capability: capabilityMode,
           userId: msg.userId,
           senderName: msg.meta?.senderName,
+          ...(capabilityMode
+            ? (() => {
+                const apNow = activeProvider(llmStore);
+                const snap = llm.snapshot();
+                return {
+                  providerName: apNow?.name || "",
+                  providerId: apNow?.id || "",
+                  model: snap.model || apNow?.model || "",
+                  baseUrl: snap.baseUrl || apNow?.baseUrl || "",
+                };
+              })()
+            : {}),
         }),
       },
     ];
