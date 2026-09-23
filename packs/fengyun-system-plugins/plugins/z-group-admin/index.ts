@@ -73,7 +73,21 @@ function kickFailTip(message?: string): string {
     return "踢人失败。机器人需要是管理员，且不能踢群主或其他管理员";
   }
   if (/get Uid Error|uid/i.test(m)) return "找不到这个 QQ";
+  if (/owner|群主/i.test(m)) return "不能踢群主";
+  if (/admin|管理员/i.test(m)) return "踢不了管理员";
   return m;
+}
+
+type GroupRole = "owner" | "admin" | "member" | "unknown";
+
+function normalizeRole(raw: unknown): GroupRole {
+  const r = String(raw || "")
+    .trim()
+    .toLowerCase();
+  if (r === "owner" || r === "群主") return "owner";
+  if (r === "admin" || r === "administrator" || r === "管理员") return "admin";
+  if (r === "member" || r === "成员") return "member";
+  return "unknown";
 }
 
 function msgTimeMs(raw: unknown): number {
@@ -106,7 +120,7 @@ export class ZGroupAdminPlugin extends Plugin {
   manifest = {
     id: "z.group.admin",
     name: "群管",
-    version: "0.2.1",
+    version: "0.2.2",
     priority: 850,
     category: "standard" as const,
     kind: "channel" as const,
@@ -230,6 +244,65 @@ export class ZGroupAdminPlugin extends Plugin {
     return gid || null;
   }
 
+  private async memberRole(
+    ctx: PluginContext,
+    gid: string,
+    userId: string,
+    botId?: string,
+  ): Promise<GroupRole> {
+    if (!ctx.ob11 || !userId) return "unknown";
+    const r = await ctx.ob11.call(
+      "get_group_member_info",
+      { group_id: String(gid), user_id: String(userId), no_cache: true },
+      { botId },
+    );
+    if (!r.ok) return "unknown";
+    const data = (r.data || {}) as Record<string, unknown>;
+    return normalizeRole(data.role);
+  }
+
+  /**
+   * 踢人前校验：
+   * - 机器人须为群管或群主，否则踢不了
+   * - 框架主人一律不踢
+   * - 群主踢不了（谁都踢不了群主）
+   * - 群管只能踢普通成员；群主可踢管理员
+   */
+  private async assertCanKick(
+    e: NexusEvent,
+    ctx: PluginContext,
+    gid: string,
+    targetQq: string,
+  ): Promise<string | null> {
+    if (ctx.isMaster?.(targetQq)) return "不能踢主人";
+
+    const botId = botIdOf(e);
+    const selfId = String(botId || e.raw?.meta?.selfId || "").trim();
+    if (!selfId) return "认不出机器人号，无法判断群身份";
+
+    const [selfRole, targetRole] = await Promise.all([
+      this.memberRole(ctx, gid, selfId, botId),
+      this.memberRole(ctx, gid, targetQq, botId),
+    ]);
+
+    if (selfRole === "member") {
+      return "我不是群管，踢不了人";
+    }
+    if (selfRole === "unknown") {
+      return "查不到我在本群的身份，确认机器人是群管后再试";
+    }
+    if (targetRole === "owner") {
+      return "踢不了群主";
+    }
+    if (targetRole === "admin" && selfRole !== "owner") {
+      return "群管踢不了管理员，只有群主可以";
+    }
+    if (targetQq === selfId) {
+      return "不能踢自己";
+    }
+    return null;
+  }
+
   async kick(e: NexusEvent, ctx: PluginContext) {
     await this.doKick(e, ctx, false);
   }
@@ -254,8 +327,9 @@ export class ZGroupAdminPlugin extends Plugin {
       await e.reply("用法：#踢片姐 @对方");
       return;
     }
-    if (ctx.isMaster?.(qq) && ctx.masterLevel?.(e.userId) !== "core") {
-      await e.reply("不能踢主人");
+    const deny = await this.assertCanKick(e, ctx, gid, qq);
+    if (deny) {
+      await e.reply(deny);
       return;
     }
 
@@ -368,8 +442,9 @@ export class ZGroupAdminPlugin extends Plugin {
       await e.reply(reject ? "用法：#踢黑 @对方" : "用法：#踢 @对方");
       return;
     }
-    if (ctx.isMaster?.(qq) && ctx.masterLevel?.(e.userId) !== "core") {
-      await e.reply("不能踢主人");
+    const deny = await this.assertCanKick(e, ctx, gid, qq);
+    if (deny) {
+      await e.reply(deny);
       return;
     }
     const r = await ctx.ob11.call(
