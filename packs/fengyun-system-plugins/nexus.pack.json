@@ -58,6 +58,14 @@
       ]
     },
     {
+      "dir": "plugins/z-all-speak",
+      "id": "z.all.speak",
+      "menu": [
+        "#全部发言菜单",
+        "#全部发言"
+      ]
+    },
+    {
       "dir": "plugins/z-group-notice",
       "id": "z.group.notice",
       "menu": [

@@ -1,0 +1,13 @@
+{
+  "id": "z.all.speak",
+  "name": "全部发言",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "priority": 820,
+  "hooks": ["onMessage", "onReady"],
+  "permissions": ["channel.send", "onebot.api"],
+  "category": "standard",
+  "kind": "channel",
+  "adapterScope": "channel",
+  "channels": ["onebot11"]
+}
