@@ -538,6 +538,9 @@ export class OneBot11Bridge {
     if (data.echo != null && (data.status != null || data.retcode != null)) {
       const echo = String(data.echo);
       const pend = this.pending.get(echo);
+      // 只有 get_login_info 的 user_id 才是机器人自己；群成员/陌生人接口也会带 user_id，不能绑身份
+      const isLoginInfo =
+        pend?.action === "get_login_info" || echo.startsWith("nx_login_");
       if (pend) {
         clearTimeout(pend.timer);
         this.pending.delete(echo);
@@ -560,10 +563,12 @@ export class OneBot11Bridge {
           message,
         });
       }
-      const payload = data.data;
-      if (payload && typeof payload === "object" && "user_id" in payload) {
-        const uid = (payload as { user_id?: unknown }).user_id;
-        if (uid != null && String(uid)) this.bindIdentity(ws, String(uid));
+      if (isLoginInfo) {
+        const payload = data.data;
+        if (payload && typeof payload === "object" && "user_id" in payload) {
+          const uid = (payload as { user_id?: unknown }).user_id;
+          if (uid != null && String(uid)) this.bindIdentity(ws, String(uid));
+        }
       }
       return;
     }
@@ -633,6 +638,14 @@ export class OneBot11Bridge {
     if (want) {
       const hit = open.filter((ws) => this.sockMeta.get(ws)?.selfId === want);
       if (hit.length) return [hit[hit.length - 1]];
+      // 指定号没对上时，仍可用同端口或任意已连 WS，避免一次误绑身份就全盘调不通
+      const bot = this.findBotCfg(want);
+      const port = Math.floor(Number(bot?.listenPort) || 0);
+      if (port > 0) {
+        const byPort = open.filter((ws) => this.sockMeta.get(ws)?.listenPort === port);
+        if (byPort.length) return [byPort[byPort.length - 1]];
+      }
+      if (open.length) return [open[open.length - 1]];
       return [];
     }
     const named = open.filter((ws) => this.sockMeta.get(ws)?.selfId);

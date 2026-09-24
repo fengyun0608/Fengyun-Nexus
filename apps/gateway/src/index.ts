@@ -677,6 +677,13 @@ async function bootstrap(): Promise<void> {
       log.info(`QQ ${sid} 已连上。先添加备注，QQ 号会写到那一张卡上`);
       return;
     }
+    const already = String(bots[idx]?.selfId || "").trim();
+    if (already && already !== sid) {
+      log.warn(
+        `${bots[idx]?.label || "未备注"} 已绑定 QQ ${already}，忽略误报 ${sid}（常见于群成员接口回包）`,
+      );
+      return;
+    }
     const label = bots[idx]?.label || "未备注";
     const port = Math.floor(Number(bots[idx]?.listenPort) || listenPort || gatewayPortEarly());
     const token = onebot.tokenFor(port);
