@@ -29,7 +29,7 @@ export class ZMediaParsePlugin extends Plugin {
   manifest = {
     id: PLUGIN_ID,
     name: "影链解析",
-    version: "0.3.4",
+    version: "0.3.5",
     priority: 320,
     category: "utility" as const,
     kind: "framework" as const,
@@ -302,7 +302,8 @@ export class ZMediaParsePlugin extends Plugin {
     }
     this.busy.add(key);
     try {
-      await sayNow(e, ctx, "抖音：视频正在解析…");
+      const maybeNote = /\/note\/|图集|图文/i.test(e.msg);
+      await sayNow(e, ctx, maybeNote ? "抖音：图文正在解析…" : "抖音：正在解析…");
       const resolved = await resolveDouyin(e.msg, {
         cookie: this.cfg.douyinCookie,
         preferSsr: this.cfg.douyinPreferSsr,
@@ -313,15 +314,17 @@ export class ZMediaParsePlugin extends Plugin {
       }
       const d = resolved.data;
       const title = d.desc.replace(/\s+/g, " ").slice(0, 80) || "无标题";
-      await sayNow(e, ctx, `抖音：${title}`);
-
       const isAlbum = Boolean(d.images?.length && !d.videoUrl);
 
       if (isAlbum) {
+        await sayNow(e, ctx, `抖音：${title}`);
+        await sayNow(e, ctx, "抖音：图文正在下载…");
         await sendImages(e, ctx, d.images || []);
         if (d.musicUrl) await sendMusicAsRecord(e, ctx, d.musicUrl);
         return;
       }
+
+      await sayNow(e, ctx, `抖音：${title}`);
 
       if (d.durationSec > 0 && d.durationSec > this.cfg.maxDurationSec) {
         await sayNow(
@@ -332,10 +335,11 @@ export class ZMediaParsePlugin extends Plugin {
         return;
       }
 
-      await sayNow(e, ctx, "视频正在下载…");
+      await sayNow(e, ctx, "抖音：视频正在下载…");
       const dl = await downloadDouyinVideo(d);
       if (!dl.ok) {
         if (d.images?.length) {
+          await sayNow(e, ctx, "抖音：视频失败，改发图文…");
           await sendImages(e, ctx, d.images);
           if (d.musicUrl) await sendMusicAsRecord(e, ctx, d.musicUrl);
           return;
@@ -344,9 +348,6 @@ export class ZMediaParsePlugin extends Plugin {
         return;
       }
       await sendLocalVideo(e, ctx, dl.path, { groupFileOverMb: this.cfg.groupFileOverMb });
-      if (d.images?.length && d.musicUrl) {
-        await sendMusicAsRecord(e, ctx, d.musicUrl);
-      }
     } finally {
       this.busy.delete(key);
     }

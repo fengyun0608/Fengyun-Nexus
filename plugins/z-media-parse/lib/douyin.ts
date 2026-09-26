@@ -132,18 +132,41 @@ function pickVideoUrl(item: Record<string, unknown>): string | undefined {
 }
 
 function pickImages(item: Record<string, unknown>): string[] {
-  const images = item.images;
-  if (!Array.isArray(images)) return [];
+  const bags: unknown[] = [];
+  if (Array.isArray(item.images)) bags.push(...item.images);
+  const post = item.image_post_info as { images?: unknown[] } | undefined;
+  if (Array.isArray(post?.images)) bags.push(...post.images);
+
   const out: string[] = [];
-  for (const im of images) {
-    const list = (im as { url_list?: string[] })?.url_list;
-    if (Array.isArray(list) && list[0]) out.push(String(list[0]));
-    else {
-      const u = firstUrl(im);
-      if (u) out.push(u);
-    }
+  const seen = new Set<string>();
+  for (const im of bags) {
+    if (!im || typeof im !== "object") continue;
+    const o = im as Record<string, unknown>;
+    const candidates = [
+      firstUrl(o),
+      firstUrl(o.display_image),
+      firstUrl(o.owner_watermark_image),
+      firstUrl(o.thumbnail),
+      ...(Array.isArray(o.download_url_list) ? o.download_url_list.map(String) : []),
+      ...(Array.isArray(o.url_list) ? o.url_list.map(String) : []),
+    ].filter(Boolean) as string[];
+    const best = candidates.find((u) => /^https?:\/\//i.test(u));
+    if (!best || seen.has(best)) continue;
+    seen.add(best);
+    out.push(best);
   }
   return out;
+}
+
+/** 图文/图集：只要有 images，就当图文（接口常仍塞一条假 video） */
+function isImagePost(item: Record<string, unknown>, images: string[]): boolean {
+  if (!images.length) return false;
+  const awemeType = Number(item.aweme_type ?? -1);
+  const mediaType = Number(item.media_type ?? -1);
+  if ([2, 68, 150, 151].includes(awemeType) || [2, 4].includes(mediaType)) return true;
+  if (item.image_post_info) return true;
+  if (Array.isArray(item.images) && item.images.length > 0) return true;
+  return false;
 }
 
 function fromAwemeDetail(
@@ -160,12 +183,13 @@ function fromAwemeDetail(
   // 抖音 video.duration 一般是毫秒；9 秒会写成 9000，旧逻辑用 >10000 才除 1000，会把短视频当成几十分钟
   const durationSec =
     rawDuration >= 1000 ? Math.round(rawDuration / 1000) : Math.round(rawDuration);
-  const cover =
-    firstUrl((item.video as { cover?: unknown } | undefined)?.cover) ||
-    firstUrl((item.video as { origin_cover?: unknown } | undefined)?.origin_cover) ||
-    pickImages(item)[0];
   const images = pickImages(item);
-  const videoUrl = pickVideoUrl(item);
+  const album = isImagePost(item, images);
+  const videoUrl = album ? undefined : pickVideoUrl(item);
+  const cover =
+    images[0] ||
+    firstUrl((item.video as { cover?: unknown } | undefined)?.cover) ||
+    firstUrl((item.video as { origin_cover?: unknown } | undefined)?.origin_cover);
   const music = (item.music || {}) as { play_url?: unknown };
   const musicUrl = firstUrl(music.play_url);
   if (!videoUrl && !images.length) return null;
@@ -177,7 +201,7 @@ function fromAwemeDetail(
     videoUrl,
     images: images.length ? images : undefined,
     musicUrl,
-    durationSec: durationSec || 0,
+    durationSec: album ? 0 : durationSec || 0,
     via,
   };
 }
