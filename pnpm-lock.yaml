@@ -223,6 +223,12 @@ importers:
 
   plugins/templates/ts-plugin: {}
 
+  plugins/z-all-speak:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   plugins/z-draw:
     dependencies:
       '@fengyun/browser-shot':
@@ -268,6 +274,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  plugins/z-media-parse:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   plugins/z-menu:
     dependencies:
       '@fengyun/nexus-plugin-sdk':
@@ -281,6 +293,12 @@ importers:
         version: link:../../packages/plugin-sdk
 
   plugins/z-onebot-hi:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/z-proxy-owner-reply:
     dependencies:
       '@fengyun/nexus-plugin-sdk':
         specifier: workspace:*

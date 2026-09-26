@@ -25,6 +25,7 @@ const PLUGINS = [
   "z-group-admin",
   "z-group-notice",
   "z-master",
+  "z-media-parse",
 ];
 const SKIP = new Set(["node_modules", "dist", ".git"]);
 

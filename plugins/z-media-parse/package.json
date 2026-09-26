@@ -1,0 +1,9 @@
+{
+  "name": "@fengyun/z-media-parse",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fengyun/nexus-plugin-sdk": "workspace:*"
+  }
+}
