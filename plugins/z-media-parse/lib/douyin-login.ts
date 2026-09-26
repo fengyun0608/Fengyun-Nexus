@@ -431,8 +431,3 @@ function renderLoginPage(session: LoginSession): string {
 </body>
 </html>`;
 }
-
-/** 兼容旧调用：浏览器登录不产生独立二维码图 */
-export async function saveQrPng(_session: unknown): Promise<string | null> {
-  return null;
-}
