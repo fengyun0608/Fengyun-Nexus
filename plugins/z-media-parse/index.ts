@@ -6,18 +6,30 @@ import {
   type MediaParseCfg,
 } from "./lib/config.js";
 import { isDouyinText, resolveDouyin, downloadDouyinVideo } from "./lib/douyin.js";
-import { startDouyinLoginHub, type DouyinLoginHub } from "./lib/douyin-login.js";
+import {
+  startDouyinLoginHub,
+  type DouyinLoginHub,
+  type LoginSuccessInfo,
+} from "./lib/douyin-login.js";
 import { isKuaishouText, resolveKuaishou, downloadKuaishouVideo } from "./lib/kuaishou.js";
 import { sendImages, sendLocalVideo, sendMusicAsRecord } from "./lib/send.js";
 
 const PLUGIN_ID = "z.media-parse";
+
+type LoginNotifyTarget = {
+  botId?: string;
+  messageType: "group" | "private";
+  groupId?: number;
+  userId: number;
+  ob11: NonNullable<PluginContext["ob11"]>;
+};
 
 /** 抖音 / 快手短链自动解析。指令仅保留 #抖音登录；菜单并入主 #菜单。 */
 export class ZMediaParsePlugin extends Plugin {
   manifest = {
     id: PLUGIN_ID,
     name: "影链解析",
-    version: "0.3.0",
+    version: "0.3.1",
     priority: 320,
     category: "utility" as const,
     kind: "framework" as const,
@@ -107,6 +119,7 @@ export class ZMediaParsePlugin extends Plugin {
   private loginHub: DouyinLoginHub | null = null;
   private loginStarting: Promise<void> | null = null;
   private busy = new Set<string>();
+  private loginNotify: LoginNotifyTarget | null = null;
 
   getConfig() {
     return { ...this.cfg };
@@ -132,6 +145,33 @@ export class ZMediaParsePlugin extends Plugin {
     ];
   }
 
+  private async onLoginSuccess(info: LoginSuccessInfo) {
+    this.cfg = { ...this.cfg, douyinCookie: info.cookie };
+    persistPluginConfig(PLUGIN_ID, { ...this.cfg });
+    const text = `恭喜，「${info.nickname || "抖音账号"}」登录成功。`;
+    const target = this.loginNotify;
+    if (!target?.ob11?.call) return;
+    try {
+      const params =
+        target.messageType === "group" && target.groupId
+          ? {
+              message_type: "group" as const,
+              group_id: target.groupId,
+              message: text,
+            }
+          : {
+              message_type: "private" as const,
+              user_id: target.userId,
+              message: text,
+            };
+      await target.ob11.call("send_msg", params, { botId: target.botId });
+    } catch (e) {
+      console.warn(
+        `[影链解析] 登录成功通知失败：${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
   private async ensureLoginHub(): Promise<void> {
     if (this.loginHub) return;
     if (this.loginStarting) return this.loginStarting;
@@ -139,10 +179,7 @@ export class ZMediaParsePlugin extends Plugin {
       try {
         this.loginHub = await startDouyinLoginHub({
           port: this.cfg.loginPort,
-          onCookie: async (cookie) => {
-            this.cfg = { ...this.cfg, douyinCookie: cookie };
-            persistPluginConfig(PLUGIN_ID, { ...this.cfg });
-          },
+          onSuccess: (info) => this.onLoginSuccess(info),
         });
       } catch (e) {
         this.loginHub = null;
@@ -168,6 +205,27 @@ export class ZMediaParsePlugin extends Plugin {
     await this.ensureLoginHub();
   }
 
+  private captureNotifyTarget(e: NexusEvent, ctx: PluginContext) {
+    if (!ctx.ob11) {
+      this.loginNotify = null;
+      return;
+    }
+    const meta = e.raw.meta || {};
+    const mt =
+      String(meta.messageType || "") === "group" || String(e.chatId).startsWith("group:")
+        ? "group"
+        : "private";
+    const groupId = Number(meta.groupId ?? String(e.chatId).replace(/^group:/, ""));
+    const userId = Number(e.userId);
+    this.loginNotify = {
+      ob11: ctx.ob11,
+      botId: String(meta.botId || meta.selfId || ctx.ob11.selfId?.() || "") || undefined,
+      messageType: mt,
+      groupId: mt === "group" && Number.isFinite(groupId) ? groupId : undefined,
+      userId: Number.isFinite(userId) ? userId : 0,
+    };
+  }
+
   async accept(e: NexusEvent, ctx: PluginContext): Promise<boolean | void> {
     if (this.cfg.enabled === false) return false;
 
@@ -186,7 +244,6 @@ export class ZMediaParsePlugin extends Plugin {
     }
 
     if (!this.cfg.autoResolve) return false;
-    // # 指令留给别的插件；纯链接/分享文案才自动解析
     if (/^\s*#/.test(e.msg)) return false;
 
     if (this.cfg.douyinEnabled && isDouyinText(e.msg)) {
@@ -200,7 +257,7 @@ export class ZMediaParsePlugin extends Plugin {
     return false;
   }
 
-  async douyinLogin(e: NexusEvent, _ctx: PluginContext) {
+  async douyinLogin(e: NexusEvent, ctx: PluginContext) {
     await this.ensureLoginHub();
     if (!this.loginHub) {
       await e.reply(
@@ -208,14 +265,17 @@ export class ZMediaParsePlugin extends Plugin {
       );
       return;
     }
-    // 对齐 douyin-spark：直接弹出真实抖音网页扫码
+    this.captureNotifyTarget(e, ctx);
+
     let tip = "正在弹出本机抖音网页，请用手机 App 扫码登录。";
     try {
       const session = await this.loginHub.startBrowserLogin();
       if (session.status === "error") {
         tip = session.error || tip;
       } else if (session.status === "waiting" || session.status === "launching") {
-        tip = "本机已打开（或正在打开）抖音网页，请扫码；成功后 Cookie 会自动写入。";
+        tip = "本机已打开（或正在打开）抖音网页，请扫码；成功后会在这里通知你。";
+      } else if (session.status === "confirmed") {
+        tip = `恭喜，「${session.nickname || "抖音账号"}」登录成功。`;
       }
     } catch (err) {
       tip = err instanceof Error ? err.message : String(err);
@@ -226,7 +286,6 @@ export class ZMediaParsePlugin extends Plugin {
         tip,
         `状态页：${this.loginHub.localUrl}?auto=1`,
         `局域网：${this.loginHub.lanUrl}?auto=1`,
-        "无桌面环境时：打开状态页，用「粘贴 Cookie」备用。",
       ].join("\n"),
     );
   }
@@ -283,7 +342,6 @@ export class ZMediaParsePlugin extends Plugin {
         return;
       }
       await sendLocalVideo(e, ctx, dl.path, { groupFileOverMb: this.cfg.groupFileOverMb });
-      // 纯视频一般自带音轨；图文滑动才需要单独发 BGM
       if (d.images?.length && d.musicUrl) {
         await sendMusicAsRecord(e, ctx, d.musicUrl);
       }

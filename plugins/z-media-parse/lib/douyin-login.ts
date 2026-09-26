@@ -23,6 +23,7 @@ type LoginSession = {
   id: string;
   status: SessionStatus;
   cookie: string;
+  nickname?: string;
   error?: string;
   createdAt: number;
   mode: "browser" | "paste";
@@ -30,13 +31,16 @@ type LoginSession = {
 
 type PwCookie = { name: string; value: string; domain?: string };
 
+type PageLike = {
+  goto: (url: string, opts?: Record<string, unknown>) => Promise<unknown>;
+  evaluate: <T>(fn: () => T | Promise<T>) => Promise<T>;
+};
+
 type PlaywrightMod = {
   chromium: {
     launch: (opts?: Record<string, unknown>) => Promise<{
       newContext: (opts?: Record<string, unknown>) => Promise<{
-        newPage: () => Promise<{
-          goto: (url: string, opts?: Record<string, unknown>) => Promise<unknown>;
-        }>;
+        newPage: () => Promise<PageLike>;
         cookies: () => Promise<PwCookie[]>;
         storageState: (opts: { path: string }) => Promise<unknown>;
       }>;
@@ -66,11 +70,82 @@ function cookiesToHeader(cookies: PwCookie[]): string {
     if (domain && !/douyin|amemv|snssdk|bytedance/i.test(domain)) continue;
     prefer.set(c.name, c.value);
   }
-  // 若过滤为空则全量（部分环境 domain 形态不同）
   if (!prefer.size) {
     for (const c of cookies) prefer.set(c.name, c.value);
   }
   return [...prefer.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+/** 从已登录页面或接口尽量取昵称 */
+async function resolveNickname(page: PageLike | null, cookieHeader: string): Promise<string> {
+  if (page) {
+    try {
+      const fromDom = await page.evaluate(() => {
+        const pick = (sel: string) =>
+          (document.querySelector(sel)?.textContent || "").replace(/\s+/g, " ").trim();
+        const list = [
+          pick('[data-e2e="user-info"]'),
+          pick('[class*="nickname"]'),
+          pick('[class*="Nickname"]'),
+          pick('button[aria-label*="用户"]'),
+        ].filter(Boolean);
+        for (const t of list) {
+          if (t && t.length >= 1 && t.length <= 40 && !/登录|下载|搜索|首页/.test(t)) return t;
+        }
+        return "";
+      });
+      if (fromDom) return fromDom;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  try {
+    const res = await fetch(
+      "https://www.douyin.com/passport/account/info/v2/?aid=6383&account_sdk_source=sso&sdk_version=2.2.7",
+      {
+        headers: {
+          Cookie: cookieHeader,
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          Referer: "https://www.douyin.com/",
+        },
+        signal: AbortSignal.timeout(12_000),
+      },
+    );
+    const data = (await res.json()) as {
+      data?: { user?: { nickname?: string; name?: string }; account?: { name?: string } };
+    };
+    const name =
+      data?.data?.user?.nickname ||
+      data?.data?.user?.name ||
+      data?.data?.account?.name ||
+      "";
+    if (name) return String(name).trim();
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const res = await fetch(
+      "https://www.douyin.com/aweme/v1/web/user/profile/self/?device_platform=webapp&aid=6383&channel=channel_pc_web&publish_video_strategy_type=2&source=channel_pc_web&personal_center_strategy=1&pc_client_type=1&version_code=170400&version_name=17.4.0&cookie_enabled=true&platform=PC",
+      {
+        headers: {
+          Cookie: cookieHeader,
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          Referer: "https://www.douyin.com/",
+        },
+        signal: AbortSignal.timeout(12_000),
+      },
+    );
+    const data = (await res.json()) as { user?: { nickname?: string } };
+    if (data?.user?.nickname) return String(data.user.nickname).trim();
+  } catch {
+    /* ignore */
+  }
+
+  return "";
 }
 
 async function loadPlaywright(): Promise<PlaywrightMod | null> {
@@ -108,14 +183,21 @@ export type DouyinLoginHub = {
   close: () => Promise<void>;
 };
 
+export type LoginSuccessInfo = {
+  cookie: string;
+  nickname: string;
+  mode: "browser" | "paste";
+};
+
 export async function startDouyinLoginHub(opts: {
   port: number;
-  onCookie: (cookie: string) => void | Promise<void>;
+  onSuccess: (info: LoginSuccessInfo) => void | Promise<void>;
 }): Promise<DouyinLoginHub> {
   let session: LoginSession = {
     id: randomBytes(4).toString("hex"),
     status: "idle",
     cookie: "",
+    nickname: "",
     createdAt: Date.now(),
     mode: "browser",
   };
@@ -126,12 +208,25 @@ export async function startDouyinLoginHub(opts: {
     session = { ...session, ...patch };
   };
 
+  async function finishSuccess(cookie: string, nickname: string, mode: "browser" | "paste") {
+    const name = nickname || "抖音账号";
+    setSession({
+      status: "confirmed",
+      cookie,
+      nickname: name,
+      error: undefined,
+      mode,
+    });
+    await opts.onSuccess({ cookie, nickname: name, mode });
+  }
+
   async function runBrowserLogin(): Promise<void> {
     browserAbort = false;
     setSession({
       id: randomBytes(4).toString("hex"),
       status: "launching",
       cookie: "",
+      nickname: "",
       error: undefined,
       createdAt: Date.now(),
       mode: "browser",
@@ -183,15 +278,14 @@ export async function startDouyinLoginHub(opts: {
           const header = cookiesToHeader(fresh);
           const dir = mediaDataDir();
           mkdirSync(dir, { recursive: true });
-          const statePath = join(dir, "douyin-state.json");
           try {
-            await context.storageState({ path: statePath });
+            await context.storageState({ path: join(dir, "douyin-state.json") });
           } catch {
             /* ignore */
           }
           writeFileSync(join(dir, "douyin.cookie.txt"), header, "utf8");
-          setSession({ status: "confirmed", cookie: header, error: undefined });
-          await opts.onCookie(header);
+          const nickname = await resolveNickname(page, header);
+          await finishSuccess(header, nickname, "browser");
           return;
         }
         await sleep(2000);
@@ -200,7 +294,7 @@ export async function startDouyinLoginHub(opts: {
       if (!browserAbort) {
         setSession({
           status: "expired",
-          error: "5 分钟内未完成扫码，请点「重新打开抖音登录」再试",
+          error: "5 分钟内未完成扫码，请点「打开抖音网页登录」再试",
         });
       }
     } catch (e) {
@@ -266,8 +360,13 @@ export async function startDouyinLoginHub(opts: {
           id: session.id,
           status: session.status,
           error: session.error || "",
+          nickname: session.nickname || "",
           cookieReady: session.status === "confirmed" && Boolean(session.cookie),
           mode: session.mode,
+          message:
+            session.status === "confirmed"
+              ? `恭喜，「${session.nickname || "抖音账号"}」登录成功`
+              : "",
         });
         return;
       }
@@ -295,14 +394,13 @@ export async function startDouyinLoginHub(opts: {
         }
         if (cookie.length < 20) return json(400, { ok: false, message: "Cookie 太短" });
         browserAbort = true;
-        setSession({
-          status: "confirmed",
-          cookie,
-          mode: "paste",
-          error: undefined,
+        const nickname = await resolveNickname(null, cookie);
+        await finishSuccess(cookie, nickname, "paste");
+        json(200, {
+          ok: true,
+          message: `恭喜，「${nickname || "抖音账号"}」登录成功`,
+          nickname: nickname || "抖音账号",
         });
-        await opts.onCookie(cookie);
-        json(200, { ok: true, message: "已保存 Cookie" });
         return;
       }
 
@@ -393,7 +491,7 @@ function renderLoginPage(session: LoginSession): string {
       idle: "点击下方按钮，打开真实抖音网页",
       launching: "正在启动浏览器…",
       waiting: "请在弹出的抖音窗口里扫码并确认",
-      confirmed: "登录成功，可以关闭本页",
+      confirmed: "登录成功",
       expired: "已超时，请重新打开抖音登录",
       error: "出错了，可重试或改用粘贴 Cookie",
     };
@@ -401,10 +499,15 @@ function renderLoginPage(session: LoginSession): string {
       try {
         const r = await fetch("/api/status");
         const j = await r.json();
+        if (j.status === "confirmed") {
+          document.getElementById("st").textContent =
+            j.message || ("恭喜，「" + (j.nickname || "抖音账号") + "」登录成功");
+          document.getElementById("err").textContent = "可以关闭本页了";
+          return;
+        }
         document.getElementById("st").textContent = map[j.status] || j.status;
         document.getElementById("err").textContent = j.error || "";
         document.getElementById("err").className = j.error ? "hint warn" : "hint";
-        if (j.status === "confirmed") return;
       } catch (e) {
         document.getElementById("st").textContent = "状态读取失败";
       }
@@ -424,7 +527,10 @@ function renderLoginPage(session: LoginSession): string {
         body: JSON.stringify({ cookie }),
       });
       const j = await r.json();
-      document.getElementById("st").textContent = j.ok ? "Cookie 已保存，可以关闭本页" : (j.message || "保存失败");
+      document.getElementById("st").textContent = j.ok
+        ? (j.message || "登录成功")
+        : (j.message || "保存失败");
+      if (j.ok) document.getElementById("err").textContent = "可以关闭本页了";
     };
     refresh();
   </script>
