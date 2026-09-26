@@ -96,12 +96,14 @@ const packMeta = {
     { dir: "plugins/z-group-admin", id: "z.group.admin", menu: ["#群管", "#群管菜单"] },
     { dir: "plugins/z-group-notice", id: "z.group.notice", menu: ["#进退群菜单"] },
     { dir: "plugins/z-master", id: "z.master", menu: ["#主人菜单"] },
+    { dir: "plugins/z-media-parse", id: "z.media-parse", menu: ["#抖音登录"] },
   ],
   combos: [
     "主人管理 + 群管：踢禁等指令认通道主人级别",
     "主人管理 + 点赞：主人与普通人不同回复",
     "群管 + 进退群：权限与欢迎语分开，可同装",
     "菜单 + 生图：截图同一套视觉壳",
+    "影链解析：群内抖音/快手短链自动解析；过大改群文件",
   ],
 };
 
@@ -127,13 +129,15 @@ const readme = `# Fengyun Nexus · 系统插件包
 | \`plugins/z-group-admin\` | \`#群管\` \`#群管菜单\` | 踢 / 禁言 / 公告 / 文件 |
 | \`plugins/z-group-notice\` | \`#进退群菜单\` | 进退群通知 |
 | \`plugins/z-master\` | \`#主人菜单\` | 核心 / 新 / 普通主人 |
+| \`plugins/z-media-parse\` | \`#抖音登录\` | 抖音/快手短链自动解析；过大改群文件 |
 
 ## 组合
 
 - 主人 + 群管：踢禁认通道主人
 - 主人 + 点赞：主客不同回复
 - 群管 + 进退群：权限与欢迎分开
-- 框架菜单不收录业务指令；各插件自己出菜单图
+- 框架菜单收录影链说明；影链业务指令仅 \`#抖音登录\`
+- 影链：群内短链自动解析，图文 BGM 发语音条
 
 ## 更新
 
@@ -171,7 +175,7 @@ writeFileSync(
       name: "fengyun-system-plugins",
       version: "0.2.0",
       private: true,
-      description: "Fengyun Nexus 系统插件包（菜单 / 状态 / 生图 / 点赞 / 群管 / 进退群 / 主人）",
+      description: "Fengyun Nexus 系统插件包（菜单 / 状态 / 生图 / 点赞 / 群管 / 进退群 / 主人 / 影链解析）",
       license: "MIT",
     },
     null,

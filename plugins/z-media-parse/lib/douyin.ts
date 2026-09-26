@@ -40,7 +40,9 @@ function loadAbogus(): ((params: string, ua: string) => string) | null {
 const generateABogus = loadAbogus();
 
 export function isDouyinText(text: string): boolean {
-  return /(v|www|live)\.douyin\.com|iesdouyin\.com|webcast\.amemv\.com/i.test(text);
+  return /(?:https?:\/\/)?(?:v|www|m|live)\.douyin\.com|(?:www\.)?iesdouyin\.com|webcast\.amemv\.com/i.test(
+    text,
+  );
 }
 
 export function extractAwemeId(url: string): string | null {

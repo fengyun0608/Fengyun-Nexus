@@ -12,7 +12,7 @@ export type KuaishouResolved = {
 };
 
 export function isKuaishouText(text: string): boolean {
-  return /(v\.)?kuaishou\.com|chenzhongtech\.com/i.test(text);
+  return /(?:https?:\/\/)?(?:v\.|www\.)?kuaishou\.com|chenzhongtech\.com/i.test(text);
 }
 
 function extractPhotoId(url: string): string | null {
