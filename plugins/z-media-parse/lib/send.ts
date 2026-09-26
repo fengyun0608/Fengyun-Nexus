@@ -157,17 +157,34 @@ export async function sendImages(
   }
 }
 
-/** 背景音乐用语音条发送 */
+/** 背景音乐用语音条发送（本地下载后再发，避免直链被拒） */
 export async function sendMusicAsRecord(
   e: NexusEvent,
   ctx: PluginContext,
   musicUrl: string,
 ): Promise<void> {
-  if (!musicUrl || !ctx.ob11?.call) return;
+  if (!musicUrl) {
+    await sayNow(e, ctx, "抖音：未找到背景音乐");
+    return;
+  }
+  if (!ctx.ob11?.call) {
+    await sayNow(e, ctx, "抖音：当前通道发不了语音条");
+    return;
+  }
+
+  await sayNow(e, ctx, "抖音：背景音乐正在发送…");
+
+  // 用移动端 UA 下 BGM（直链对桌面 UA / Referer 常 403）
+  const mobileUa =
+    "Mozilla/5.0 (Linux; Android 5.0; SM-G900P Build/LRX21T) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.25 Mobile Safari/537.36";
   const dl = await downloadToFile(musicUrl, {
     fileName: `bgm-${Date.now()}.mp3`,
-    headers: { Referer: "https://www.douyin.com/" },
-    maxBytes: 8 * 1024 * 1024,
+    headers: {
+      "User-Agent": mobileUa,
+      Referer: "https://www.douyin.com/",
+      Accept: "*/*",
+    },
+    maxBytes: 12 * 1024 * 1024,
   });
   if (!dl.ok) {
     await sayNow(e, ctx, `背景音乐下载失败：${dl.message}`);
@@ -176,25 +193,39 @@ export async function sendMusicAsRecord(
 
   const botId = botIdOf(e, ctx);
   const mt = messageType(e);
+
+  // NapCat：小文件走 base64，大文件再试本地路径 / file URL
   let fileRef = dl.path;
   try {
     const size = statSync(dl.path).size;
-    if (size > 0 && size <= 1_200_000) {
+    if (size > 0 && size <= 2_000_000) {
       fileRef = `base64://${readFileSync(dl.path).toString("base64")}`;
+    } else {
+      fileRef = pathToFileURL(dl.path).href;
     }
   } catch {
     /* keep path */
   }
 
-  const seg = [{ type: "record", data: { file: fileRef } }];
-  const params: Record<string, unknown> =
-    mt === "group"
-      ? { message_type: "group", group_id: groupIdOf(e), message: seg }
-      : { message_type: "private", user_id: userIdOf(e), message: seg };
+  const trySend = async (file: string) => {
+    const seg = [{ type: "record", data: { file } }];
+    const params: Record<string, unknown> =
+      mt === "group"
+        ? { message_type: "group", group_id: groupIdOf(e), message: seg }
+        : { message_type: "private", user_id: userIdOf(e), message: seg };
+    return ctx.ob11!.call("send_msg", params, { botId });
+  };
 
-  const r = await ctx.ob11.call("send_msg", params, { botId });
+  let r = await trySend(fileRef);
+  if (!r.ok && fileRef !== dl.path) {
+    r = await trySend(dl.path);
+  }
   if (!r.ok) {
-    const cq = `[CQ:record,file=${dl.path}]`;
+    const cqFile =
+      fileRef.startsWith("base64://") || fileRef.startsWith("file:")
+        ? fileRef
+        : pathToFileURL(dl.path).href;
+    const cq = `[CQ:record,file=${cqFile}]`;
     const r2 = await ctx.ob11.call(
       "send_msg",
       mt === "group"
@@ -202,7 +233,9 @@ export async function sendMusicAsRecord(
         : { message_type: "private", user_id: userIdOf(e), message: cq },
       { botId },
     );
-    if (!r2.ok) await sayNow(e, ctx, "背景音乐语音条发送失败");
+    if (!r2.ok) {
+      await sayNow(e, ctx, `背景音乐语音条发送失败：${r2.message || r.message || "未知错误"}`);
+    }
   }
 }
 

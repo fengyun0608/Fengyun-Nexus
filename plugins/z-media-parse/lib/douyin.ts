@@ -100,12 +100,47 @@ function isBareDouyinHome(url: string): boolean {
 }
 
 function firstUrl(obj: unknown): string | undefined {
+  if (typeof obj === "string" && /^https?:\/\//i.test(obj)) return obj;
   if (!obj || typeof obj !== "object") return undefined;
   const o = obj as Record<string, unknown>;
   const list = o.url_list;
-  if (Array.isArray(list) && list[0]) return String(list[0]);
-  if (typeof o.uri === "string" && o.uri.startsWith("http")) return o.uri;
+  if (Array.isArray(list) && list[0] && /^https?:\/\//i.test(String(list[0]))) {
+    return String(list[0]);
+  }
+  if (typeof o.uri === "string" && /^https?:\/\//i.test(o.uri)) return o.uri;
   return undefined;
+}
+
+/** 图文 BGM：对齐常见字段 play_url.url_list / uri */
+function pickMusicUrl(item: Record<string, unknown>): string | undefined {
+  const music = item.music;
+  if (!music) return undefined;
+  if (typeof music === "string" && /^https?:\/\//i.test(music)) return music;
+  if (typeof music !== "object") return undefined;
+  const m = music as Record<string, unknown>;
+
+  const fromPlay = (play: unknown): string | undefined => {
+    if (!play) return undefined;
+    if (typeof play === "string" && /^https?:\/\//i.test(play)) return play;
+    if (typeof play !== "object") return undefined;
+    const p = play as Record<string, unknown>;
+    const list = p.url_list;
+    if (Array.isArray(list)) {
+      for (const u of list) {
+        if (typeof u === "string" && /^https?:\/\//i.test(u)) return u;
+      }
+    }
+    if (typeof p.uri === "string" && /^https?:\/\//i.test(p.uri)) return p.uri;
+    return undefined;
+  };
+
+  return (
+    fromPlay(m.play_url) ||
+    fromPlay(m.play_url_lowbr) ||
+    fromPlay(m.download_url) ||
+    fromPlay(m.preview_url) ||
+    firstUrl(m)
+  );
 }
 
 function pickVideoUrl(item: Record<string, unknown>): string | undefined {
@@ -158,12 +193,11 @@ function pickImages(item: Record<string, unknown>): string[] {
   return out;
 }
 
-/** 图文/图集：只要有 images，就当图文（接口常仍塞一条假 video） */
+/** 图文：aweme_type 2/68/150，或明确带 images（接口常仍塞假 video） */
 function isImagePost(item: Record<string, unknown>, images: string[]): boolean {
   if (!images.length) return false;
   const awemeType = Number(item.aweme_type ?? -1);
-  const mediaType = Number(item.media_type ?? -1);
-  if ([2, 68, 150, 151].includes(awemeType) || [2, 4].includes(mediaType)) return true;
+  if ([2, 68, 150].includes(awemeType)) return true;
   if (item.image_post_info) return true;
   if (Array.isArray(item.images) && item.images.length > 0) return true;
   return false;
@@ -190,8 +224,12 @@ function fromAwemeDetail(
     images[0] ||
     firstUrl((item.video as { cover?: unknown } | undefined)?.cover) ||
     firstUrl((item.video as { origin_cover?: unknown } | undefined)?.origin_cover);
-  const music = (item.music || {}) as { play_url?: unknown };
-  const musicUrl = firstUrl(music.play_url);
+  // 原声且音量为 0 时视为无 BGM（图文常见）
+  const albumMusic = item.image_album_music_info as { volume?: number } | undefined;
+  const skipMusic =
+    item.is_use_music === false ||
+    (albumMusic != null && Number(albumMusic.volume) === 0);
+  const musicUrl = skipMusic ? undefined : pickMusicUrl(item);
   if (!videoUrl && !images.length) return null;
   return {
     awemeId,

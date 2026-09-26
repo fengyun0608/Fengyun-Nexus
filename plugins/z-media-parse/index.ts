@@ -29,7 +29,7 @@ export class ZMediaParsePlugin extends Plugin {
   manifest = {
     id: PLUGIN_ID,
     name: "影链解析",
-    version: "0.3.5",
+    version: "0.3.6",
     priority: 320,
     category: "utility" as const,
     kind: "framework" as const,
@@ -320,7 +320,7 @@ export class ZMediaParsePlugin extends Plugin {
         await sayNow(e, ctx, `抖音：${title}`);
         await sayNow(e, ctx, "抖音：图文正在下载…");
         await sendImages(e, ctx, d.images || []);
-        if (d.musicUrl) await sendMusicAsRecord(e, ctx, d.musicUrl);
+        await sendMusicAsRecord(e, ctx, d.musicUrl || "");
         return;
       }
 
@@ -341,7 +341,7 @@ export class ZMediaParsePlugin extends Plugin {
         if (d.images?.length) {
           await sayNow(e, ctx, "抖音：视频失败，改发图文…");
           await sendImages(e, ctx, d.images);
-          if (d.musicUrl) await sendMusicAsRecord(e, ctx, d.musicUrl);
+          await sendMusicAsRecord(e, ctx, d.musicUrl || "");
           return;
         }
         await sayNow(e, ctx, `抖音：${dl.message}`);
