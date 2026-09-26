@@ -19,6 +19,8 @@ export type DouyinResolved = {
   cover?: string;
   videoUrl?: string;
   images?: string[];
+  /** 图文/视频附带 BGM，发语音条用 */
+  musicUrl?: string;
   durationSec: number;
   via: "api" | "ssr";
 };
@@ -117,6 +119,8 @@ function fromAwemeDetail(item: Record<string, unknown>, via: "api" | "ssr"): Dou
     pickImages(item)[0];
   const images = pickImages(item);
   const videoUrl = pickVideoUrl(item);
+  const music = (item.music || {}) as { play_url?: unknown };
+  const musicUrl = firstUrl(music.play_url);
   if (!videoUrl && !images.length) return null;
   return {
     awemeId,
@@ -125,6 +129,7 @@ function fromAwemeDetail(item: Record<string, unknown>, via: "api" | "ssr"): Dou
     cover,
     videoUrl,
     images: images.length ? images : undefined,
+    musicUrl,
     durationSec: durationSec || 0,
     via,
   };

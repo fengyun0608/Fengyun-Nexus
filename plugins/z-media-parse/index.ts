@@ -13,16 +13,16 @@ import {
   type DouyinLoginHub,
 } from "./lib/douyin-login.js";
 import { isKuaishouText, resolveKuaishou, downloadKuaishouVideo } from "./lib/kuaishou.js";
-import { sendImages, sendLocalVideo } from "./lib/send.js";
+import { sendImages, sendLocalVideo, sendMusicAsRecord } from "./lib/send.js";
 
 const PLUGIN_ID = "z.media-parse";
 
-/** 抖音 / 快手链接解析。控制台可开关；抖音支持扫码登录自动写 Cookie；快手走第三方轮询。 */
+/** 抖音 / 快手短链自动解析。指令仅保留 #抖音登录；菜单并入主 #菜单。 */
 export class ZMediaParsePlugin extends Plugin {
   manifest = {
     id: PLUGIN_ID,
     name: "影链解析",
-    version: "0.1.0",
+    version: "0.2.0",
     priority: 320,
     category: "utility" as const,
     kind: "framework" as const,
@@ -31,9 +31,12 @@ export class ZMediaParsePlugin extends Plugin {
   };
 
   rule = [
-    { reg: "^#影链菜单$", fnc: "menu", describe: "影链解析菜单" },
-    { reg: "^#抖音登录$", fnc: "douyinLogin", describe: "打开抖音扫码登录页", permission: "master" as const },
-    { reg: "^#解析\\s*", fnc: "parseCmd", describe: "手动解析链接" },
+    {
+      reg: "^#抖音登录$",
+      fnc: "douyinLogin",
+      describe: "打开抖音扫码/粘贴 Cookie 登录页",
+      permission: "master" as const,
+    },
   ];
 
   configSchema = [
@@ -42,14 +45,14 @@ export class ZMediaParsePlugin extends Plugin {
       label: "总开关",
       type: "boolean" as const,
       default: true,
-      description: "关闭后不解析、不响应指令",
+      description: "关闭后不解析、不响应 #抖音登录",
     },
     {
       key: "autoResolve",
       label: "自动识别链接",
       type: "boolean" as const,
       default: true,
-      description: "群里直接发抖音/快手链接就解析，无需 #解析",
+      description: "群里文案含抖音/快手短链时自动解析发送",
     },
     {
       key: "douyinEnabled",
@@ -68,41 +71,40 @@ export class ZMediaParsePlugin extends Plugin {
       label: "抖音 Cookie",
       type: "textarea" as const,
       default: "",
-      description: "可手填；也可用 #抖音登录 扫码自动写入",
+      description: "可手填；也可用 #抖音登录 扫码或粘贴写入",
     },
     {
       key: "douyinPreferSsr",
       label: "抖音优先分享页兜底",
       type: "boolean" as const,
       default: true,
-      description: "先试分享页，再试官方 Web 接口",
     },
     {
       key: "maxDurationSec",
       label: "最长时长（秒）",
       type: "number" as const,
       default: 480,
-      description: "超过则只发文案不下载视频",
+      description: "超过则只发标题不下载视频",
+    },
+    {
+      key: "groupFileOverMb",
+      label: "改发群文件阈值（MB）",
+      type: "number" as const,
+      default: 15,
+      description: "视频大于该大小直接上传群文件，减轻刷屏与协议压力",
     },
     {
       key: "kuaishouApis",
       label: "快手第三方接口",
       type: "textarea" as const,
       default: DEFAULT_CFG.kuaishouApis,
-      description: "每行一个，URL 里用 {} 占位作品链接，失败自动轮询下一个",
+      description: "每行一个，URL 里用 {} 占位，失败自动轮询",
     },
     {
       key: "loginPort",
       label: "抖音登录页端口",
       type: "number" as const,
       default: 17988,
-      description: "本机打开 http://局域网IP:端口/douyin-login 扫码",
-    },
-    {
-      key: "identifyPrefix",
-      label: "识别前缀",
-      type: "string" as const,
-      default: "识别：",
     },
   ];
 
@@ -149,7 +151,6 @@ export class ZMediaParsePlugin extends Plugin {
         });
       } catch (e) {
         this.loginHub = null;
-        // 端口占用时不挡插件加载
         console.warn(
           `[影链解析] 登录页启动失败：${e instanceof Error ? e.message : String(e)}`,
         );
@@ -190,6 +191,9 @@ export class ZMediaParsePlugin extends Plugin {
     }
 
     if (!this.cfg.autoResolve) return false;
+    // # 指令留给别的插件；纯链接/分享文案才自动解析
+    if (/^\s*#/.test(e.msg)) return false;
+
     if (this.cfg.douyinEnabled && isDouyinText(e.msg)) {
       await this.handleDouyin(e, ctx);
       return true;
@@ -201,53 +205,32 @@ export class ZMediaParsePlugin extends Plugin {
     return false;
   }
 
-  async menu(e: NexusEvent, ctx: PluginContext) {
-    const sections = [
-      {
-        title: "解析",
-        lines: [
-          "直接发抖音 / 快手链接（可关自动识别）",
-          "#解析 + 链接 — 手动触发",
-        ],
-      },
-      {
-        title: "抖音登录",
-        lines: [
-          "#抖音登录 — 输出扫码页链接（主人）",
-          "手机抖音扫码确认后 Cookie 自动写入",
-        ],
-      },
-      {
-        title: "控制台",
-        lines: [
-          "总开关 / 抖音 / 快手 / 自动识别",
-          "快手第三方接口可多行轮询",
-        ],
-      },
-    ];
-    const shot = await ctx.shot.renderMenu({ title: "影链解析", sections });
-    if (!shot.ok) {
-      const lines = sections.flatMap((s) => [s.title, ...s.lines.map((x) => `· ${x}`)]);
-      await e.reply(["影链解析", ...lines].join("\n"));
-      return;
-    }
-    await e.replyImage(pathToFileURL(shot.pngPath).href);
-  }
-
   async douyinLogin(e: NexusEvent, _ctx: PluginContext) {
     await this.ensureLoginHub();
     if (!this.loginHub) {
-      await e.reply(`登录页未启动。请检查端口 ${this.cfg.loginPort} 是否被占用，或在控制台改「抖音登录页端口」后重载插件。`);
+      await e.reply(
+        `登录页未启动。请检查端口 ${this.cfg.loginPort} 是否被占用，或在控制台改「抖音登录页端口」后重载插件。`,
+      );
       return;
     }
-    const session = await this.loginHub.ensureSession();
-    const qrPath = await saveQrPng(session);
+    // 即使二维码接口被风控，也照样给链接（页内可粘贴 Cookie）
+    let qrPath: string | null = null;
+    let tip = "";
+    try {
+      const session = await this.loginHub.ensureSession();
+      qrPath = await saveQrPng(session);
+      if (session.error || !session.qrcodeBase64) {
+        tip = session.error || "扫码暂不可用，请打开链接用粘贴 Cookie";
+      }
+    } catch (err) {
+      tip = err instanceof Error ? err.message : String(err);
+    }
     await e.reply(
       [
-        "抖音扫码登录",
+        "抖音登录",
         `本机：${this.loginHub.localUrl}`,
         `局域网：${this.loginHub.lanUrl}`,
-        "用抖音 App 扫码并确认；成功后 Cookie 会自动写入控制台配置。",
+        tip || "打开链接扫码，或在页内粘贴 Cookie；成功后自动写入配置。",
       ].join("\n"),
     );
     if (qrPath) {
@@ -255,63 +238,62 @@ export class ZMediaParsePlugin extends Plugin {
     }
   }
 
-  async parseCmd(e: NexusEvent, ctx: PluginContext) {
-    if (this.cfg.douyinEnabled && isDouyinText(e.msg)) {
-      await this.handleDouyin(e, ctx);
-      return;
-    }
-    if (this.cfg.kuaishouEnabled && isKuaishouText(e.msg)) {
-      await this.handleKuaishou(e, ctx);
-      return;
-    }
-    await e.reply("请带上抖音或快手链接，例如：#解析 https://v.douyin.com/xxx");
-  }
-
   private lockKey(e: NexusEvent): string {
-    return `${e.channel}:${e.chatId}:${e.userId}`;
+    return `${e.channel}:${e.chatId}`;
   }
 
   private async handleDouyin(e: NexusEvent, ctx: PluginContext) {
     const key = this.lockKey(e);
     if (this.busy.has(key)) {
-      await e.reply("正在解析中，稍等一下");
+      await e.reply("抖音：正在解析中，稍等");
       return;
     }
     this.busy.add(key);
     try {
+      await e.reply("抖音：视频正在解析…");
       const resolved = await resolveDouyin(e.msg, {
         cookie: this.cfg.douyinCookie,
         preferSsr: this.cfg.douyinPreferSsr,
       });
       if (!resolved.ok) {
-        await e.reply(resolved.message);
+        await e.reply(`抖音：${resolved.message}`);
         return;
       }
       const d = resolved.data;
-      const head = `${this.cfg.identifyPrefix}抖音${d.images?.length && !d.videoUrl ? "图集" : ""}，作者：${d.author}\n📝 ${d.desc}\n（${d.via}）`;
+      const title = d.desc.replace(/\s+/g, " ").slice(0, 80) || "无标题";
+      await e.reply(`抖音：${title}`);
 
-      if (d.images?.length && !d.videoUrl) {
-        await sendImages(e, d.images, head);
+      const isAlbum = Boolean(d.images?.length && !d.videoUrl);
+
+      if (isAlbum) {
+        await sendImages(e, d.images || []);
+        if (d.musicUrl) await sendMusicAsRecord(e, ctx, d.musicUrl);
         return;
       }
 
       if (d.durationSec > 0 && d.durationSec > this.cfg.maxDurationSec) {
         await e.reply(
-          `${head}\n时长约 ${(d.durationSec / 60).toFixed(1)} 分钟，超过上限 ${Math.round(this.cfg.maxDurationSec / 60)} 分钟，已跳过下载`,
+          `时长约 ${(d.durationSec / 60).toFixed(1)} 分钟，超过上限，已跳过下载`,
         );
         return;
       }
 
+      await e.reply("视频正在下载…");
       const dl = await downloadDouyinVideo(d);
       if (!dl.ok) {
         if (d.images?.length) {
-          await sendImages(e, d.images, `${head}\n视频下载失败，改发封面/图集`);
+          await sendImages(e, d.images);
+          if (d.musicUrl) await sendMusicAsRecord(e, ctx, d.musicUrl);
           return;
         }
-        await e.reply(`${head}\n${dl.message}`);
+        await e.reply(`抖音：${dl.message}`);
         return;
       }
-      await sendLocalVideo(e, ctx, dl.path, head);
+      await sendLocalVideo(e, ctx, dl.path, { groupFileOverMb: this.cfg.groupFileOverMb });
+      // 纯视频一般自带音轨；图文滑动才需要单独发 BGM
+      if (d.images?.length && d.musicUrl) {
+        await sendMusicAsRecord(e, ctx, d.musicUrl);
+      }
     } finally {
       this.busy.delete(key);
     }
@@ -320,30 +302,33 @@ export class ZMediaParsePlugin extends Plugin {
   private async handleKuaishou(e: NexusEvent, ctx: PluginContext) {
     const key = this.lockKey(e);
     if (this.busy.has(key)) {
-      await e.reply("正在解析中，稍等一下");
+      await e.reply("快手：正在解析中，稍等");
       return;
     }
     this.busy.add(key);
     try {
+      await e.reply("快手：视频正在解析…");
       const resolved = await resolveKuaishou(e.msg, this.cfg);
       if (!resolved.ok) {
-        await e.reply(resolved.message);
+        await e.reply(`快手：${resolved.message}`);
         return;
       }
       const d = resolved.data;
-      const head = `${this.cfg.identifyPrefix}快手，作者：${d.author}\n📝 ${d.title}\n（${d.via}）`;
+      const title = (d.title || "无标题").replace(/\s+/g, " ").slice(0, 80);
+      await e.reply(`快手：${title}`);
 
       if (d.images?.length && !d.videoUrl) {
-        await sendImages(e, d.images, head);
+        await sendImages(e, d.images);
         return;
       }
 
+      await e.reply("视频正在下载…");
       const dl = await downloadKuaishouVideo(d);
       if (!dl.ok) {
-        await e.reply(`${head}\n${dl.message}`);
+        await e.reply(`快手：${dl.message}`);
         return;
       }
-      await sendLocalVideo(e, ctx, dl.path, head);
+      await sendLocalVideo(e, ctx, dl.path, { groupFileOverMb: this.cfg.groupFileOverMb });
     } finally {
       this.busy.delete(key);
     }

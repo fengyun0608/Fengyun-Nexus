@@ -64,13 +64,22 @@ const SECTIONS: Section[] = [
       "#回声菜单 — 专页",
     ],
   },
+  {
+    title: "影链解析",
+    lines: [
+      "群内发抖音 / 快手短链或分享文案 → 自动解析发视频",
+      "过大视频改发群文件（控制台可调阈值）",
+      "图文背景音乐用语音条发送",
+      "#抖音登录 — 主人扫码或粘贴 Cookie（仅此指令）",
+    ],
+  },
 ];
 
 export class ZMenuPlugin extends Plugin {
   manifest = {
     id: "z.menu",
     name: "菜单",
-    version: "0.3.0",
+    version: "0.3.1",
     priority: 10,
     category: "basic" as const,
     kind: "framework" as const,

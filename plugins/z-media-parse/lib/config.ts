@@ -10,9 +10,10 @@ export type MediaParseCfg = {
   douyinCookie: string;
   douyinPreferSsr: boolean;
   maxDurationSec: number;
+  /** 超过该大小（MB）改发群文件，防刷 / 防过大 */
+  groupFileOverMb: number;
   kuaishouApis: string;
   loginPort: number;
-  identifyPrefix: string;
 };
 
 export const DEFAULT_CFG: MediaParseCfg = {
@@ -23,6 +24,7 @@ export const DEFAULT_CFG: MediaParseCfg = {
   douyinCookie: "",
   douyinPreferSsr: true,
   maxDurationSec: 480,
+  groupFileOverMb: 15,
   kuaishouApis: [
     "http://47.99.158.118/video-crack/v2/parse?content={}",
     "https://api.jkyai.top/API/jhspjx.php?url={}",
@@ -30,7 +32,6 @@ export const DEFAULT_CFG: MediaParseCfg = {
     "https://api.bugpk.com/api/pipixia?url={}",
   ].join("\n"),
   loginPort: 17988,
-  identifyPrefix: "识别：",
 };
 
 export function normalizeCfg(raw: Record<string, unknown> | null | undefined): MediaParseCfg {
@@ -43,9 +44,9 @@ export function normalizeCfg(raw: Record<string, unknown> | null | undefined): M
     douyinCookie: String(src.douyinCookie ?? ""),
     douyinPreferSsr: src.douyinPreferSsr !== false,
     maxDurationSec: Math.max(30, Number(src.maxDurationSec) || DEFAULT_CFG.maxDurationSec),
+    groupFileOverMb: Math.max(1, Number(src.groupFileOverMb) || DEFAULT_CFG.groupFileOverMb),
     kuaishouApis: String(src.kuaishouApis ?? DEFAULT_CFG.kuaishouApis),
     loginPort: Math.max(1024, Math.min(65535, Number(src.loginPort) || DEFAULT_CFG.loginPort)),
-    identifyPrefix: String(src.identifyPrefix ?? DEFAULT_CFG.identifyPrefix) || "识别：",
   };
 }
 
@@ -53,7 +54,6 @@ function pluginConfigPath(root = findRepoRoot()): string {
   return join(root, "configs", "plugin-config.local.json");
 }
 
-/** 写入控制台同一份插件配置，重启/热更都能读到 Cookie */
 export function persistPluginConfig(id: string, values: Record<string, unknown>): void {
   const root = findRepoRoot();
   const path = pluginConfigPath(root);
