@@ -1,7 +1,7 @@
 {
   "id": "z.media-parse",
   "name": "影链解析",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "main": "index.ts",
   "priority": 320,
   "hooks": ["onMessage", "onReady"],

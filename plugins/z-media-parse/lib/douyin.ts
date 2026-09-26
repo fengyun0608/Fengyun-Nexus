@@ -154,10 +154,12 @@ function fromAwemeDetail(
   if (!awemeId) return null;
   const author = ((item.author || {}) as { nickname?: string }).nickname || "抖音用户";
   const desc = String(item.desc || "").trim() || "无简介";
-  const durationMs = Number(
+  const rawDuration = Number(
     (item.video as { duration?: number } | undefined)?.duration || item.duration || 0,
   );
-  const durationSec = durationMs > 10_000 ? Math.round(durationMs / 1000) : Math.round(durationMs);
+  // 抖音 video.duration 一般是毫秒；9 秒会写成 9000，旧逻辑用 >10000 才除 1000，会把短视频当成几十分钟
+  const durationSec =
+    rawDuration >= 1000 ? Math.round(rawDuration / 1000) : Math.round(rawDuration);
   const cover =
     firstUrl((item.video as { cover?: unknown } | undefined)?.cover) ||
     firstUrl((item.video as { origin_cover?: unknown } | undefined)?.origin_cover) ||
