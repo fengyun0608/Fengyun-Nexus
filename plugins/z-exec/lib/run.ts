@@ -1,7 +1,7 @@
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { spawn, ensureWorkDir, resolveBin, type ExecLang } from "./env-gate.js";
+import { spawn, ensureWorkDir, findRepoRoot, resolveBin, type ExecLang } from "./env-gate.js";
 
 export type RunResult = {
   ok: boolean;
@@ -20,17 +20,42 @@ function clip(s: string): string {
   return `${t.slice(0, MAX_OUT)}\n…（已截断）`;
 }
 
+function bufToText(b: Buffer | string): string {
+  if (typeof b === "string") return b;
+  return b.toString("utf8");
+}
+
+/** Windows PowerShell：对象需 Out-String，否则管道 stdout 常为空 */
+function encodePowerShell(code: string): string {
+  const codeB64 = Buffer.from(code, "utf8").toString("base64");
+  const script = [
+    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+    "$OutputEncoding = [Console]::OutputEncoding",
+    "$ProgressPreference = 'SilentlyContinue'",
+    "$ErrorActionPreference = 'Continue'",
+    `$__code = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${codeB64}'))`,
+    "$__sb = [scriptblock]::Create($__code)",
+    "try {",
+    "  $__out = & $__sb 2>&1",
+    "  if ($null -eq $__out) { '' } else { ($__out | Out-String -Width 200).TrimEnd() }",
+    "} catch {",
+    "  ($_ | Out-String -Width 200).TrimEnd()",
+    "}",
+  ].join("\n");
+  return Buffer.from(script, "utf16le").toString("base64");
+}
+
 function runProcess(
   bin: string,
   args: string[],
-  opts?: { cwd?: string; timeoutMs?: number },
+  opts?: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv },
 ): Promise<RunResult> {
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return new Promise((resolve) => {
     const child = spawn(bin, args, {
       cwd: opts?.cwd,
       windowsHide: true,
-      env: { ...process.env },
+      env: { ...process.env, PYTHONIOENCODING: "utf-8", ...opts?.env },
       shell: false,
     });
     let stdout = "";
@@ -45,11 +70,11 @@ function runProcess(
       }
     }, timeoutMs);
     child.stdout?.on("data", (b) => {
-      stdout += String(b);
+      stdout += bufToText(b);
       if (stdout.length > MAX_OUT * 2) stdout = stdout.slice(0, MAX_OUT * 2);
     });
     child.stderr?.on("data", (b) => {
-      stderr += String(b);
+      stderr += bufToText(b);
       if (stderr.length > MAX_OUT * 2) stderr = stderr.slice(0, MAX_OUT * 2);
     });
     child.on("error", (err) => {
@@ -79,30 +104,33 @@ function cleanupDir(dir: string) {
 
 export async function runLangCode(lang: ExecLang, code: string): Promise<RunResult> {
   const work = ensureWorkDir();
+  const root = findRepoRoot();
   const id = randomBytes(4).toString("hex");
 
   if (lang === "shell") {
     if (process.platform === "win32") {
       const ps = resolveBin("shell") || "powershell.exe";
       if (/powershell/i.test(ps)) {
-        return runProcess(ps, ["-NoProfile", "-NonInteractive", "-Command", code], { cwd: work });
+        return runProcess(ps, ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(code)], {
+          cwd: root,
+        });
       }
-      return runProcess(ps, ["/d", "/s", "/c", code], { cwd: work });
+      return runProcess(ps, ["/d", "/s", "/c", code], { cwd: root });
     }
     const sh = resolveBin("shell") || "/bin/sh";
-    return runProcess(sh, ["-lc", code], { cwd: work });
+    return runProcess(sh, ["-lc", code], { cwd: root });
   }
 
   if (lang === "python") {
     const py = resolveBin("python");
     if (!py) return { ok: false, code: null, stdout: "", stderr: "找不到 python" };
-    return runProcess(py, ["-c", code], { cwd: work });
+    return runProcess(py, ["-c", code], { cwd: root });
   }
 
   if (lang === "node") {
     const node = resolveBin("node");
     if (!node) return { ok: false, code: null, stdout: "", stderr: "找不到 node" };
-    return runProcess(node, ["-e", code], { cwd: work });
+    return runProcess(node, ["-e", code], { cwd: root });
   }
 
   if (lang === "typescript") {
@@ -129,13 +157,13 @@ export async function runLangCode(lang: ExecLang, code: string): Promise<RunResu
   if (lang === "php") {
     const php = resolveBin("php");
     if (!php) return { ok: false, code: null, stdout: "", stderr: "找不到 php" };
-    return runProcess(php, ["-r", code], { cwd: work });
+    return runProcess(php, ["-r", code], { cwd: root });
   }
 
   if (lang === "ruby") {
     const ruby = resolveBin("ruby");
     if (!ruby) return { ok: false, code: null, stdout: "", stderr: "找不到 ruby" };
-    return runProcess(ruby, ["-e", code], { cwd: work });
+    return runProcess(ruby, ["-e", code], { cwd: root });
   }
 
   if (lang === "go") {

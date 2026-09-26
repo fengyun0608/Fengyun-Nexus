@@ -59,7 +59,7 @@ function which(bin: string): string | null {
   }
 }
 
-function findRepoRoot(): string {
+export function findRepoRoot(): string {
   let d = process.cwd();
   for (let i = 0; i < 8; i++) {
     if (

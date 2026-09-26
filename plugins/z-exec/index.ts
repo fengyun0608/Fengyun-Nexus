@@ -26,7 +26,7 @@ export class ZExecPlugin extends Plugin {
   manifest = {
     id: PLUGIN_ID,
     name: "命令执行",
-    version: "0.1.1",
+    version: "0.1.3",
     priority: 280,
     category: "utility" as const,
     kind: "framework" as const,
@@ -354,6 +354,30 @@ function splitChunks(text: string, size: number): string[] {
   const out: string[] = [];
   for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
   return out;
+}
+
+/** 立即发文字：e.reply 只入队，合并转发会抢先发出去 */
+async function sayNow(e: NexusEvent, ctx: PluginContext, text: string): Promise<void> {
+  if (!ctx.ob11?.call) {
+    await e.reply(text);
+    return;
+  }
+  const botId = String(e.raw.meta?.botId || e.raw.meta?.selfId || "") || undefined;
+  const mt = String(e.raw.meta?.messageType || "");
+  const isGroup = mt === "group" || String(e.chatId).startsWith("group:");
+  const params = isGroup
+    ? {
+        message_type: "group" as const,
+        group_id: Number(e.raw.meta?.groupId ?? String(e.chatId).replace(/^group:/, "")),
+        message: text,
+      }
+    : {
+        message_type: "private" as const,
+        user_id: Number(e.userId),
+        message: text,
+      };
+  const r = await ctx.ob11.call("send_msg", params, { botId });
+  if (!r.ok) await e.reply(text);
 }
 
 export default new ZExecPlugin();
