@@ -2,10 +2,11 @@ import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 import { assertLangReady, LANG_BY_CMD, type ExecLang } from "./lib/env-gate.js";
 import { isDangerous } from "./lib/danger.js";
-import { formatRunResult, runLangCode } from "./lib/run.js";
+import { formatRunResult, runLangCode, type RunResult } from "./lib/run.js";
 
 const PLUGIN_ID = "z.exec";
 const CONFIRM_TTL_MS = 120_000;
+const MAX_NODE_CHARS = 800;
 
 type Pending = {
   msgId: string;
@@ -25,7 +26,7 @@ export class ZExecPlugin extends Plugin {
   manifest = {
     id: PLUGIN_ID,
     name: "命令执行",
-    version: "0.1.0",
+    version: "0.1.1",
     priority: 280,
     category: "utility" as const,
     kind: "framework" as const,
@@ -181,7 +182,7 @@ export class ZExecPlugin extends Plugin {
       return;
     }
 
-    await this.execute(e, gate.meta.lang, gate.meta.label, code);
+    await this.execute(e, ctx, gate.meta.lang, gate.meta.label, code);
   }
 
   private async tryConfirm(e: NexusEvent, ctx: PluginContext): Promise<boolean> {
@@ -249,19 +250,106 @@ export class ZExecPlugin extends Plugin {
     this.pending.delete(e.userId);
     const label = LANG_BY_CMD[pending.cmd]?.label || pending.cmd;
     await e.reply(`已确认，开始执行 ${label}…`);
-    await this.execute(e, pending.lang, label, pending.code);
+    await this.execute(e, ctx, pending.lang, label, pending.code);
     return true;
   }
 
-  private async execute(e: NexusEvent, lang: ExecLang, label: string, code: string) {
+  private async execute(e: NexusEvent, ctx: PluginContext, lang: ExecLang, label: string, code: string) {
     await e.reply(`${label}：执行中…`);
     try {
       const r = await runLangCode(lang, code);
-      await e.reply([`${label}：执行结果`, formatRunResult(r)].join("\n"));
+      const ok = await this.sendResultForward(e, ctx, label, code, r);
+      if (!ok) {
+        await e.reply([`${label}：执行结果`, formatRunResult(r)].join("\n"));
+      }
     } catch (err) {
       await e.reply(`${label}：执行异常 ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  /** 最终结果用合并转发输出（群 / 私聊） */
+  private async sendResultForward(
+    e: NexusEvent,
+    ctx: PluginContext,
+    label: string,
+    code: string,
+    r: RunResult,
+  ): Promise<boolean> {
+    if (!ctx.ob11?.call) return false;
+
+    const botId = String(e.raw.meta?.botId || e.raw.meta?.selfId || "") || undefined;
+    const nickname = "命令执行";
+    const uin = String(e.raw.meta?.selfId || e.raw.meta?.botId || "80000000");
+    const nodes: ReturnType<typeof forwardNode>[] = [];
+
+    nodes.push(
+      forwardNode(
+        nickname,
+        uin,
+        `${label} · 执行结果\n状态：${r.timedOut ? "超时" : r.ok ? "成功" : "失败"}  exit=${r.code ?? "?"}`,
+      ),
+    );
+    nodes.push(
+      forwardNode(nickname, uin, `【指令】\n${code.replace(/\s+/g, " ").slice(0, MAX_NODE_CHARS)}`),
+    );
+
+    if (r.stdout.trim()) {
+      for (const chunk of splitChunks(r.stdout.trim(), MAX_NODE_CHARS)) {
+        nodes.push(forwardNode(nickname, uin, `【stdout】\n${chunk}`));
+      }
+    }
+    if (r.stderr.trim()) {
+      for (const chunk of splitChunks(r.stderr.trim(), MAX_NODE_CHARS)) {
+        nodes.push(forwardNode(nickname, uin, `【stderr】\n${chunk}`));
+      }
+    }
+    if (!r.stdout.trim() && !r.stderr.trim()) {
+      nodes.push(forwardNode(nickname, uin, "（无输出）"));
+    }
+
+    const mt = String(e.raw.meta?.messageType || "");
+    const isGroup = mt === "group" || String(e.chatId).startsWith("group:");
+    if (isGroup) {
+      const gid = Number(e.raw.meta?.groupId ?? String(e.chatId).replace(/^group:/, ""));
+      if (!Number.isFinite(gid) || gid <= 0) return false;
+      const res = await ctx.ob11.call(
+        "send_group_forward_msg",
+        { group_id: gid, messages: nodes },
+        { botId },
+      );
+      return Boolean(res.ok);
+    }
+
+    const uid = Number(e.userId);
+    if (!Number.isFinite(uid) || uid <= 0) return false;
+    const res = await ctx.ob11.call(
+      "send_private_forward_msg",
+      { user_id: uid, messages: nodes },
+      { botId },
+    );
+    return Boolean(res.ok);
+  }
+}
+
+function forwardNode(name: string, uin: string, text: string) {
+  const uinNum = Number(uin) || 80000000;
+  return {
+    type: "node",
+    data: {
+      name,
+      uin: String(uinNum),
+      user_id: uinNum,
+      nickname: name,
+      content: [{ type: "text", data: { text } }],
+    },
+  };
+}
+
+function splitChunks(text: string, size: number): string[] {
+  if (text.length <= size) return [text];
+  const out: string[] = [];
+  for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
+  return out;
 }
 
 export default new ZExecPlugin();
