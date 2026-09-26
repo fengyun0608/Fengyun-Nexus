@@ -8,8 +8,7 @@ import { networkInterfaces } from "node:os";
 import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { findRepoRoot, mediaDataDir } from "./paths.js";
 
 type SessionStatus =
