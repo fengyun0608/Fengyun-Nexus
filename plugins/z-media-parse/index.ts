@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 import {
   DEFAULT_CFG,
@@ -7,11 +6,7 @@ import {
   type MediaParseCfg,
 } from "./lib/config.js";
 import { isDouyinText, resolveDouyin, downloadDouyinVideo } from "./lib/douyin.js";
-import {
-  startDouyinLoginHub,
-  saveQrPng,
-  type DouyinLoginHub,
-} from "./lib/douyin-login.js";
+import { startDouyinLoginHub, type DouyinLoginHub } from "./lib/douyin-login.js";
 import { isKuaishouText, resolveKuaishou, downloadKuaishouVideo } from "./lib/kuaishou.js";
 import { sendImages, sendLocalVideo, sendMusicAsRecord } from "./lib/send.js";
 
@@ -22,7 +17,7 @@ export class ZMediaParsePlugin extends Plugin {
   manifest = {
     id: PLUGIN_ID,
     name: "影链解析",
-    version: "0.2.0",
+    version: "0.3.0",
     priority: 320,
     category: "utility" as const,
     kind: "framework" as const,
@@ -71,7 +66,7 @@ export class ZMediaParsePlugin extends Plugin {
       label: "抖音 Cookie",
       type: "textarea" as const,
       default: "",
-      description: "可手填；也可用 #抖音登录 扫码或粘贴写入",
+      description: "可手填；也可用 #抖音登录 弹出真实抖音网页扫码写入",
     },
     {
       key: "douyinPreferSsr",
@@ -213,14 +208,14 @@ export class ZMediaParsePlugin extends Plugin {
       );
       return;
     }
-    // 即使二维码接口被风控，也照样给链接（页内可粘贴 Cookie）
-    let qrPath: string | null = null;
-    let tip = "";
+    // 对齐 douyin-spark：直接弹出真实抖音网页扫码
+    let tip = "正在弹出本机抖音网页，请用手机 App 扫码登录。";
     try {
-      const session = await this.loginHub.ensureSession();
-      qrPath = await saveQrPng(session);
-      if (session.error || !session.qrcodeBase64) {
-        tip = session.error || "扫码暂不可用，请打开链接用粘贴 Cookie";
+      const session = await this.loginHub.startBrowserLogin();
+      if (session.status === "error") {
+        tip = session.error || tip;
+      } else if (session.status === "waiting" || session.status === "launching") {
+        tip = "本机已打开（或正在打开）抖音网页，请扫码；成功后 Cookie 会自动写入。";
       }
     } catch (err) {
       tip = err instanceof Error ? err.message : String(err);
@@ -228,14 +223,12 @@ export class ZMediaParsePlugin extends Plugin {
     await e.reply(
       [
         "抖音登录",
-        `本机：${this.loginHub.localUrl}`,
-        `局域网：${this.loginHub.lanUrl}`,
-        tip || "打开链接扫码，或在页内粘贴 Cookie；成功后自动写入配置。",
+        tip,
+        `状态页：${this.loginHub.localUrl}?auto=1`,
+        `局域网：${this.loginHub.lanUrl}?auto=1`,
+        "无桌面环境时：打开状态页，用「粘贴 Cookie」备用。",
       ].join("\n"),
     );
-    if (qrPath) {
-      await e.replyImage(pathToFileURL(qrPath).href);
-    }
   }
 
   private lockKey(e: NexusEvent): string {
