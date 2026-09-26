@@ -29,7 +29,7 @@ export class ZMediaParsePlugin extends Plugin {
   manifest = {
     id: PLUGIN_ID,
     name: "影链解析",
-    version: "0.3.1",
+    version: "0.3.2",
     priority: 320,
     category: "utility" as const,
     kind: "framework" as const,
