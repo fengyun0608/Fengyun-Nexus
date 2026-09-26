@@ -16,7 +16,17 @@ import { installSherpaVoice } from "./desktop-pet-voice-setup.js";
 
 const requireFrom = createRequire(import.meta.url);
 
-export type EnvRuntimeId = "go" | "python" | "browser" | "napcat" | "desktop-pet";
+export type EnvRuntimeId =
+  | "go"
+  | "python"
+  | "browser"
+  | "napcat"
+  | "desktop-pet"
+  | "node"
+  | "shell"
+  | "rust"
+  | "php"
+  | "ruby";
 export type EnvTaskStatus = "pending" | "running" | "paused" | "done" | "failed" | "cancelled";
 
 export type EnvRuntimeDef = {
@@ -60,6 +70,46 @@ const runtimes: EnvRuntimeDef[] = [
     versions: ["3.12.4", "3.11.9", "3.10.14"],
     modes: ["compile", "binary"],
     installed: false,
+  },
+  {
+    id: "node",
+    label: "Node.js",
+    versions: ["system"],
+    modes: ["binary"],
+    installed: false,
+    hint: "给 #js / #node / #ts 用；本机有 node 即可",
+  },
+  {
+    id: "shell",
+    label: "Shell",
+    versions: ["system"],
+    modes: ["binary"],
+    installed: false,
+    hint: "给 #sh / #cmd / #ps 用；跟随本机命令行",
+  },
+  {
+    id: "rust",
+    label: "Rust",
+    versions: ["system"],
+    modes: ["binary"],
+    installed: false,
+    hint: "给 #rs / #rust 用；需本机 rustc（可先装 rustup）",
+  },
+  {
+    id: "php",
+    label: "PHP",
+    versions: ["system"],
+    modes: ["binary"],
+    installed: false,
+    hint: "给 #php 用；需本机 php",
+  },
+  {
+    id: "ruby",
+    label: "Ruby",
+    versions: ["system"],
+    modes: ["binary"],
+    installed: false,
+    hint: "给 #rb / #ruby 用；需本机 ruby",
   },
   {
     id: "browser",
@@ -216,6 +266,79 @@ function refreshInstalledFlags(): void {
       }
       continue;
     }
+    if (rt.id === "node") {
+      const node = which("node.exe") || which("node") || process.execPath;
+      if (node) {
+        rt.installed = true;
+        try {
+          rt.activeVersion = execSync(`"${node}" -v`, {
+            encoding: "utf8",
+            timeout: 8_000,
+            windowsHide: true,
+          }).trim();
+        } catch {
+          rt.activeVersion = "system";
+        }
+      }
+      continue;
+    }
+    if (rt.id === "shell") {
+      const sh =
+        process.platform === "win32"
+          ? which("powershell.exe") || which("cmd.exe") || "cmd"
+          : which("bash") || which("sh") || "/bin/sh";
+      if (sh) {
+        rt.installed = true;
+        rt.activeVersion = process.platform === "win32" ? "windows" : "posix";
+      }
+      continue;
+    }
+    if (rt.id === "rust" && which("rustc")) {
+      rt.installed = true;
+      try {
+        rt.activeVersion = execSync("rustc --version", {
+          encoding: "utf8",
+          timeout: 8_000,
+          windowsHide: true,
+        })
+          .trim()
+          .slice(0, 48);
+      } catch {
+        rt.activeVersion = "system";
+      }
+      continue;
+    }
+    if (rt.id === "php" && which("php")) {
+      rt.installed = true;
+      try {
+        rt.activeVersion = execSync("php -v", {
+          encoding: "utf8",
+          timeout: 8_000,
+          windowsHide: true,
+        })
+          .trim()
+          .split(/\r?\n/)[0]
+          ?.slice(0, 48);
+      } catch {
+        rt.activeVersion = "system";
+      }
+      continue;
+    }
+    if (rt.id === "ruby" && which("ruby")) {
+      rt.installed = true;
+      try {
+        rt.activeVersion = execSync("ruby -v", {
+          encoding: "utf8",
+          timeout: 8_000,
+          windowsHide: true,
+        })
+          .trim()
+          .slice(0, 48);
+      } catch {
+        rt.activeVersion = "system";
+      }
+      continue;
+    }
     if (rt.id === "browser") {
       const chrome =
         which("chromium") ||
@@ -321,6 +444,13 @@ export function listRuntimes(): EnvRuntimeDef[] {
   return runtimes.map((r) => ({ ...r }));
 }
 
+/** 插件 / 工具查询某运行时是否已就绪（与环境配置页一致） */
+export function isRuntimeInstalled(id: string): boolean {
+  refreshInstalledFlags();
+  const rt = runtimes.find((r) => r.id === id);
+  return Boolean(rt?.installed);
+}
+
 export function listTasks(): EnvTask[] {
   return [...tasks].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
@@ -406,8 +536,11 @@ export function autoQueueMissing(): { queued: EnvTask[]; skipped: string[] } {
   refreshInstalledFlags();
   const queued: EnvTask[] = [];
   const skipped: string[] = [];
+  // 一键队列只拉核心：go / python / browser / node / shell
+  // rust/php/ruby 需本机先装好再手动点登记，避免自动排队失败刷屏
+  const autoIds = new Set(["go", "python", "browser", "node", "shell"]);
   for (const rt of runtimes) {
-    if (rt.id === "napcat" || rt.id === "desktop-pet") {
+    if (rt.id === "napcat" || rt.id === "desktop-pet" || !autoIds.has(rt.id)) {
       skipped.push(rt.id);
       continue;
     }
@@ -650,7 +783,47 @@ async function executeInstall(task: EnvTask, signal?: AbortSignal): Promise<void
     await installDesktopPetTask(task);
     return;
   }
+  if (
+    task.runtime === "node" ||
+    task.runtime === "shell" ||
+    task.runtime === "rust" ||
+    task.runtime === "php" ||
+    task.runtime === "ruby"
+  ) {
+    await installDetectOnly(task);
+    return;
+  }
   throw new Error("未知运行时");
+}
+
+async function installDetectOnly(task: EnvTask): Promise<void> {
+  setProgress(task, 20);
+  appendLog(task, `检测本机是否已有 ${task.runtime}`);
+  refreshInstalledFlags();
+  const rt = runtimes.find((r) => r.id === task.runtime);
+  if (!rt?.installed) {
+    const tip: Record<string, string> = {
+      node: "请先安装 Node.js，或确认 PATH 里有 node",
+      shell: "本机命令行不可用",
+      rust: "请先安装 Rust（rustup）后再点安装登记",
+      php: "请先安装 PHP 后再点安装登记",
+      ruby: "请先安装 Ruby 后再点安装登记",
+    };
+    throw new Error(tip[task.runtime] || "本机未检测到该语言");
+  }
+  setProgress(task, 70);
+  appendLog(task, `已检测到：${rt.activeVersion || "system"}`);
+  writeFileSync(
+    markerPath(task.runtime),
+    JSON.stringify(
+      { version: rt.activeVersion || "system", at: now(), source: "detect" },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+  setProgress(task, 95);
+  appendLog(task, "已登记到环境配置，可在 #py / #sh 等指令里调用");
 }
 
 async function installDesktopPetTask(task: EnvTask): Promise<void> {

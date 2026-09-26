@@ -13,7 +13,7 @@ import {
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 
-type EnvRuntimeId = "go" | "python" | "browser" | "napcat" | "desktop-pet";
+type EnvRuntimeId = string;
 type EnvRuntimeDef = {
   id: EnvRuntimeId;
   label: string;

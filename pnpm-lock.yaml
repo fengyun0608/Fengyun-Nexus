@@ -244,6 +244,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  plugins/z-exec:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   plugins/z-goodnight:
     dependencies:
       '@fengyun/nexus-plugin-sdk':

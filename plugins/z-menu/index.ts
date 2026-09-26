@@ -73,6 +73,16 @@ const SECTIONS: Section[] = [
       "#抖音登录 — 弹出真实抖音网页扫码（对齐续火花助手）",
     ],
   },
+  {
+    title: "命令执行",
+    lines: [
+      "#py 代码 — Python（需环境就绪）",
+      "#sh 命令 — Shell / #cmd / #ps",
+      "#js / #go / #ts / #rs / #php / #rb",
+      "危险指令：引用自己的原消息回复「确认」",
+      "#执行菜单 — 专页",
+    ],
+  },
 ];
 
 export class ZMenuPlugin extends Plugin {

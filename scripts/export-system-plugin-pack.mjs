@@ -26,6 +26,7 @@ const PLUGINS = [
   "z-group-notice",
   "z-master",
   "z-media-parse",
+  "z-exec",
 ];
 const SKIP = new Set(["node_modules", "dist", ".git"]);
 
@@ -97,6 +98,7 @@ const packMeta = {
     { dir: "plugins/z-group-notice", id: "z.group.notice", menu: ["#进退群菜单"] },
     { dir: "plugins/z-master", id: "z.master", menu: ["#主人菜单"] },
     { dir: "plugins/z-media-parse", id: "z.media-parse", menu: ["#抖音登录"] },
+    { dir: "plugins/z-exec", id: "z.exec", menu: ["#执行菜单", "#py", "#sh"] },
   ],
   combos: [
     "主人管理 + 群管：踢禁等指令认通道主人级别",
@@ -104,6 +106,7 @@ const packMeta = {
     "群管 + 进退群：权限与欢迎语分开，可同装",
     "菜单 + 生图：截图同一套视觉壳",
     "影链解析：群内抖音/快手短链自动解析；过大改群文件",
+    "命令执行：主人 #py/#sh，环境配置就绪后才可调用",
   ],
 };
 
@@ -130,12 +133,14 @@ const readme = `# Fengyun Nexus · 系统插件包
 | \`plugins/z-group-notice\` | \`#进退群菜单\` | 进退群通知 |
 | \`plugins/z-master\` | \`#主人菜单\` | 核心 / 新 / 普通主人 |
 | \`plugins/z-media-parse\` | \`#抖音登录\` | 抖音/快手短链自动解析；过大改群文件 |
+| \`plugins/z-exec\` | \`#执行菜单\` \`#py\` \`#sh\` | 主人执行多语言命令；危险二次确认 |
 
 ## 组合
 
 - 主人 + 群管：踢禁认通道主人
 - 主人 + 点赞：主客不同回复
 - 群管 + 进退群：权限与欢迎分开
+- 命令执行：环境配置登记语言后，主人可用 #py / #sh 等
 - 框架菜单收录影链说明；影链业务指令仅 \`#抖音登录\`
 - 影链：群内短链自动解析，图文 BGM 发语音条
 
