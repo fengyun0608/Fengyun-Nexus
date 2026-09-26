@@ -27,6 +27,29 @@ function botIdOf(e: NexusEvent, ctx: PluginContext): string | undefined {
   return ctx.ob11?.selfId?.() || undefined;
 }
 
+/**
+ * 立即发文字。不要用 e.reply 做进度提示：
+ * e.reply 只入队，等插件整段跑完才由网关刷出；而视频走 ob11 会马上发，顺序会颠倒。
+ */
+export async function sayNow(
+  e: NexusEvent,
+  ctx: PluginContext,
+  text: string,
+): Promise<void> {
+  if (!ctx.ob11?.call) {
+    await e.reply(text);
+    return;
+  }
+  const botId = botIdOf(e, ctx);
+  const mt = messageType(e);
+  const params =
+    mt === "group"
+      ? { message_type: "group" as const, group_id: groupIdOf(e), message: text }
+      : { message_type: "private" as const, user_id: userIdOf(e), message: text };
+  const r = await ctx.ob11.call("send_msg", params, { botId });
+  if (!r.ok) await e.reply(text);
+}
+
 async function uploadGroupFile(
   e: NexusEvent,
   ctx: PluginContext,
@@ -55,7 +78,7 @@ export async function sendLocalVideo(
   opts?: { groupFileOverMb?: number },
 ): Promise<{ ok: boolean; message: string }> {
   if (!ctx.ob11?.call) {
-    await e.reply(`已解析到视频，但当前通道不支持直发。文件：${filePath}`);
+    await sayNow(e, ctx, `已解析到视频，但当前通道不支持直发。文件：${filePath}`);
     return { ok: false, message: "无 OneBot" };
   }
 
@@ -67,17 +90,17 @@ export async function sendLocalVideo(
   try {
     size = statSync(filePath).size;
   } catch {
-    await e.reply("视频文件不存在");
+    await sayNow(e, ctx, "视频文件不存在");
     return { ok: false, message: "文件不存在" };
   }
 
   if (mt === "group" && size > limitBytes) {
     const ok = await uploadGroupFile(e, ctx, filePath, botId);
     if (ok) {
-      await e.reply(`视频约 ${(size / 1024 / 1024).toFixed(1)}MB，已改发群文件`);
+      await sayNow(e, ctx, `视频约 ${(size / 1024 / 1024).toFixed(1)}MB，已改发群文件`);
       return { ok: true, message: "已发群文件" };
     }
-    await e.reply("视频过大且群文件上传失败");
+    await sayNow(e, ctx, "视频过大且群文件上传失败");
     return { ok: false, message: "群文件失败" };
   }
 
@@ -98,22 +121,39 @@ export async function sendLocalVideo(
   if (mt === "group") {
     const ok = await uploadGroupFile(e, ctx, filePath, botId);
     if (ok) {
-      await e.reply("视频发送失败，已改发群文件");
+      await sayNow(e, ctx, "视频发送失败，已改发群文件");
       return { ok: true, message: "已发群文件" };
     }
   }
 
-  await e.reply(`视频发送失败：${r.message || "未知错误"}`);
+  await sayNow(e, ctx, `视频发送失败：${r.message || "未知错误"}`);
   return { ok: false, message: r.message || "发送失败" };
 }
 
-export async function sendImages(e: NexusEvent, urls: string[]): Promise<void> {
+export async function sendImages(
+  e: NexusEvent,
+  ctx: PluginContext,
+  urls: string[],
+): Promise<void> {
   const max = Math.min(urls.length, 12);
+  if (!ctx.ob11?.call) {
+    for (let i = 0; i < max; i++) await e.replyImage(urls[i]);
+    if (urls.length > max) await e.reply(`还有 ${urls.length - max} 张图未发完（已截断）`);
+    return;
+  }
+  const botId = botIdOf(e, ctx);
+  const mt = messageType(e);
   for (let i = 0; i < max; i++) {
-    await e.replyImage(urls[i]);
+    const seg = [{ type: "image", data: { file: urls[i] } }];
+    const params: Record<string, unknown> =
+      mt === "group"
+        ? { message_type: "group", group_id: groupIdOf(e), message: seg }
+        : { message_type: "private", user_id: userIdOf(e), message: seg };
+    const r = await ctx.ob11.call("send_msg", params, { botId });
+    if (!r.ok) await e.replyImage(urls[i]);
   }
   if (urls.length > max) {
-    await e.reply(`还有 ${urls.length - max} 张图未发完（已截断）`);
+    await sayNow(e, ctx, `还有 ${urls.length - max} 张图未发完（已截断）`);
   }
 }
 
@@ -130,7 +170,7 @@ export async function sendMusicAsRecord(
     maxBytes: 8 * 1024 * 1024,
   });
   if (!dl.ok) {
-    await e.reply(`背景音乐下载失败：${dl.message}`);
+    await sayNow(e, ctx, `背景音乐下载失败：${dl.message}`);
     return;
   }
 
@@ -154,7 +194,6 @@ export async function sendMusicAsRecord(
 
   const r = await ctx.ob11.call("send_msg", params, { botId });
   if (!r.ok) {
-    // 兜底 CQ
     const cq = `[CQ:record,file=${dl.path}]`;
     const r2 = await ctx.ob11.call(
       "send_msg",
@@ -163,7 +202,7 @@ export async function sendMusicAsRecord(
         : { message_type: "private", user_id: userIdOf(e), message: cq },
       { botId },
     );
-    if (!r2.ok) await e.reply("背景音乐语音条发送失败");
+    if (!r2.ok) await sayNow(e, ctx, "背景音乐语音条发送失败");
   }
 }
 

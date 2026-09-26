@@ -12,7 +12,7 @@ import {
   type LoginSuccessInfo,
 } from "./lib/douyin-login.js";
 import { isKuaishouText, resolveKuaishou, downloadKuaishouVideo } from "./lib/kuaishou.js";
-import { sendImages, sendLocalVideo, sendMusicAsRecord } from "./lib/send.js";
+import { sendImages, sendLocalVideo, sendMusicAsRecord, sayNow } from "./lib/send.js";
 
 const PLUGIN_ID = "z.media-parse";
 
@@ -29,7 +29,7 @@ export class ZMediaParsePlugin extends Plugin {
   manifest = {
     id: PLUGIN_ID,
     name: "影链解析",
-    version: "0.3.3",
+    version: "0.3.4",
     priority: 320,
     category: "utility" as const,
     kind: "framework" as const,
@@ -297,48 +297,50 @@ export class ZMediaParsePlugin extends Plugin {
   private async handleDouyin(e: NexusEvent, ctx: PluginContext) {
     const key = this.lockKey(e);
     if (this.busy.has(key)) {
-      await e.reply("抖音：正在解析中，稍等");
+      await sayNow(e, ctx, "抖音：正在解析中，稍等");
       return;
     }
     this.busy.add(key);
     try {
-      await e.reply("抖音：视频正在解析…");
+      await sayNow(e, ctx, "抖音：视频正在解析…");
       const resolved = await resolveDouyin(e.msg, {
         cookie: this.cfg.douyinCookie,
         preferSsr: this.cfg.douyinPreferSsr,
       });
       if (!resolved.ok) {
-        await e.reply(`抖音：${resolved.message}`);
+        await sayNow(e, ctx, `抖音：${resolved.message}`);
         return;
       }
       const d = resolved.data;
       const title = d.desc.replace(/\s+/g, " ").slice(0, 80) || "无标题";
-      await e.reply(`抖音：${title}`);
+      await sayNow(e, ctx, `抖音：${title}`);
 
       const isAlbum = Boolean(d.images?.length && !d.videoUrl);
 
       if (isAlbum) {
-        await sendImages(e, d.images || []);
+        await sendImages(e, ctx, d.images || []);
         if (d.musicUrl) await sendMusicAsRecord(e, ctx, d.musicUrl);
         return;
       }
 
       if (d.durationSec > 0 && d.durationSec > this.cfg.maxDurationSec) {
-        await e.reply(
+        await sayNow(
+          e,
+          ctx,
           `时长约 ${(d.durationSec / 60).toFixed(1)} 分钟，超过上限，已跳过下载`,
         );
         return;
       }
 
-      await e.reply("视频正在下载…");
+      await sayNow(e, ctx, "视频正在下载…");
       const dl = await downloadDouyinVideo(d);
       if (!dl.ok) {
         if (d.images?.length) {
-          await sendImages(e, d.images);
+          await sendImages(e, ctx, d.images);
           if (d.musicUrl) await sendMusicAsRecord(e, ctx, d.musicUrl);
           return;
         }
-        await e.reply(`抖音：${dl.message}`);
+        await sayNow(e, ctx, `抖音：${dl.message}`);
         return;
       }
       await sendLocalVideo(e, ctx, dl.path, { groupFileOverMb: this.cfg.groupFileOverMb });
@@ -353,30 +355,30 @@ export class ZMediaParsePlugin extends Plugin {
   private async handleKuaishou(e: NexusEvent, ctx: PluginContext) {
     const key = this.lockKey(e);
     if (this.busy.has(key)) {
-      await e.reply("快手：正在解析中，稍等");
+      await sayNow(e, ctx, "快手：正在解析中，稍等");
       return;
     }
     this.busy.add(key);
     try {
-      await e.reply("快手：视频正在解析…");
+      await sayNow(e, ctx, "快手：视频正在解析…");
       const resolved = await resolveKuaishou(e.msg, this.cfg);
       if (!resolved.ok) {
-        await e.reply(`快手：${resolved.message}`);
+        await sayNow(e, ctx, `快手：${resolved.message}`);
         return;
       }
       const d = resolved.data;
       const title = (d.title || "无标题").replace(/\s+/g, " ").slice(0, 80);
-      await e.reply(`快手：${title}`);
+      await sayNow(e, ctx, `快手：${title}`);
 
       if (d.images?.length && !d.videoUrl) {
-        await sendImages(e, d.images);
+        await sendImages(e, ctx, d.images);
         return;
       }
 
-      await e.reply("视频正在下载…");
+      await sayNow(e, ctx, "视频正在下载…");
       const dl = await downloadKuaishouVideo(d);
       if (!dl.ok) {
-        await e.reply(`快手：${dl.message}`);
+        await sayNow(e, ctx, `快手：${dl.message}`);
         return;
       }
       await sendLocalVideo(e, ctx, dl.path, { groupFileOverMb: this.cfg.groupFileOverMb });
