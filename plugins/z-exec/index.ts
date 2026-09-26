@@ -249,21 +249,25 @@ export class ZExecPlugin extends Plugin {
 
     this.pending.delete(e.userId);
     const label = LANG_BY_CMD[pending.cmd]?.label || pending.cmd;
-    await e.reply(`已确认，开始执行 ${label}…`);
+    await sayNow(e, ctx, `已确认，开始执行 ${label}…`);
     await this.execute(e, ctx, pending.lang, label, pending.code);
     return true;
   }
 
   private async execute(e: NexusEvent, ctx: PluginContext, lang: ExecLang, label: string, code: string) {
-    await e.reply(`${label}：执行中…`);
+    await sayNow(e, ctx, `${label}：执行中…`);
     try {
       const r = await runLangCode(lang, code);
       const ok = await this.sendResultForward(e, ctx, label, code, r);
       if (!ok) {
-        await e.reply([`${label}：执行结果`, formatRunResult(r)].join("\n"));
+        await sayNow(e, ctx, [`${label}：执行结果`, formatRunResult(r)].join("\n"));
       }
     } catch (err) {
-      await e.reply(`${label}：执行异常 ${err instanceof Error ? err.message : String(err)}`);
+      await sayNow(
+        e,
+        ctx,
+        `${label}：执行异常 ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 

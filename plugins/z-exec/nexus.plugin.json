@@ -1,7 +1,7 @@
 {
   "id": "z.exec",
   "name": "命令执行",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "main": "index.ts",
   "kind": "framework",
   "adapterScope": "all"
