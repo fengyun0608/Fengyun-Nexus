@@ -11,6 +11,14 @@ export type RunResult = {
   timedOut?: boolean;
 };
 
+export type RunOptions = {
+  cwd?: string;
+  timeoutMs?: number;
+  env?: NodeJS.ProcessEnv;
+  /** 进程有新输出时回调（未截断的增量），用于边跑边推 */
+  onChunk?: (chunk: string, stream: "stdout" | "stderr") => void;
+};
+
 const MAX_OUT = 3500;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -25,7 +33,10 @@ function bufToText(b: Buffer | string): string {
   return b.toString("utf8");
 }
 
-/** Windows PowerShell：对象需 Out-String，否则管道 stdout 常为空 */
+/**
+ * Windows PowerShell：用 Out-String -Stream 边跑边出字，
+ * 避免整段攒完才一次性吐到 stdout。
+ */
 function encodePowerShell(code: string): string {
   const codeB64 = Buffer.from(code, "utf8").toString("base64");
   const script = [
@@ -36,26 +47,27 @@ function encodePowerShell(code: string): string {
     `$__code = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${codeB64}'))`,
     "$__sb = [scriptblock]::Create($__code)",
     "try {",
-    "  $__out = & $__sb 2>&1",
-    "  if ($null -eq $__out) { '' } else { ($__out | Out-String -Width 200).TrimEnd() }",
+    "  & $__sb 2>&1 | Out-String -Stream -Width 200",
     "} catch {",
-    "  ($_ | Out-String -Width 200).TrimEnd()",
+    "  $_ | Out-String -Stream -Width 200",
     "}",
   ].join("\n");
   return Buffer.from(script, "utf16le").toString("base64");
 }
 
-function runProcess(
-  bin: string,
-  args: string[],
-  opts?: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv },
-): Promise<RunResult> {
+function runProcess(bin: string, args: string[], opts?: RunOptions): Promise<RunResult> {
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const onChunk = opts?.onChunk;
   return new Promise((resolve) => {
     const child = spawn(bin, args, {
       cwd: opts?.cwd,
       windowsHide: true,
-      env: { ...process.env, PYTHONIOENCODING: "utf-8", ...opts?.env },
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUNBUFFERED: "1",
+        ...opts?.env,
+      },
       shell: false,
     });
     let stdout = "";
@@ -70,12 +82,24 @@ function runProcess(
       }
     }, timeoutMs);
     child.stdout?.on("data", (b) => {
-      stdout += bufToText(b);
+      const t = bufToText(b);
+      stdout += t;
       if (stdout.length > MAX_OUT * 2) stdout = stdout.slice(0, MAX_OUT * 2);
+      try {
+        onChunk?.(t, "stdout");
+      } catch {
+        /* ignore */
+      }
     });
     child.stderr?.on("data", (b) => {
-      stderr += bufToText(b);
+      const t = bufToText(b);
+      stderr += t;
       if (stderr.length > MAX_OUT * 2) stderr = stderr.slice(0, MAX_OUT * 2);
+      try {
+        onChunk?.(t, "stderr");
+      } catch {
+        /* ignore */
+      }
     });
     child.on("error", (err) => {
       clearTimeout(timer);
@@ -102,35 +126,41 @@ function cleanupDir(dir: string) {
   }
 }
 
-export async function runLangCode(lang: ExecLang, code: string): Promise<RunResult> {
+export async function runLangCode(
+  lang: ExecLang,
+  code: string,
+  opts?: Pick<RunOptions, "timeoutMs" | "onChunk">,
+): Promise<RunResult> {
   const work = ensureWorkDir();
   const root = findRepoRoot();
   const id = randomBytes(4).toString("hex");
+  const base: RunOptions = { timeoutMs: opts?.timeoutMs, onChunk: opts?.onChunk };
 
   if (lang === "shell") {
     if (process.platform === "win32") {
       const ps = resolveBin("shell") || "powershell.exe";
       if (/powershell/i.test(ps)) {
         return runProcess(ps, ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(code)], {
+          ...base,
           cwd: root,
         });
       }
-      return runProcess(ps, ["/d", "/s", "/c", code], { cwd: root });
+      return runProcess(ps, ["/d", "/s", "/c", code], { ...base, cwd: root });
     }
     const sh = resolveBin("shell") || "/bin/sh";
-    return runProcess(sh, ["-lc", code], { cwd: root });
+    return runProcess(sh, ["-lc", code], { ...base, cwd: root });
   }
 
   if (lang === "python") {
     const py = resolveBin("python");
     if (!py) return { ok: false, code: null, stdout: "", stderr: "找不到 python" };
-    return runProcess(py, ["-c", code], { cwd: root });
+    return runProcess(py, ["-u", "-c", code], { ...base, cwd: root });
   }
 
   if (lang === "node") {
     const node = resolveBin("node");
     if (!node) return { ok: false, code: null, stdout: "", stderr: "找不到 node" };
-    return runProcess(node, ["-e", code], { cwd: root });
+    return runProcess(node, ["-e", code], { ...base, cwd: root });
   }
 
   if (lang === "typescript") {
@@ -139,12 +169,12 @@ export async function runLangCode(lang: ExecLang, code: string): Promise<RunResu
     const file = join(work, `exec-${id}.ts`);
     writeFileSync(file, code, "utf8");
     try {
-      const r1 = await runProcess(node, ["--experimental-strip-types", file], { cwd: work });
+      const r1 = await runProcess(node, ["--experimental-strip-types", file], { ...base, cwd: work });
       if (!/Unknown option|experimental-strip-types|ERR_UNKNOWN|bad option/i.test(r1.stderr + r1.stdout)) {
         return r1;
       }
       const npx = process.platform === "win32" ? "npx.cmd" : "npx";
-      return await runProcess(npx, ["--yes", "tsx", file], { cwd: work });
+      return await runProcess(npx, ["--yes", "tsx", file], { ...base, cwd: work });
     } finally {
       try {
         if (existsSync(file)) unlinkSync(file);
@@ -157,13 +187,13 @@ export async function runLangCode(lang: ExecLang, code: string): Promise<RunResu
   if (lang === "php") {
     const php = resolveBin("php");
     if (!php) return { ok: false, code: null, stdout: "", stderr: "找不到 php" };
-    return runProcess(php, ["-r", code], { cwd: root });
+    return runProcess(php, ["-r", code], { ...base, cwd: root });
   }
 
   if (lang === "ruby") {
     const ruby = resolveBin("ruby");
     if (!ruby) return { ok: false, code: null, stdout: "", stderr: "找不到 ruby" };
-    return runProcess(ruby, ["-e", code], { cwd: root });
+    return runProcess(ruby, ["-e", code], { ...base, cwd: root });
   }
 
   if (lang === "go") {
@@ -180,7 +210,7 @@ export async function runLangCode(lang: ExecLang, code: string): Promise<RunResu
       "utf8",
     );
     try {
-      return await runProcess(go, ["run", "."], { cwd: dir });
+      return await runProcess(go, ["run", "."], { ...base, cwd: dir });
     } finally {
       cleanupDir(dir);
     }
@@ -199,9 +229,9 @@ export async function runLangCode(lang: ExecLang, code: string): Promise<RunResu
       "utf8",
     );
     try {
-      const c = await runProcess(rustc, [file, "-O", "-o", bin], { cwd: dir });
+      const c = await runProcess(rustc, [file, "-O", "-o", bin], { ...base, cwd: dir });
       if (!c.ok) return c;
-      return await runProcess(bin, [], { cwd: dir });
+      return await runProcess(bin, [], { ...base, cwd: dir });
     } finally {
       cleanupDir(dir);
     }

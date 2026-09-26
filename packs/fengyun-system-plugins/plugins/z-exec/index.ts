@@ -3,10 +3,14 @@ import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plug
 import { assertLangReady, LANG_BY_CMD, type ExecLang } from "./lib/env-gate.js";
 import { isDangerous } from "./lib/danger.js";
 import { formatRunResult, runLangCode, type RunResult } from "./lib/run.js";
+import { LIVE_UPGRADE_MS, looksLikeLongRunning } from "./lib/long-detect.js";
 
 const PLUGIN_ID = "z.exec";
 const CONFIRM_TTL_MS = 120_000;
 const MAX_NODE_CHARS = 800;
+const LIVE_FLUSH_MS = 1500;
+const LIVE_FLUSH_CHARS = 500;
+const LIVE_MSG_MAX = 900;
 
 type Pending = {
   msgId: string;
@@ -20,13 +24,13 @@ type Pending = {
 
 /**
  * 主人命令执行：#py / #sh / #go / #js …
- * 语言须在控制台「环境配置」就绪；危险指令需引用自己的原消息并回复「确认」。
+ * 短指令跑完一次合并转发；长指令自动切持续输出，结束再说「程序执行完成」。
  */
 export class ZExecPlugin extends Plugin {
   manifest = {
     id: PLUGIN_ID,
     name: "命令执行",
-    version: "0.1.3",
+    version: "0.1.5",
     priority: 280,
     category: "utility" as const,
     kind: "framework" as const,
@@ -61,12 +65,11 @@ export class ZExecPlugin extends Plugin {
       label: "超时（秒）",
       type: "number" as const,
       default: 30,
-      description: "单次执行最长等待",
+      description: "单次执行最长等待，最长 600 秒",
     },
   ];
 
   private cfg = { enabled: true, timeoutSec: 30 };
-  /** 每位主人各自一条待确认（只能确认自己的） */
   private pending = new Map<string, Pending>();
 
   getConfig() {
@@ -76,7 +79,7 @@ export class ZExecPlugin extends Plugin {
   setConfig(next: Record<string, unknown>) {
     this.cfg = {
       enabled: next.enabled !== false,
-      timeoutSec: Math.max(5, Math.min(120, Number(next.timeoutSec) || 30)),
+      timeoutSec: Math.max(5, Math.min(600, Number(next.timeoutSec) || 30)),
     };
   }
 
@@ -102,6 +105,13 @@ export class ZExecPlugin extends Plugin {
           "#sh echo hello",
           "#js console.log(1)",
           "更多：#go #ts #rs #php #rb #cmd #ps",
+        ],
+      },
+      {
+        title: "输出方式",
+        lines: [
+          "短指令：跑完一次合并转发",
+          "长指令：自动切持续输出，结束提示完成",
         ],
       },
       {
@@ -218,7 +228,6 @@ export class ZExecPlugin extends Plugin {
       return true;
     }
 
-    // 校验被引用消息确实是本人发的（每人只能确认自己的）
     let quoteUser = String(e.raw.meta?.quoteUserId || "").trim();
     if (!quoteUser && ctx.ob11?.call) {
       const botId = String(e.raw.meta?.botId || e.raw.meta?.selfId || "") || undefined;
@@ -249,29 +258,74 @@ export class ZExecPlugin extends Plugin {
 
     this.pending.delete(e.userId);
     const label = LANG_BY_CMD[pending.cmd]?.label || pending.cmd;
-    await sayNow(e, ctx, `已确认，开始执行 ${label}…`);
+    await e.reply(`已确认，开始执行 ${label}…`);
     await this.execute(e, ctx, pending.lang, label, pending.code);
     return true;
   }
 
   private async execute(e: NexusEvent, ctx: PluginContext, lang: ExecLang, label: string, code: string) {
-    await sayNow(e, ctx, `${label}：执行中…`);
+    const preferLive = looksLikeLongRunning(code, lang);
+    const live = createLivePusher(e, label);
+    let liveMode = preferLive;
+    let earlyBuf = "";
+    let holdAfterAnnounce: string[] = [];
+    let announcing: Promise<void> | null = null;
+    const started = Date.now();
+
+    if (preferLive) {
+      await e.reply(`${label}：检测到可能较长时间运行，已切换持续输出模式`);
+    } else {
+      await e.reply(`${label}：执行中…`);
+    }
+
+    const pushLive = (chunk: string) => {
+      if (!chunk) return;
+      if (announcing) holdAfterAnnounce.push(chunk);
+      else live.push(chunk);
+    };
+
     try {
-      const r = await runLangCode(lang, code);
+      const r = await runLangCode(lang, code, {
+        timeoutMs: this.cfg.timeoutSec * 1000,
+        onChunk: (chunk) => {
+          if (liveMode) {
+            pushLive(chunk);
+            return;
+          }
+          earlyBuf += chunk;
+          if (Date.now() - started < LIVE_UPGRADE_MS) return;
+          liveMode = true;
+          const dump = earlyBuf;
+          earlyBuf = "";
+          announcing = (async () => {
+            await e.reply(`${label}：运行时间较长，已切换持续输出模式`);
+            if (dump) live.push(dump);
+            for (const c of holdAfterAnnounce) live.push(c);
+            holdAfterAnnounce = [];
+            announcing = null;
+          })();
+        },
+      });
+
+      if (announcing) await announcing;
+      if (liveMode) {
+        if (earlyBuf) live.push(earlyBuf);
+        await live.flush();
+        await e.reply(formatDone(label, r));
+        return;
+      }
+
       const ok = await this.sendResultForward(e, ctx, label, code, r);
       if (!ok) {
-        await sayNow(e, ctx, [`${label}：执行结果`, formatRunResult(r)].join("\n"));
+        await e.reply([`${label}：执行结果`, formatRunResult(r)].join("\n"));
       }
     } catch (err) {
-      await sayNow(
-        e,
-        ctx,
-        `${label}：执行异常 ${err instanceof Error ? err.message : String(err)}`,
-      );
+      if (announcing) await announcing;
+      if (liveMode) await live.flush();
+      await e.reply(`${label}：执行异常 ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  /** 最终结果用合并转发输出（群 / 私聊） */
   private async sendResultForward(
     e: NexusEvent,
     ctx: PluginContext,
@@ -313,26 +367,33 @@ export class ZExecPlugin extends Plugin {
 
     const mt = String(e.raw.meta?.messageType || "");
     const isGroup = mt === "group" || String(e.chatId).startsWith("group:");
-    if (isGroup) {
-      const gid = Number(e.raw.meta?.groupId ?? String(e.chatId).replace(/^group:/, ""));
-      if (!Number.isFinite(gid) || gid <= 0) return false;
-      const res = await ctx.ob11.call(
-        "send_group_forward_msg",
-        { group_id: gid, messages: nodes },
+
+    return e.runInSendOrder(async () => {
+      if (isGroup) {
+        const gid = Number(e.raw.meta?.groupId ?? String(e.chatId).replace(/^group:/, ""));
+        if (!Number.isFinite(gid) || gid <= 0) return false;
+        const res = await ctx.ob11!.call(
+          "send_group_forward_msg",
+          { group_id: gid, messages: nodes },
+          { botId },
+        );
+        return Boolean(res.ok);
+      }
+      const uid = Number(e.userId);
+      if (!Number.isFinite(uid) || uid <= 0) return false;
+      const res = await ctx.ob11!.call(
+        "send_private_forward_msg",
+        { user_id: uid, messages: nodes },
         { botId },
       );
       return Boolean(res.ok);
-    }
-
-    const uid = Number(e.userId);
-    if (!Number.isFinite(uid) || uid <= 0) return false;
-    const res = await ctx.ob11.call(
-      "send_private_forward_msg",
-      { user_id: uid, messages: nodes },
-      { botId },
-    );
-    return Boolean(res.ok);
+    });
   }
+}
+
+function formatDone(label: string, r: RunResult): string {
+  const st = r.timedOut ? "超时已终止" : r.ok ? "成功" : "失败";
+  return `${label}：程序执行完成\n状态：${st}  exit=${r.code ?? "?"}`;
 }
 
 function forwardNode(name: string, uin: string, text: string) {
@@ -356,28 +417,52 @@ function splitChunks(text: string, size: number): string[] {
   return out;
 }
 
-/** 立即发文字：e.reply 只入队，合并转发会抢先发出去 */
-async function sayNow(e: NexusEvent, ctx: PluginContext, text: string): Promise<void> {
-  if (!ctx.ob11?.call) {
-    await e.reply(text);
-    return;
-  }
-  const botId = String(e.raw.meta?.botId || e.raw.meta?.selfId || "") || undefined;
-  const mt = String(e.raw.meta?.messageType || "");
-  const isGroup = mt === "group" || String(e.chatId).startsWith("group:");
-  const params = isGroup
-    ? {
-        message_type: "group" as const,
-        group_id: Number(e.raw.meta?.groupId ?? String(e.chatId).replace(/^group:/, "")),
-        message: text,
+/** 长指令边跑边推：按时间/字数节流；全部走 e.reply 出站链 */
+function createLivePusher(e: NexusEvent, label: string) {
+  let buf = "";
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let flushing: Promise<void> = Promise.resolve();
+
+  const doFlush = async () => {
+    const text = buf.replace(/\r\n/g, "\n").trimEnd();
+    buf = "";
+    if (!text.trim()) return;
+    for (const part of splitChunks(text.trim(), LIVE_MSG_MAX)) {
+      await e.reply(`${label} · 输出\n${part}`);
+    }
+  };
+
+  const schedule = () => {
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = null;
+      flushing = flushing.then(doFlush);
+    }, LIVE_FLUSH_MS);
+  };
+
+  return {
+    push(chunk: string) {
+      if (!chunk) return;
+      buf += chunk;
+      if (buf.length >= LIVE_FLUSH_CHARS) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        flushing = flushing.then(doFlush);
+      } else {
+        schedule();
       }
-    : {
-        message_type: "private" as const,
-        user_id: Number(e.userId),
-        message: text,
-      };
-  const r = await ctx.ob11.call("send_msg", params, { botId });
-  if (!r.ok) await e.reply(text);
+    },
+    async flush() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      await flushing;
+      await doFlush();
+    },
+  };
 }
 
 export default new ZExecPlugin();

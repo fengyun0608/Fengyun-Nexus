@@ -75,6 +75,15 @@ export interface PluginRule {
 }
 
 /** 事件对象 `e` — reply / identity / raw. */
+export type NexusReplyItem = {
+  type: "text" | "image";
+  content: string;
+  file?: string;
+};
+
+/** 宿主注入：真正发到通道。同一事件内串行，保证发送顺序。 */
+export type NexusReplyFlush = (item: NexusReplyItem) => Promise<void>;
+
 export class NexusEvent {
   readonly id: string;
   readonly channel: string;
@@ -82,11 +91,11 @@ export class NexusEvent {
   readonly userId: string;
   readonly msg: string;
   readonly raw: NexusMessage;
-  private _replies: Array<{
-    type: "text" | "image";
-    content: string;
-    file?: string;
-  }> = [];
+  private _replies: NexusReplyItem[] = [];
+  private _flush: NexusReplyFlush | null = null;
+  private _outbox: Promise<void> = Promise.resolve();
+  /** 已有即时发送时，handler 结束可无排队回执但仍算命中 */
+  private _flushedCount = 0;
 
   constructor(message: NexusMessage) {
     this.id = message.id;
@@ -101,18 +110,63 @@ export class NexusEvent {
     return this.msg;
   }
 
+  /** 是否已通过即时通道发出过内容 */
+  get didFlush(): boolean {
+    return this._flushedCount > 0;
+  }
+
+  /**
+   * 网关注入即时发送。注入后 `reply` / `replyImage` / `runInSendOrder`
+   * 全部走同一条出站链，严格按 await 顺序发出。
+   */
+  setFlush(fn: NexusReplyFlush | null): void {
+    this._flush = fn;
+  }
+
+  /** 任意异步发送（合并转发等）插入同一出站链，避免插队 */
+  async runInSendOrder<T>(fn: () => Promise<T>): Promise<T> {
+    let result!: T;
+    let error: unknown;
+    this._outbox = this._outbox.then(async () => {
+      try {
+        result = await fn();
+      } catch (err) {
+        error = err;
+      }
+    });
+    await this._outbox;
+    if (error) throw error;
+    return result;
+  }
+
   async reply(content: string): Promise<void> {
-    this._replies.push({ type: "text", content });
+    const item: NexusReplyItem = { type: "text", content };
+    if (this._flush) {
+      await this.runInSendOrder(async () => {
+        await this._flush!(item);
+        this._flushedCount += 1;
+      });
+      return;
+    }
+    this._replies.push(item);
   }
 
   /**
    * 只发图，不附带旁文。第二参数仅作内部占位文案，不会再推一条文字消息。
    */
   async replyImage(file: string, _label = "image"): Promise<void> {
-    this._replies.push({ type: "image", content: "image", file });
+    const item: NexusReplyItem = { type: "image", content: "image", file };
+    if (this._flush) {
+      await this.runInSendOrder(async () => {
+        await this._flush!(item);
+        this._flushedCount += 1;
+      });
+      return;
+    }
+    this._replies.push(item);
   }
 
-  takeReplies(): Array<{ type: "text" | "image"; content: string; file?: string }> {
+  takeReplies(): NexusReplyItem[] {
     const out = [...this._replies];
     this._replies = [];
     return out;
@@ -439,7 +493,21 @@ export class PluginHost {
         if (typeof p.accept === "function") {
           const hit = await p.accept(e, ctx);
           if (hit) {
-            out.push(...e.toOutbound(`plugin:${p.manifest.id}`));
+            const queued = e.toOutbound(`plugin:${p.manifest.id}`);
+            out.push(...queued);
+            // 全程即时发送、无排队回执时，仍返回占位，避免宿主继续走 AI
+            if (!out.length && e.didFlush) {
+              out.push({
+                id: newId("msg"),
+                channel: e.channel,
+                chatId: e.chatId,
+                userId: `plugin:${p.manifest.id}`,
+                type: "text",
+                content: "",
+                meta: { replyTo: e.id },
+                createdAt: nowIso(),
+              });
+            }
             return out;
           }
         }
@@ -478,8 +546,10 @@ export class PluginHost {
     msg: NexusMessage,
     makeCtx: (id: string) => PluginContext,
     gate?: (id: string) => boolean | Promise<boolean>,
+    opts?: { flushReply?: NexusReplyFlush },
   ): Promise<NexusMessage[]> {
     const e = new NexusEvent(msg);
+    if (opts?.flushReply) e.setFlush(opts.flushReply);
     return this.dispatchEvent(e, makeCtx, gate);
   }
 }

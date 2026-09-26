@@ -1555,6 +1555,20 @@ async function bootstrap(): Promise<void> {
     // 插件匹配用去掉呼唤前缀后的文本（nexus帮助 → #帮助）
     const pluginMsg = trimmed !== trimmedRaw ? { ...msg, content: trimmed } : msg;
 
+    // OneBot：插件 reply 即时按序发出，避免「执行中」排在合并转发后面
+    const flushReply =
+      msg.channel === "onebot11"
+        ? async (item: { type: "text" | "image"; content: string; file?: string }) => {
+            if (item.type === "image" && item.file) {
+              await onebot.sendImage(item.file, msg);
+              return;
+            }
+            const text = String(item.content || "").trim();
+            if (text) await onebot.sendText(text, msg);
+          }
+        : undefined;
+
+    // 长指令（如 z-exec 持续输出）可能远超 55s，超时放宽到 16 分钟
     const pluginReplies = await Promise.race([
       plugins.onMessage(
         pluginMsg,
@@ -1577,9 +1591,10 @@ async function bootstrap(): Promise<void> {
           }
           return true;
         },
+        flushReply ? { flushReply } : undefined,
       ),
       new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("插件处理超时")), 55_000);
+        setTimeout(() => reject(new Error("插件处理超时")), 16 * 60 * 1000);
       }),
     ]).catch((e) => {
       const tip = e instanceof Error ? e.message : String(e);
@@ -1598,6 +1613,14 @@ async function bootstrap(): Promise<void> {
     });
 
     if (pluginReplies.length) {
+      const hitId =
+        pluginReplies[0]?.userId?.startsWith("plugin:")
+          ? pluginReplies[0].userId.slice("plugin:".length)
+          : "";
+      const botHint = String(msg.meta?.botId || msg.meta?.selfId || "");
+      log.info(
+        `插件命中  通道=${msg.channel}${botHint ? `  bot=${botHint}` : ""}  插件=${hitId || "?"}  ${trimmed.slice(0, 60)}`,
+      );
       sessions.append(session, "user", trimmed);
       writeMsg({
         id: msg.id,
@@ -1885,9 +1908,21 @@ async function bootstrap(): Promise<void> {
               }
               return true;
             },
+            msg.channel === "onebot11"
+              ? {
+                  flushReply: async (item) => {
+                    if (item.type === "image" && item.file) {
+                      await onebot.sendImage(item.file, fake);
+                      return;
+                    }
+                    const text = String(item.content || "").trim();
+                    if (text) await onebot.sendText(text, fake);
+                  },
+                }
+              : undefined,
           ),
           new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error("能力调用超时")), 20_000);
+            setTimeout(() => reject(new Error("能力调用超时")), 16 * 60 * 1000);
           }),
         ]).catch((e) => {
           const tip = e instanceof Error ? e.message : String(e);
