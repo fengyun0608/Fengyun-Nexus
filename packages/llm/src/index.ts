@@ -50,7 +50,10 @@ export type LlmStreamOpts = {
   onDelta?: (text: string) => void;
   /** 每回合摘要，给网关打日志。 */
   onTrace?: (line: string) => void;
-  /** 0 或不传：不限轮次，直到标签外有结果。正数才截断。 */
+  /**
+   * 正数：硬上限。
+   * 0 / 不传：能力模式「尽量做完」，但仍有安全帽（默认 28）与空转纠偏，避免无限抠源码。
+   */
   maxRounds?: number;
 };
 
@@ -342,8 +345,9 @@ export class LlmRouter {
     if (!tools.length) return this.chat(messages, opts);
 
     const history = messages.map((m) => ({ ...m }));
-    // 0 = 不限轮次。能力模式默认不限，直到标签外有结果才停。
     const maxRounds = opts?.maxRounds ?? 0;
+    /** 不限时也有安全帽，防止无限抠源码空转 */
+    const hardCap = maxRounds > 0 ? maxRounds : 28;
     const thoughts: string[] = [];
     const trace = (line: string) => {
       try {
@@ -358,6 +362,19 @@ export class LlmRouter {
       if (opts?.onDelta) await emitSoftDeltas(out, opts.onDelta);
       return out;
     };
+    const parseArgs = (raw: string): Record<string, unknown> => {
+      try {
+        return JSON.parse(raw || "{}") as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    };
+    const isSourceDigShell = (args: Record<string, unknown>): boolean => {
+      const cmd = String(args.command || args.cmd || "");
+      return /apps[/\\]gateway|packages[/\\](llm|plugin|channel)|onebot11-bridge|plugin-loader|plugin-ctx|napcat\.mjs|Substring\s*\(|Get-Content[\s\S]{0,80}\\.ts/i.test(
+        cmd,
+      );
+    };
     const runCalls = async (calls: LlmToolCall[], content: string, hideContent: boolean) => {
       history.push({
         role: "assistant",
@@ -365,12 +382,7 @@ export class LlmRouter {
         tool_calls: calls,
       });
       for (const call of calls) {
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
-        } catch {
-          args = {};
-        }
+        const args = parseArgs(call.function.arguments || "{}");
         let result: unknown;
         try {
           result = await onTool(call.function.name, args);
@@ -386,30 +398,43 @@ export class LlmRouter {
       }
     };
     let emptySpeak = 0;
-    const oneTurn = async (round: number): Promise<string | null> => {
-      const turn = await this.chatTurn(history, tools);
+    let toolOnlyEmpty = 0;
+    let shellDig = 0;
+    const nudge = (content: string, why: string) => {
+      history.push({ role: "user", content });
+      trace(`AI 纠偏  ${why}`);
+    };
+    const oneTurn = async (
+      round: number,
+      allowTools: boolean,
+    ): Promise<"done" | "cont" | string> => {
+      const turn = await this.chatTurn(history, allowTools ? tools : undefined);
       const peeled = peelPlainThinkingFromContent(turn.content || "");
       const turnThink = [turn.reasoning?.trim(), peeled.think].filter(Boolean).join("\n\n");
       const turnSpeak = peeled.think ? peeled.speak : turn.content || "";
       if (turnThink) thoughts.push(turnThink);
       const contentForTools = turnSpeak || turn.content || "";
       const leaked = turn.tool_calls?.length ? [] : leakedToolCalls(contentForTools);
-      const calls = turn.tool_calls?.length ? turn.tool_calls : leaked;
+      const calls = allowTools
+        ? turn.tool_calls?.length
+          ? turn.tool_calls
+          : leaked
+        : [];
+      const speakNow = speakOutsideTags(turnSpeak);
       trace(
-        `AI 回合 ${round}  工具 ${calls.map((c) => c.function.name).join("、") || "无"}  正文 ${clipLine(speakOutsideTags(turnSpeak)) || "空"}  思考 ${clipLine(turnThink || "") || "无"}`,
+        `AI 回合 ${round}  工具 ${calls.map((c) => c.function.name).join("、") || "无"}  正文 ${clipLine(speakNow) || "空"}  思考 ${clipLine(turnThink || "") || "无"}`,
       );
       if (!calls.length) {
         const text = composeSpeak(thoughts.join("\n\n"), turnSpeak);
         const speak = speakOutsideTags(text);
         if (speak && !isMostlyEnglishSpeak(text)) return text;
 
-        // 空回话，或整段英文报告当成没回话
         if (speak && isMostlyEnglishSpeak(text)) {
           thoughts.push(speak);
           trace(`AI 英文回话  已收进思考，催中文概括`);
         }
         emptySpeak += 1;
-        if (emptySpeak >= 2) {
+        if (emptySpeak >= 2 || !allowTools) {
           const rescued = rescueSpeakFromThoughts(thoughts);
           if (rescued && !isMostlyEnglishSpeak(rescued)) {
             trace(`AI 空回话  从思考捞出一句：${clipLine(rescued)}`);
@@ -418,30 +443,76 @@ export class LlmRouter {
           trace("AI 空回话  二次仍空，结束本轮");
           return composeSpeak(
             thoughts.join("\n\n"),
-            "我刚才卡住了，请把问题再说一遍。",
+            "我这边绕远了。请再说一下要我做哪一步，我直接干。",
           );
         }
         history.push({ role: "assistant", content: turn.content || "" });
-        history.push({
-          role: "user",
-          content:
-            "回话必须用简体中文。刚才若只有思考或大段英文报告，请用两三句中文直接回答用户，写在 <think> 标签外面；不要 IDENTITY/DEMO/TIMELINE 英文标题，不要「思考：」前缀，不要工具名或 JSON。",
-        });
-        trace("AI 空回话  继续，不因轮次结束");
-        return null;
+        nudge(
+          "回话必须用简体中文。刚才若只有思考或大段英文报告，请用两三句中文直接回答用户，写在 <think> 标签外面；不要 IDENTITY/DEMO/TIMELINE 英文标题，不要「思考：」前缀，不要工具名或 JSON。",
+          "空回话催中文",
+        );
+        return "cont";
       }
+
       emptySpeak = 0;
+      if (!speakNow) toolOnlyEmpty += 1;
+      else toolOnlyEmpty = 0;
+
+      let digThis = 0;
+      for (const call of calls) {
+        if (call.function.name !== "nexus_shell") continue;
+        if (isSourceDigShell(parseArgs(call.function.arguments || "{}"))) digThis += 1;
+      }
+      if (digThis) shellDig += digThis;
+      else shellDig = Math.max(0, shellDig - 1);
+
       await runCalls(calls, contentForTools, leaked.length > 0);
-      return null;
+
+      if (shellDig >= 3) {
+        shellDig = 0;
+        nudge(
+          "停：不要再用 shell 抠框架源码或 NapCat 打包文件猜 API。QQ 群文件用 nexus_qq_group_files / nexus_qq_group_file_get；禁言用 nexus_qq_ban；重启用 nexus_framework_restart。先写两三句中文进度（标签外），再调正确工具。",
+          "禁止抠源码",
+        );
+      } else if (toolOnlyEmpty >= 6) {
+        toolOnlyEmpty = 0;
+        nudge(
+          "停一下：连续多轮只有工具没有回话。先用简体中文两三句告诉用户当前进度和卡点，写在 <think> 外面；然后再调下一步。禁止空转。",
+          "工具空转催进度",
+        );
+      } else if (round === 12 || round === 20) {
+        nudge(
+          `已进行约 ${round} 轮。若目标仍未完成：换直接工具，或用中文说明卡点；不要继续漫无目的地翻目录/抠源码。`,
+          `第 ${round} 轮提醒`,
+        );
+      }
+      return "cont";
     };
 
-    for (let i = 1; maxRounds <= 0 || i <= maxRounds; i++) {
-      const done = await oneTurn(i);
-      if (done) return finish(done);
-      if (i % 20 === 0) trace(`AI 仍在继续  已 ${i} 回合，不因读或写的轮次停`);
+    for (let i = 1; i <= hardCap; i++) {
+      const done = await oneTurn(i, true);
+      if (done !== "cont") return finish(done);
+      if (i === hardCap - 1) {
+        nudge(
+          "轮次将尽。停止继续挖工具。用简体中文总结：已做到哪、卡在哪、还需要主人提供什么；写在 <think> 外面，不要再调工具。",
+          "收尾催总结",
+        );
+        const last = await oneTurn(i + 1, false);
+        if (last !== "cont") return finish(last);
+        break;
+      }
+      if (i % 10 === 0) trace(`AI 仍在继续  已 ${i}/${hardCap} 回合`);
     }
-    trace("AI 停  已到调用方给出的轮次上限");
-    return finish("还没写完，我接着弄。");
+    const rescued = rescueSpeakFromThoughts(thoughts);
+    trace("AI 停  已到安全轮次上限");
+    return finish(
+      composeSpeak(
+        thoughts.join("\n\n"),
+        rescued && !isMostlyEnglishSpeak(rescued)
+          ? rescued
+          : "这事我绕远了，先停一下。你再说要我做的下一步，我按直接工具重来。",
+      ),
+    );
   }
 
   private endpoint(): string {

@@ -123,6 +123,8 @@ const MASTER_TOOLS = new Set([
   "nexus_qq_poke",
   "nexus_qq_ban",
   "nexus_qq_find_member",
+  "nexus_qq_group_files",
+  "nexus_qq_group_file_get",
   "nexus_framework_restart",
   "nexus_screen",
   "nexus_shot",
@@ -336,7 +338,7 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     tool("nexus_list_caps", "列出已加载插件的群内能力", {}),
     tool(
       "nexus_call_cap",
-      "调用一条群内插件 # 指令。仅当没有对应直接工具时用。禁言用 nexus_qq_ban，重启用 nexus_framework_restart，不要靠模拟输入。",
+      "调用一条群内插件 # 指令。仅当没有对应直接工具时用。禁言用 nexus_qq_ban；群文件用 nexus_qq_group_files / nexus_qq_group_file_get；重启用 nexus_framework_restart。不要靠模拟输入，也不要为查群文件去抠源码。",
       { text: { type: "string", description: "指令文本" } },
       ["text"],
     ),
@@ -422,6 +424,30 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
       },
     ),
     tool(
+      "nexus_qq_group_files",
+      "列出 QQ 群文件（OneBot get_group_root_files）。主人说按某群文件部署时立刻用这个，可传其他群号。不要 shell 抠框架/NapCat 源码，不要 call_cap #群文件。",
+      {
+        group_id: {
+          type: "string",
+          description: "群号；默认当前群。可传如 993080666",
+        },
+        folder_id: { type: "string", description: "可选文件夹 id，进入子目录" },
+      },
+    ),
+    tool(
+      "nexus_qq_group_file_get",
+      "按文件名关键词或 file_id 取群文件下载地址；txt/md 等会尽量读出正文。部署说明文档直接用这个。",
+      {
+        group_id: { type: "string", description: "群号；默认当前群" },
+        name: {
+          type: "string",
+          description: "文件名关键词，如 TRSS、云崽、Debian",
+        },
+        file_id: { type: "string", description: "已知 file_id 时可直接传" },
+        busid: { type: "number", description: "可选 busid，列表里带的话一并传" },
+      },
+    ),
+    tool(
       "nexus_framework_restart",
       "直接重启 Fengyun Nexus 框架（同窗口）。不要写重启插件，不要模拟输入 #重启。",
       {},
@@ -472,7 +498,7 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     ),
     tool(
       "nexus_shell",
-      "在本机执行系统命令。Windows 用 PowerShell，macOS / Linux 服务器用 bash 或 sh，Termux 用自带 bash。查日志、列目录、看进程都可以。框架日志文件是 data/logs/gateway.log。这是系统命令，不是框架内部 # 指令。",
+      "在本机执行系统命令。Windows 用 PowerShell，macOS / Linux 服务器用 bash 或 sh。查日志、列目录、部署脚本、SSH 连服务器都可以。禁止用它抠 apps/gateway 源码或 NapCat 打包文件来猜 QQ API——群文件用 nexus_qq_group_files，禁言用 nexus_qq_ban。框架日志：data/logs/gateway.log。",
       {
         command: { type: "string", description: "系统命令正文" },
         cwd: { type: "string", description: "工作目录，默认框架根，也可写绝对路径" },
@@ -947,6 +973,172 @@ export async function runAgentTool(
       user_id: userId,
       group_id: groupId,
       minutes,
+    };
+  }
+  if (name === "nexus_qq_group_files") {
+    if (!bag.onebot) return { error: "OneBot 未就绪" };
+    const groupId = resolveGroupId(bag, args);
+    if (!groupId) return { error: "缺少群号（传 group_id 或在群里用）" };
+    const folderId = String(args.folder_id || args.folderId || "").trim();
+    const botId = botIdOfCtx(bag);
+    const params: Record<string, unknown> = {
+      group_id: Number(groupId) || groupId,
+    };
+    let action = "get_group_root_files";
+    if (folderId) {
+      action = "get_group_files_by_folder";
+      params.folder_id = folderId;
+    }
+    let r = await bag.onebot.callAction(action, params, { botId, timeoutMs: 20_000 });
+    if (!r.ok && !folderId) {
+      r = await bag.onebot.callAction(
+        "get_group_file_system_info",
+        { group_id: Number(groupId) || groupId },
+        { botId, timeoutMs: 15_000 },
+      );
+    }
+    if (!r.ok) {
+      return { ok: false, group_id: groupId, message: String(r.message || "拉取群文件失败") };
+    }
+    const data = (r.data || {}) as {
+      files?: Array<Record<string, unknown>>;
+      folders?: Array<Record<string, unknown>>;
+    };
+    const files = (data.files || []).slice(0, 80).map((f) => ({
+      file_name: String(f.file_name ?? f.fileName ?? ""),
+      file_id: String(f.file_id ?? f.fileId ?? ""),
+      busid: f.busid ?? f.busId ?? undefined,
+      size: f.size ?? f.file_size ?? undefined,
+    }));
+    const folders = (data.folders || []).slice(0, 40).map((f) => ({
+      folder_name: String(f.folder_name ?? f.folderName ?? ""),
+      folder_id: String(f.folder_id ?? f.folderId ?? ""),
+    }));
+    return {
+      ok: true,
+      group_id: groupId,
+      folder_id: folderId || undefined,
+      folders,
+      files,
+      message:
+        files.length || folders.length
+          ? `群文件 ${files.length} 个，文件夹 ${folders.length} 个`
+          : "该目录为空",
+    };
+  }
+  if (name === "nexus_qq_group_file_get") {
+    if (!bag.onebot) return { error: "OneBot 未就绪" };
+    const groupId = resolveGroupId(bag, args);
+    if (!groupId) return { error: "缺少群号（传 group_id 或在群里用）" };
+    const botId = botIdOfCtx(bag);
+    let fileId = String(args.file_id || args.fileId || "").trim();
+    let busid = args.busid ?? args.busId;
+    let fileName = String(args.file_name || args.fileName || "").trim();
+    const nameKey = String(args.name || args.keyword || "").trim();
+    if (!fileId && nameKey) {
+      const listed = await bag.onebot.callAction(
+        "get_group_root_files",
+        { group_id: Number(groupId) || groupId },
+        { botId, timeoutMs: 20_000 },
+      );
+      const data = (listed.data || {}) as {
+        files?: Array<Record<string, unknown>>;
+        folders?: Array<Record<string, unknown>>;
+      };
+      const files = data.files || [];
+      const hits = files.filter((f) =>
+        String(f.file_name ?? f.fileName ?? "").includes(nameKey),
+      );
+      if (!hits.length) {
+        return {
+          ok: false,
+          group_id: groupId,
+          message: `根目录没有文件名含「${nameKey}」的项；可先 nexus_qq_group_files 看列表，或传 folder_id 进子目录后再取`,
+          folders: (data.folders || []).slice(0, 20).map((f) => ({
+            folder_name: String(f.folder_name ?? f.folderName ?? ""),
+            folder_id: String(f.folder_id ?? f.folderId ?? ""),
+          })),
+        };
+      }
+      if (hits.length > 1) {
+        return {
+          ok: false,
+          group_id: groupId,
+          message: `匹配到 ${hits.length} 个文件，请用更准的 name 或 file_id`,
+          files: hits.slice(0, 15).map((f) => ({
+            file_name: String(f.file_name ?? f.fileName ?? ""),
+            file_id: String(f.file_id ?? f.fileId ?? ""),
+            busid: f.busid ?? f.busId,
+          })),
+        };
+      }
+      const hit = hits[0]!;
+      fileId = String(hit.file_id ?? hit.fileId ?? "");
+      busid = hit.busid ?? hit.busId ?? busid;
+      fileName = String(hit.file_name ?? hit.fileName ?? fileName);
+    }
+    if (!fileId) return { error: "缺少 file_id 或 name" };
+    const urlParams: Record<string, unknown> = {
+      group_id: Number(groupId) || groupId,
+      file_id: fileId,
+    };
+    if (busid != null && String(busid) !== "") {
+      urlParams.busid = Number(busid) || busid;
+    }
+    const urlRes = await bag.onebot.callAction("get_group_file_url", urlParams, {
+      botId,
+      timeoutMs: 20_000,
+    });
+    if (!urlRes.ok) {
+      return {
+        ok: false,
+        group_id: groupId,
+        file_id: fileId,
+        file_name: fileName || undefined,
+        message: String(urlRes.message || "获取下载地址失败"),
+      };
+    }
+    const urlData = (urlRes.data || {}) as { url?: string };
+    const url = String(urlData.url || "").trim();
+    let textPreview = "";
+    let textFull = "";
+    const lower = (fileName || nameKey || "").toLowerCase();
+    const maybeText = /\.(txt|md|log|json|yml|yaml|sh|ps1|conf|ini|csv)$/i.test(lower) || !fileName;
+    if (url && maybeText) {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 25_000);
+        const res = await fetch(url, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (res.ok) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          // 文本类大致上限 200KB
+          if (buf.length <= 200_000) {
+            const raw = buf.toString("utf8");
+            if (!/[\u0000-\u0008]/.test(raw.slice(0, 2000))) {
+              textFull = raw.length > 12000 ? `${raw.slice(0, 12000)}\n…(已截断)` : raw;
+              textPreview = raw.slice(0, 400).replace(/\s+/g, " ");
+            }
+          }
+        }
+      } catch {
+        /* 链接可用但拉正文失败时仍返回 url */
+      }
+    }
+    return {
+      ok: true,
+      group_id: groupId,
+      file_id: fileId,
+      file_name: fileName || undefined,
+      busid: busid ?? undefined,
+      url: url || undefined,
+      content: textFull || undefined,
+      preview: textPreview || undefined,
+      message: textFull
+        ? `已读取「${fileName || fileId}」正文`
+        : url
+          ? `已拿到下载地址（未能直接读正文，可用 url）`
+          : "接口成功但未返回 url",
     };
   }
   if (name === "nexus_framework_restart") {
