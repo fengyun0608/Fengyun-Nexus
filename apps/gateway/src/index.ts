@@ -145,6 +145,7 @@ import {
   splitThinkingAndSpeak,
   stripLeakedToolMarkup,
 } from "./ai-segments.js";
+import { redactSecrets, redactSecretsList } from "./secret-redact.js";
 import { startTerminalRepl } from "./terminal-repl.js";
 import {
   buildRestartingMessage,
@@ -478,6 +479,7 @@ function frameworkSystemPrompt(opts?: {
     "你在 Fengyun Nexus 里运作，对外产品身份是 Fengyun Nexus。",
     "这个通道如果另外写了人设，就在 Fengyun Nexus 这个身份上按那个人设说话。",
     "硬规矩：给人看的回话必须用简体中文。禁止用英文写回话、技术报告、IDENTITY、DEMO、TIMELINE、VALUE。命令输出与英文推理只放进 <think>；标签外用中文两三句概括结果。用户没要求英文时不要回英文。",
+    "机密勿泄露：密码、口令、token、密钥、完整 IP、带账密的连接串，一律不要写进思考或回话。需要交代时只说「已配置 / 已连上」，或用打码（如 114.***.***.81、password=***）。即使用户把 txt 路径或内容发给你，也禁止原样复述。",
   ];
   if (opts?.capability) {
     const cfgBits = [
@@ -2138,10 +2140,13 @@ async function bootstrap(): Promise<void> {
       log.warn("能力模式结束后没有可发正文，已改发一句提示");
     }
 
-    const { thinkingNodes, speak } = splitThinkingAndSpeak(spoken);
+    const split = splitThinkingAndSpeak(spoken);
+    // 出站打码：思考 / 回话 / 落库都走同一套，避免 IP、密码等泄露
+    const thinkingNodes = redactSecretsList(split.thinkingNodes);
+    const speak = redactSecrets(split.speak);
     // 回话按空行/分类拆成多条短气泡；思考只走合并转发，不占气泡
     const parts = speak ? splitAiSegments(speak) : [];
-    const extra = capSink.map((x) => x.trim()).filter(Boolean);
+    const extra = redactSecretsList(capSink.map((x) => x.trim()).filter(Boolean));
     let thinkingForwarded = false;
 
     // QQ：思考用合并转发；控制台等通道仍把思考当普通文本段
@@ -2173,8 +2178,9 @@ async function bootstrap(): Promise<void> {
     }
     if (!all.length) return [];
     log.info(
-      `AI 发出  思考 ${thinkingNodes.length} 段  回话 ${all.length} 条  ${all
-        .join(" / ")
+      `AI 发出  思考 ${thinkingNodes.length} 段  回话 ${all.length} 条  ${redactSecrets(
+        all.join(" / "),
+      )
         .replace(/\s+/g, " ")
         .slice(0, 220)}`,
     );
