@@ -1,0 +1,1 @@
+{"name":"@fengyun/z-proxy-owner-reply","version":"0.1.1","private":true,"type":"module","dependencies":{"@fengyun/nexus-plugin-sdk":"workspace:*"}}

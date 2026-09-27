@@ -1,0 +1,1 @@
+{"id":"z.proxy.owner.reply","name":"代主人回话","version":"0.1.1","main":"index.ts","priority":700,"hooks":["onMessage","onReady"],"permissions":["channel.send","onebot.api","llm.chat","fs.data"],"category":"standard","kind":"channel","adapterScope":"channel","channels":["onebot11"]}
