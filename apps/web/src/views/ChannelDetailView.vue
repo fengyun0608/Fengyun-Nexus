@@ -27,6 +27,8 @@ type Settings = {
   normalMasters?: string[];
   onlyMasters?: boolean;
   replyGroupIds?: string[];
+  privateAi?: boolean;
+  privateAiMastersOnly?: boolean;
   systemPrompt?: string;
   note?: string;
 };
@@ -95,6 +97,8 @@ const newMasters = ref("");
 const normalMasters = ref("");
 const onlyMasters = ref(false);
 const replyGroupIds = ref("");
+const privateAi = ref(true);
+const privateAiMastersOnly = ref(true);
 const systemPrompt = ref("");
 const note = ref("");
 
@@ -285,6 +289,8 @@ async function loadSettings() {
   normalMasters.value = (s.normalMasters || []).join(", ");
   onlyMasters.value = Boolean(s.onlyMasters);
   replyGroupIds.value = (s.replyGroupIds || []).join(", ");
+  privateAi.value = s.privateAi !== false;
+  privateAiMastersOnly.value = s.privateAiMastersOnly !== false;
   systemPrompt.value = s.systemPrompt || "";
   note.value = s.note || "";
 }
@@ -393,6 +399,8 @@ async function saveSettings() {
       body.normalMasters = normalMasters.value;
       body.onlyMasters = onlyMasters.value;
       body.replyGroupIds = replyGroupIds.value;
+      body.privateAi = privateAi.value;
+      body.privateAiMastersOnly = privateAiMastersOnly.value;
     }
     await api(`/v1/channels/${encodeURIComponent(id.value)}/settings`, {
       method: "PUT",
@@ -750,6 +758,12 @@ watch(showOnebot, (open) => {
           AI 回复群
           <n-input v-model:value="replyGroupIds" placeholder="空=不限；# 指令不受此限" />
         </label>
+        <label class="field row-switch">私聊可用 AI <n-switch v-model:value="privateAi" /></label>
+        <label class="field row-switch">
+          私聊 AI 仅主人
+          <n-switch v-model:value="privateAiMastersOnly" :disabled="!privateAi" />
+        </label>
+        <p class="hint">私聊无需 @ / 呼唤词。默认开，且默认仅主人可闲聊；# 指令不受影响。</p>
       </template>
       <p v-else class="hint">本通道自用，无需主人。主人与回复群只在 QQ / OneBot 通道设置。</p>
       <label class="field">人设 / 系统提示 <n-input v-model:value="systemPrompt" type="textarea" :rows="4" /></label>

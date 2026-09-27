@@ -49,6 +49,7 @@ import {
   getChannelSettings,
   isChannelMaster,
   isGroupReplyAllowed,
+  isPrivateAiAllowed,
   loadChannelsConfig,
   saveChannelsConfig,
   type ChannelSettings,
@@ -1665,6 +1666,18 @@ async function bootstrap(): Promise<void> {
       return [];
     }
 
+    // 私聊 AI：可关；默认仅主人可闲聊（无需 @ / 呼唤词）
+    if (
+      !isHash &&
+      !isPrivateAiAllowed(chSettings, {
+        messageType: msg.meta?.messageType as string | undefined,
+        userId: msg.userId,
+        isAdminConsole,
+      })
+    ) {
+      return [];
+    }
+
     if (!isHash && chSettings.onlyMasters && chSettings.masters.length && !isMaster) {
       return [];
     }
@@ -1673,7 +1686,7 @@ async function bootstrap(): Promise<void> {
       return [];
     }
 
-    // 群聊：必须 @ 机器人，或开头呼唤词，才走 AI
+    // 群聊：必须 @ 机器人，或开头呼唤词，才走 AI；私聊 / 控制台不限
     if (
       !shouldTriggerAi({
         channel: msg.channel,
@@ -2009,6 +2022,10 @@ async function bootstrap(): Promise<void> {
         if (typeof patch.systemPrompt === "string") next.systemPrompt = patch.systemPrompt;
         if (typeof patch.note === "string") next.note = patch.note;
         if (typeof patch.onlyMasters === "boolean") next.onlyMasters = patch.onlyMasters;
+        if (typeof patch.privateAi === "boolean") next.privateAi = patch.privateAi;
+        if (typeof patch.privateAiMastersOnly === "boolean") {
+          next.privateAiMastersOnly = patch.privateAiMastersOnly;
+        }
         if (typeof patch.replyGroupIds === "string") {
           next.replyGroupIds = String(patch.replyGroupIds)
             .split(/[,，\s]+/)
@@ -2904,6 +2921,8 @@ async function bootstrap(): Promise<void> {
           label: s.label || c.label || c.id,
           masters: s.masters,
           onlyMasters: s.onlyMasters,
+          privateAi: s.privateAi,
+          privateAiMastersOnly: s.privateAiMastersOnly,
           source: channels.sourceOf(c.id) || "core",
           connected: ob ? ob.connected : undefined,
           clients: ob ? ob.clients : undefined,
@@ -2970,6 +2989,12 @@ async function bootstrap(): Promise<void> {
         typeof body.systemPrompt === "string" ? body.systemPrompt : prev.systemPrompt,
       onlyMasters:
         typeof body.onlyMasters === "boolean" ? body.onlyMasters : prev.onlyMasters,
+      privateAi:
+        typeof body.privateAi === "boolean" ? body.privateAi : prev.privateAi,
+      privateAiMastersOnly:
+        typeof body.privateAiMastersOnly === "boolean"
+          ? body.privateAiMastersOnly
+          : prev.privateAiMastersOnly,
       note: typeof body.note === "string" ? body.note : prev.note,
       label: typeof body.label === "string" ? body.label : prev.label,
     };

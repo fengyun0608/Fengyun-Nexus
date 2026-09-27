@@ -21,6 +21,16 @@ export type ChannelSettings = {
    * 仅对 messageType=group 生效。
    */
   replyGroupIds: string[];
+  /**
+   * 私聊是否走 AI（无需 @ / 呼唤词）。默认 true。
+   * # 指令不受此限制。
+   */
+  privateAi: boolean;
+  /**
+   * 私聊 AI 是否仅主人可用。默认 true（给主人私聊闲聊）。
+   * 未配置任何主人时不拦，避免空名单把自己锁死。
+   */
+  privateAiMastersOnly: boolean;
   /** 本通道 AI 人设（注入 system prompt） */
   systemPrompt: string;
   /** Webhook 共享令牌（可被 NEXUS_WEBHOOK_TOKEN 覆盖） */
@@ -91,6 +101,9 @@ function normalize(raw: Partial<ChannelSettings> | undefined): ChannelSettings {
     normalMasters,
     onlyMasters: Boolean(raw?.onlyMasters),
     replyGroupIds: parseIdList(raw?.replyGroupIds),
+    // 缺省开启：旧配置无此字段时行为与原先「私聊可走 AI」一致
+    privateAi: raw?.privateAi === false ? false : true,
+    privateAiMastersOnly: raw?.privateAiMastersOnly === false ? false : true,
     systemPrompt: typeof raw?.systemPrompt === "string" ? raw.systemPrompt : "",
     note: typeof raw?.note === "string" ? raw.note : "",
   });
@@ -266,4 +279,29 @@ export function isGroupReplyAllowed(
   if (!settings.replyGroupIds.length) return true;
   if (!groupId) return true;
   return settings.replyGroupIds.includes(String(groupId));
+}
+
+/**
+ * 私聊是否允许走 AI（# 指令不走此判断）。
+ * 控制台 / 非私聊消息直接放行。
+ */
+export function isPrivateAiAllowed(
+  settings: ChannelSettings,
+  opts: {
+    messageType?: string;
+    userId: string;
+    isAdminConsole?: boolean;
+  },
+): boolean {
+  if (opts.isAdminConsole) return true;
+  if (opts.messageType !== "private") return true;
+  if (!settings.privateAi) return false;
+  if (
+    settings.privateAiMastersOnly &&
+    settings.masters.length &&
+    !isChannelMaster(settings, opts.userId)
+  ) {
+    return false;
+  }
+  return true;
 }

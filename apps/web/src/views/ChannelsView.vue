@@ -10,6 +10,8 @@ type ChannelItem = {
   label?: string;
   masters?: string[];
   onlyMasters?: boolean;
+  privateAi?: boolean;
+  privateAiMastersOnly?: boolean;
   source?: "core" | "plugin";
 };
 
@@ -62,6 +64,13 @@ onMounted(() => void load());
             · {{ c.source === "plugin" ? "插件自动挂载" : "内置" }}
             · 主人 {{ (c.masters || []).length || "—" }}
             · {{ c.onlyMasters ? "仅主人" : "全员可触发" }}
+            · {{
+              c.privateAi === false
+                ? "私聊 AI 关"
+                : c.privateAiMastersOnly === false
+                  ? "私聊 AI 全员"
+                  : "私聊 AI 主人"
+            }}
           </span>
         </button>
         <p v-if="!items.length" class="muted">暂无通道</p>

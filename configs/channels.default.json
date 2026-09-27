@@ -8,6 +8,8 @@
       "normalMasters": [],
       "onlyMasters": false,
       "replyGroupIds": [],
+      "privateAi": true,
+      "privateAiMastersOnly": true,
       "systemPrompt": "",
       "note": ""
     },
@@ -19,6 +21,8 @@
       "normalMasters": [],
       "onlyMasters": false,
       "replyGroupIds": [],
+      "privateAi": true,
+      "privateAiMastersOnly": true,
       "systemPrompt": "",
       "accessToken": "",
       "note": "调用需 Authorization: Bearer <令牌> 或 X-Nexus-Token；也可用环境变量 NEXUS_WEBHOOK_TOKEN。管理登录令牌亦可。"
@@ -31,8 +35,10 @@
       "normalMasters": [],
       "onlyMasters": false,
       "replyGroupIds": [],
+      "privateAi": true,
+      "privateAiMastersOnly": true,
       "systemPrompt": "",
-      "note": "核心/新/普通主人、AI 回复群、人设均可在控制台配置"
+      "note": "核心/新/普通主人、AI 回复群、私聊 AI、人设均可在控制台配置"
     }
   }
 }

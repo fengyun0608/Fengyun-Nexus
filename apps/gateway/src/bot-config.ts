@@ -142,7 +142,7 @@ export function stripAtMentions(text: string, selfId?: string): string {
 
 /**
  * 群聊要不要走 AI：必须 @ 机器人，或开头呼唤词。
- * 私聊 / 控制台 / 非 QQ：直接放行。
+ * 私聊 / 控制台 / 非 QQ：直接放行（私聊是否启用、是否仅主人由通道设置 privateAi* 另判）。
  */
 export function shouldTriggerAi(opts: {
   channel: string;

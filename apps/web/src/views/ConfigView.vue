@@ -111,7 +111,7 @@ onMounted(() => void loadBot());
         呼唤前缀
         <n-input v-model:value="botWake" placeholder="例如 nexus，逗号分隔；留空=群里只能@" />
       </label>
-      <p class="hint">群聊：@ 机器人或开头呼唤词才走 AI。私聊/本控制台不限。</p>
+      <p class="hint">群聊：@ 机器人或开头呼唤词才走 AI。私聊默认可用（可在通道设置里关，或限制仅主人）；本控制台不限。</p>
       <n-button type="primary" :loading="saving" @click="saveBot">保存</n-button>
     </div>
 
