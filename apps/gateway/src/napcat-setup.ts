@@ -669,6 +669,75 @@ function resolveSystemQq(): string | null {
   return null;
 }
 
+/** 官方 LinuxQQ 下载页配置（会变）；失败再回退写死地址 */
+function resolveLinuxQqDownloadUrls(arch: "amd64" | "arm64"): { deb: string[]; rpm: string[] } {
+  const fallbackDeb =
+    arch === "arm64"
+      ? [
+          "https://qqdl.gtimg.cn/qqfile/QQNTV2/9.9.36/release/9ee04bef/QQ_3.2.34_260924_arm64_01.deb",
+          "https://dldir1v6.qq.com/qqfile/qq/QQNT/Linux/QQ_3.2.34_260924_arm64_01.deb",
+        ]
+      : [
+          "https://qqdl.gtimg.cn/qqfile/QQNTV2/9.9.36/release/9ee04bef/QQ_3.2.34_260924_amd64_01.deb",
+          "https://dldir1v6.qq.com/qqfile/qq/QQNT/Linux/QQ_3.2.34_260924_amd64_01.deb",
+        ];
+  const fallbackRpm =
+    arch === "arm64"
+      ? ["https://qqdl.gtimg.cn/qqfile/QQNTV2/9.9.36/release/9ee04bef/QQ_3.2.34_260924_aarch64_01.rpm"]
+      : ["https://qqdl.gtimg.cn/qqfile/QQNTV2/9.9.36/release/9ee04bef/QQ_3.2.34_260924_x86_64_01.rpm"];
+  const deb: string[] = [];
+  const rpm: string[] = [];
+  try {
+    const raw = execSync(
+      `curl -fsSL -A "Mozilla/5.0" --connect-timeout 12 --max-time 30 "https://im.qq.com/rainbow/linuxQQDownload/"`,
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const m = raw.match(/\{[\s\S]*"x64DownloadUrl"[\s\S]*\}/);
+    if (m?.[0]) {
+      const j = JSON.parse(m[0]) as {
+        x64DownloadUrl?: { deb?: string; rpm?: string };
+        armDownloadUrl?: { deb?: string; rpm?: string };
+      };
+      const block = arch === "arm64" ? j.armDownloadUrl : j.x64DownloadUrl;
+      if (block?.deb) deb.push(block.deb);
+      if (block?.rpm) rpm.push(block.rpm);
+    }
+  } catch {
+    /* 用回退列表 */
+  }
+  for (const u of fallbackDeb) if (!deb.includes(u)) deb.push(u);
+  for (const u of fallbackRpm) if (!rpm.includes(u)) rpm.push(u);
+  return { deb, rpm };
+}
+
+function downloadLinuxPackage(urls: string[], outFile: string, log: InstallNapCatLog): boolean {
+  for (const url of urls) {
+    try {
+      log(`下载：${url}`);
+      execSync(
+        `curl -fL -A "Mozilla/5.0" --connect-timeout 30 --max-time 900 -o "${outFile}" "${url}"`,
+        { stdio: "inherit" },
+      );
+      const st = existsSync(outFile) ? require("node:fs").statSync(outFile) : null;
+      // 真 deb 通常 > 50MB；483B 是 404 XML
+      if (!st || st.size < 5_000_000) {
+        log(`下载体积异常（${st?.size ?? 0} 字节），换下一个源…`);
+        try {
+          unlinkSync(outFile);
+        } catch {
+          /* ignore */
+        }
+        continue;
+      }
+      log(`已下载 ${(st.size / 1024 / 1024).toFixed(1)} MB`);
+      return true;
+    } catch (e) {
+      log(`下载失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return false;
+}
+
 /** 安装脚本常半截失败：有 so / launcher 却没系统 qq。启动前尽量补装。 */
 function ensureLinuxQqSync(home: string, log: InstallNapCatLog = () => undefined): string | null {
   const hit = resolveSystemQq();
@@ -678,28 +747,22 @@ function ensureLinuxQqSync(home: string, log: InstallNapCatLog = () => undefined
   }
   if (isWin() || isTermux()) return null;
   mkdirSync(home, { recursive: true });
-  let arch = "amd64";
+  let arch: "amd64" | "arm64" = "amd64";
   try {
     const m = execSync("uname -m", { encoding: "utf8" }).trim();
     if (/aarch64|arm64/i.test(m)) arch = "arm64";
   } catch {
     /* default amd64 */
   }
-  const debUrl =
-    arch === "arm64"
-      ? "https://qqdl.gtimg.cn/qqfile/QQNT/9.9.32/release/c390e792/QQ_3.2.31_260710_arm64_01.deb"
-      : "https://qqdl.gtimg.cn/qqfile/QQNT/9.9.32/release/c390e792/QQ_3.2.31_260710_amd64_01.deb";
-  const rpmUrl =
-    arch === "arm64"
-      ? "https://qqdl.gtimg.cn/qqfile/QQNT/9.9.32/release/c390e792/QQ_3.2.31_260710_aarch64_01.rpm"
-      : "https://qqdl.gtimg.cn/qqfile/QQNT/9.9.32/release/c390e792/QQ_3.2.31_260710_x86_64_01.rpm";
+  const urls = resolveLinuxQqDownloadUrls(arch);
   log("未找到 qq，正在补装 LinuxQQ…");
   try {
     if (whichCmd("apt-get") || whichCmd("dpkg")) {
       const deb = join(home, "QQ.deb");
-      execSync(`curl -k -L --connect-timeout 30 --max-time 600 -o "${deb}" "${debUrl}"`, {
-        stdio: "inherit",
-      });
+      if (!downloadLinuxPackage(urls.deb, deb, log)) {
+        log("所有 deb 源均失败，请手动装：https://im.qq.com/linuxqq/");
+        return null;
+      }
       execSync(`apt-get install -y -f --allow-downgrades -qq "${deb}"`, { stdio: "inherit" });
       try {
         execSync("apt-get install -y -qq libnss3 libgbm1", { stdio: "ignore" });
@@ -708,9 +771,10 @@ function ensureLinuxQqSync(home: string, log: InstallNapCatLog = () => undefined
       }
     } else if (whichCmd("dnf") || whichCmd("rpm")) {
       const rpm = join(home, "QQ.rpm");
-      execSync(`curl -k -L --connect-timeout 30 --max-time 600 -o "${rpm}" "${rpmUrl}"`, {
-        stdio: "inherit",
-      });
+      if (!downloadLinuxPackage(urls.rpm, rpm, log)) {
+        log("所有 rpm 源均失败，请手动装：https://im.qq.com/linuxqq/");
+        return null;
+      }
       execSync(`dnf localinstall -y "${rpm}"`, { stdio: "inherit" });
     } else {
       log("无法自动补装：未找到 apt-get / dnf");
