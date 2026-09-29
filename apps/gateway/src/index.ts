@@ -4290,6 +4290,22 @@ async function bootstrap(): Promise<void> {
         const tag = names.length ? names.join("、") : p === port ? "网关" : "独立端口";
         await bootLine(`反向地址已列出：${tag}  ws://${show}:${p}${wsPath}`);
       }
+      try {
+        const marker = readNapCatMarker(ROOT);
+        const home = marker?.home || napcatHome(ROOT);
+        const hasTrace =
+          Boolean(marker) ||
+          existsSync(join(home, "napcat.mjs")) ||
+          existsSync(join(home, "launcher.sh")) ||
+          existsSync(join(home, "qq")) ||
+          existsSync(join(home, "installed.json"));
+        if (hasTrace) {
+          const script = ensureNapCatLaunchScripts(ROOT);
+          if (existsSync(script)) await bootLine(`NapCat 启动脚本已就绪：${script}`);
+        }
+      } catch {
+        /* 未装 NapCat 时忽略 */
+      }
     }
     void printBootSuccess();
     warnBootGaps({

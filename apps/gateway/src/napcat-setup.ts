@@ -22,6 +22,8 @@ export type NapCatFlavor = "auto" | "shell" | "linux" | "termux" | "docker";
 
 export type NapCatStatus = {
   installed: boolean;
+  /** 启动脚本是否已就绪（可点「启动 NapCat」） */
+  canLaunch: boolean;
   home: string;
   flavor?: string;
   version?: string;
@@ -1006,33 +1008,40 @@ export function getNapCatStatus(opts: {
   const marker = readNapCatMarker(opts.root);
   const home = resolveNapCatHome(opts.root);
   const flavor = (marker?.flavor || resolveFlavor("auto")) as string;
-  // 已装但缺启动脚本时当场补写，避免点启动才报「未找到 start-nexus.sh」
-  if (marker || existsSync(join(home, "napcat.mjs")) || existsSync(join(home, "launcher.bat"))) {
+  // 有安装痕迹就尽量补启动脚本（旧安装常缺 start-nexus.sh）
+  const hasTrace =
+    Boolean(marker) ||
+    existsSync(join(home, "napcat.mjs")) ||
+    existsSync(join(home, "launcher.bat")) ||
+    existsSync(join(home, "launcher.sh")) ||
+    existsSync(join(home, "qq")) ||
+    existsSync(join(home, "installed.json"));
+  if (hasTrace) {
     try {
-      if (isWin()) {
-        if (!existsSync(join(home, "start-nexus.bat"))) writeStartScripts(home, "shell");
-      } else if (!existsSync(join(home, "start-nexus.sh"))) {
-        writeStartScripts(home, flavor === "shell" ? "linux" : flavor);
-      }
+      ensureNapCatLaunchScripts(opts.root);
     } catch {
       /* ignore */
     }
   }
-  const installed =
-    Boolean(marker) ||
-    existsSync(join(home, "launcher.bat")) ||
+  const hasScript =
+    existsSync(join(home, "start-nexus.sh")) || existsSync(join(home, "start-nexus.bat"));
+  const hasBinary =
     existsSync(join(home, "napcat.mjs")) ||
-    existsSync(join(home, "start-nexus.sh")) ||
-    existsSync(join(home, "start-nexus.bat"));
+    existsSync(join(home, "launcher.bat")) ||
+    existsSync(join(home, "launcher.sh")) ||
+    existsSync(join(home, "qq")) ||
+    existsSync(join(home, "opt/QQ/qq"));
+  const installed = Boolean(marker) || hasScript || hasBinary;
+  const canLaunch = hasScript || hasBinary;
   const launchCmd = isWin()
     ? existsSync(join(home, "start-nexus.bat"))
       ? join(home, "start-nexus.bat")
       : existsSync(join(home, "launcher.bat"))
         ? join(home, "launcher.bat")
-        : "请先在环境配置安装 NapCat"
+        : "请先点「重新写入反向 WS」或到环境配置安装"
     : existsSync(join(home, "start-nexus.sh"))
       ? `bash "${join(home, "start-nexus.sh")}"`
-      : "请先在环境配置安装 NapCat";
+      : "请先点「重新写入反向 WS」或到环境配置安装";
 
   const steps = [
     "打开「环境配置」→ NapCat → 安装（本机自动选 Windows Shell / Linux / Termux）",
@@ -1042,7 +1051,11 @@ export function getNapCatStatus(opts: {
   ];
 
   let tip = "未安装：请到环境配置一键安装 NapCat";
-  if (installed && !opts.connected) tip = "已安装未连接：请启动 NapCat 并扫码，或检查反向 WS 地址";
+  if (installed && !canLaunch) {
+    tip = "安装不完整（缺启动脚本）：请点「重新写入反向 WS」补脚本，或到环境配置重装";
+  } else if (installed && !opts.connected) {
+    tip = "已安装未连接：请启动 NapCat 并扫码，或检查反向 WS 地址";
+  }
   if (opts.connected) tip = `已连接${opts.selfId ? `（QQ ${opts.selfId}）` : ""}，可以收发消息了`;
 
   const configFiles: string[] = [];
@@ -1055,6 +1068,7 @@ export function getNapCatStatus(opts: {
 
   return {
     installed,
+    canLaunch,
     home,
     flavor,
     version: marker?.version,
@@ -1069,25 +1083,24 @@ export function getNapCatStatus(opts: {
 
 /** 尝试拉起本机 NapCat（Windows 优先） */
 export function tryLaunchNapCat(root: string): { ok: boolean; message: string } {
-  const marker = readNapCatMarker(root);
   const home = resolveNapCatHome(root);
-  const flavor = (marker?.flavor || resolveFlavor("auto")) as string;
   mkdirSync(home, { recursive: true });
+  try {
+    ensureNapCatLaunchScripts(root);
+  } catch (e) {
+    return {
+      ok: false,
+      message: `无法写入启动脚本：${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
 
   if (isWin()) {
-    let bat =
+    const bat =
       [join(home, "start-nexus.bat"), join(home, "launcher.bat"), join(home, "launcher-win10.bat")].find(
         (p) => existsSync(p),
       ) || "";
     if (!bat) {
-      try {
-        bat = writeStartScripts(home, "shell");
-      } catch {
-        /* ignore */
-      }
-    }
-    if (!bat || !existsSync(bat)) {
-      return { ok: false, message: "未找到启动脚本，请先到环境配置安装或点「重装/接线」" };
+      return { ok: false, message: "未找到启动脚本，请先到环境配置安装或点「重新写入反向 WS」" };
     }
     spawn("cmd.exe", ["/c", "start", '""', bat], {
       cwd: home,
@@ -1098,19 +1111,9 @@ export function tryLaunchNapCat(root: string): { ok: boolean; message: string } 
     return { ok: true, message: "已拉起 NapCat 窗口，请扫码登录" };
   }
 
-  let sh = join(home, "start-nexus.sh");
+  const sh = join(home, "start-nexus.sh");
   if (!existsSync(sh)) {
-    try {
-      sh = writeStartScripts(home, flavor === "shell" ? "linux" : flavor);
-    } catch (e) {
-      return {
-        ok: false,
-        message: `无法写入 start-nexus.sh：${e instanceof Error ? e.message : String(e)}`,
-      };
-    }
-  }
-  if (!existsSync(sh)) {
-    return { ok: false, message: "未找到 start-nexus.sh，请到环境配置点「重装/接线」" };
+    return { ok: false, message: "未找到 start-nexus.sh，请到环境配置点「重新写入反向 WS」" };
   }
   spawn("bash", [sh], { cwd: home, detached: true, stdio: "ignore" }).unref();
   return { ok: true, message: "已后台尝试启动，请看终端或扫码窗口" };

@@ -19,6 +19,7 @@ import BotAccountCards, { type BotDraft } from "@/components/BotAccountCards.vue
 
 type NapCatInfo = {
   installed?: boolean;
+  canLaunch?: boolean;
   home?: string;
   flavor?: string;
   version?: string;
@@ -179,10 +180,18 @@ onUnmounted(() => {
           <p class="tip">{{ info?.napcat?.tip || "—" }}</p>
           <n-space style="margin-top: 10px">
             <n-button type="primary" @click="router.push('/env-setup')">去环境配置安装 NapCat</n-button>
-            <n-button :loading="acting === 'launch'" :disabled="!info?.napcat?.installed" @click="launchNapCat">
+            <n-button
+              :loading="acting === 'launch'"
+              :disabled="!(info?.napcat?.canLaunch || info?.napcat?.installed)"
+              @click="launchNapCat"
+            >
               启动 NapCat
             </n-button>
-            <n-button :loading="acting === 'wire'" :disabled="!info?.napcat?.installed" @click="rewire">
+            <n-button
+              :loading="acting === 'wire'"
+              :disabled="!(info?.napcat?.home || info?.napcat?.installed)"
+              @click="rewire"
+            >
               重新写入反向 WS
             </n-button>
             <a
