@@ -427,7 +427,7 @@ async function main() {
   process.env.NEXUS_ENV = guessEnv();
 
   await detectDeps();
-  await ensureBuild();
+  // ensureBuild 挪进循环：#更新后同窗口重启也要重编 packages dist
 
   bootLog("OK", ANSI.green, `姿态=${process.env.NEXUS_ENV}`);
   const showPort = String(process.env.PORT || "8787").trim() || "8787";
@@ -442,6 +442,9 @@ async function main() {
   // #重启 / 更新：网关退出码 75 或 data/nexus-restart.flag → 同窗口再拉起，不新开终端
   const RESTART_CODE = 75;
   for (;;) {
+    // 每次拉起前再确认包 dist（#更新只拉了源码，dist 未进 git）
+    await detectDeps();
+    await ensureBuild();
     const code = await runCode(["--filter", "@fengyun/nexus-gateway", gatewayScript]);
     const flagged = consumeRestartFlag();
     if (code === RESTART_CODE || flagged) {

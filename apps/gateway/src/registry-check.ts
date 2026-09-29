@@ -347,12 +347,21 @@ function pluginSdkLinkHealthy(link: string): boolean {
       exports?: { "."?: string | { import?: string; require?: string; default?: string } };
     };
     const exp = pkg.exports?.["."];
+    // 只有 import、没有 require/default 时，tsx/CJS 会报 No "exports" main defined
+    if (exp && typeof exp === "object") {
+      if (!exp.require && !exp.default && !exp.import) return false;
+      if (exp.import && !exp.require && !exp.default) {
+        // 允许纯 ESM，但入口文件必须在
+        const entry = String(exp.import).replace(/^\.\//, "");
+        return existsSync(join(link, entry));
+      }
+    }
     const entry =
       typeof exp === "string"
         ? exp
-        : exp?.import || exp?.default || exp?.require || pkg.main || "";
+        : exp?.require || exp?.default || exp?.import || pkg.main || "";
     if (!entry) return false;
-    return existsSync(join(link, entry));
+    return existsSync(join(link, entry.replace(/^\.\//, "")));
   } catch {
     return false;
   }

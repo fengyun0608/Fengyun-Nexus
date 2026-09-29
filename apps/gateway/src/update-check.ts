@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFileSync, execSync } from "node:child_process";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 export type UpdateCheckResult = {
@@ -338,6 +338,40 @@ export function applyRemoteUpdate(root: string): UpdateApplyResult {
     const version = readLocalVersion(root);
     const updated = before !== after;
 
+    // dist/ 不进 git：拉源码后必须重编内部包，否则 gateway 会报缺导出（如 DesktopPetChannel）
+    let buildNote = "";
+    if (updated) {
+      try {
+        execSync("pnpm run build:packages", {
+          cwd: root,
+          stdio: "pipe",
+          encoding: "utf8",
+          timeout: 600_000,
+          env: { ...process.env, FORCE_COLOR: "0" },
+        });
+        buildNote = "内部包已重新编译";
+      } catch (e) {
+        const err = e instanceof Error ? e.message : String(e);
+        const stderr =
+          e && typeof e === "object" && "stderr" in e
+            ? String((e as { stderr?: string }).stderr || "")
+            : "";
+        buildNote = `内部包编译失败（重启时 boot 会再试）：${(stderr || err).slice(0, 240)}`;
+      }
+      // 插件里坏掉的 SDK 链接尽量清掉，交给下次 boot / 热更重接
+      try {
+        const pluginsDir = join(root, "plugins");
+        if (existsSync(pluginsDir)) {
+          execSync(
+            `find "${pluginsDir}" -path '*/node_modules/@fengyun/nexus-plugin-sdk' -type d -prune -exec rm -rf {} + 2>/dev/null || true`,
+            { cwd: root, stdio: "ignore", shell: "/bin/bash" },
+          );
+        }
+      } catch {
+        /* Windows 可忽略 */
+      }
+    }
+
     let shortStat = "";
     let subjects: string[] = [];
     let areas = "";
@@ -362,6 +396,12 @@ export function applyRemoteUpdate(root: string): UpdateApplyResult {
       subjects,
       areas,
     });
+
+    if (buildNote && updated) {
+      built.forwardNodes = [...(built.forwardNodes || []), `编译\n${buildNote}`];
+      built.reportText = `${built.reportText || ""}\n\n编译\n${buildNote}`.trim();
+      built.changeItems = [...(built.changeItems || []), buildNote];
+    }
 
     return {
       ok: true,
