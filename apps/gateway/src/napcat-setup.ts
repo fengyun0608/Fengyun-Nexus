@@ -12,6 +12,7 @@ import {
   writeFileSync,
   unlinkSync,
   renameSync,
+  statSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -718,7 +719,7 @@ function downloadLinuxPackage(urls: string[], outFile: string, log: InstallNapCa
         `curl -fL -A "Mozilla/5.0" --connect-timeout 30 --max-time 900 -o "${outFile}" "${url}"`,
         { stdio: "inherit" },
       );
-      const st = existsSync(outFile) ? require("node:fs").statSync(outFile) : null;
+      const st = existsSync(outFile) ? statSync(outFile) : null;
       // 真 deb 通常 > 50MB；483B 是 404 XML
       if (!st || st.size < 5_000_000) {
         log(`下载体积异常（${st?.size ?? 0} 字节），换下一个源…`);

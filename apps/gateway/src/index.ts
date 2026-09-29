@@ -4408,10 +4408,6 @@ async function bootstrap(): Promise<void> {
     });
 
     if (pending.channel === "onebot11") {
-      if (!onebot.status().connected && !onebot.listConnectedSelfIds().length) {
-        log.warn("重启成功图已生成，但 OneBot 未连接，等 NapCat 扫码连上后再发 #状态 即可");
-        return;
-      }
       const gid =
         pending.groupId ||
         (pending.chatId.startsWith("group:") ? pending.chatId.slice(6) : undefined);
