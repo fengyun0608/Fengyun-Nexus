@@ -137,7 +137,7 @@ cd Fengyun-Nexus
 chmod +x boot.sh && ./boot.sh
 ```
 
-已装过：目录里 `./boot.sh` 或双击 `start.bat`。
+已装过：目录里 `./boot.sh` / `start.bat`（默认 PM2 后台）。日常：`./nexus.sh start` · `./nexus.sh desk` · `./nexus.sh logs -f`。
 
 本机已装 Docker 时：
 
@@ -152,10 +152,13 @@ docker compose up -d --build
 ## 常用命令
 
 ```bash
-pnpm boot                 # 启动（正式，无 watch）
-pnpm smoke                # 另开端口，确认能听并且 #帮助 有回
-pnpm nexus setup          # 交互配置
-pnpm nexus env desktop    # 切换姿态
+./nexus.sh start          # PM2 后台启动框架（Windows: nexus.cmd start）
+./nexus.sh desk           # 启动台：填 QQ/端口 → 启 NapCat → 跟日志
+./nexus.sh logs -f        # 框架日志
+./nexus.sh nc logs -f     # NapCat 日志
+NEXUS_FOREGROUND=1 ./boot.sh   # 前台调试
+pnpm smoke                # 另开端口冒烟
+pnpm nexus setup          # 交互改密
 pnpm nexus status
 ```
 

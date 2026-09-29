@@ -14,6 +14,9 @@
 #   NEXUS_REINSTALL=1       重装运行环境，并清空后重装框架目录
 #   NEXUS_REINSTALL_ENV=1   只重装 Node/pnpm 等环境，不动项目目录
 #   NEXUS_SKIP_BOOT=1       只装不启
+#   NEXUS_SKIP_NAPCAT=1     跳过 NapCat 安装
+#   NEXUS_SKIP_DESK=1       启动后不进启动台
+#   NEXUS_FOREGROUND=1      前台占终端（默认 PM2 后台）
 #   NEXUS_ENV=desktop|server|termux
 #   NEXUS_INSTALL_DIR=…     安装目录（默认 ~/Fengyun-Nexus）
 #   NEXUS_BRANCH=main
@@ -420,10 +423,23 @@ ensure_pnpm() {
   fi
 }
 
+ensure_pm2() {
+  if command -v pm2 >/dev/null 2>&1; then
+    ok "PM2 $(pm2 -v 2>/dev/null || echo ok)"
+    return 0
+  fi
+  log "安装 PM2"
+  npm install -g pm2 || warn "PM2 安装失败（稍后可用 npm i -g pm2）"
+  if command -v pm2 >/dev/null 2>&1; then
+    ok "PM2 $(pm2 -v 2>/dev/null || echo ok)"
+  fi
+}
+
 install_env() {
   ensure_base_pkgs
   ensure_node
   ensure_pnpm
+  ensure_pm2
   ok "环境  node=$(node -v)  pnpm=$(pnpm -v)  姿态=$NEXUS_ENV"
 }
 
@@ -535,7 +551,7 @@ clone_fresh() {
 
 finalize_tree() {
   cd "$INSTALL_DIR"
-  chmod +x boot.sh restart.sh scripts/get.sh server-install.sh termux-install.sh scripts/termux-setup.sh scripts/termux-repair-apt.sh 2>/dev/null || true
+  chmod +x boot.sh restart.sh nexus.sh scripts/get.sh server-install.sh termux-install.sh scripts/termux-setup.sh scripts/termux-repair-apt.sh 2>/dev/null || true
   export NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false
   export NEXUS_ENV
   if [ "$NEXUS_ENV" = "termux" ]; then
@@ -548,6 +564,21 @@ finalize_tree() {
   persist_mirror
   persist_env
   ok "框架已就绪  env=$NEXUS_ENV  mirror=$MIRROR  $(git -C "$INSTALL_DIR" log -1 --oneline 2>/dev/null || echo ready)"
+}
+
+ensure_runtime_extras() {
+  cd "$INSTALL_DIR"
+  log "企业运行时：PM2 + NapCat（可 NEXUS_SKIP_NAPCAT=1 跳过 NC）"
+  # 依赖需先装，tsx 才能跑 install-napcat-once
+  if [ ! -d node_modules ]; then
+    log "首次 pnpm install…"
+    pnpm install || warn "pnpm install 未完全成功，稍后 boot 还会再装"
+  fi
+  if [ "${NEXUS_SKIP_NAPCAT:-0}" = "1" ]; then
+    node scripts/ensure-runtime.mjs --pm2-only || true
+  else
+    node scripts/ensure-runtime.mjs || true
+  fi
 }
 
 ensure_framework() {
@@ -612,6 +643,7 @@ public_ipv4() {
 boot_now() {
   cd "$INSTALL_DIR"
   export NEXUS_ENV
+  ensure_runtime_extras
   log "启动  姿态=$NEXUS_ENV"
   log "进程绑定 0.0.0.0:8787"
   local pub
@@ -622,6 +654,26 @@ boot_now() {
     log "外网打开 http://公网IP:8787/ （公网 IP 看云控制台，网卡地址多半是内网）"
   fi
   log "云服务器请在安全组放行 TCP 8787，只开别的端口连不上"
+
+  if [ "${NEXUS_FOREGROUND:-0}" = "1" ]; then
+    log "前台模式 NEXUS_FOREGROUND=1"
+    exec ./boot.sh
+  fi
+
+  if command -v pm2 >/dev/null 2>&1; then
+    log "PM2 后台启动框架"
+    pnpm --filter @fengyun/nexus-cli start -- start || ./boot.sh
+    if [ -t 0 ] && [ "${NEXUS_SKIP_DESK:-0}" != "1" ]; then
+      log "进入启动台（填 QQ / 端口 → 启 NapCat）"
+      pnpm --filter @fengyun/nexus-cli start -- desk || true
+    else
+      ok "已后台运行。启动台：cd $INSTALL_DIR && ./nexus.sh desk"
+      ok "日志：./nexus.sh logs -f"
+    fi
+    exit 0
+  fi
+
+  warn "无 PM2，回退 ./boot.sh"
   exec ./boot.sh
 }
 

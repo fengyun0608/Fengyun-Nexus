@@ -13,6 +13,9 @@
 #   $env:NEXUS_REINSTALL = "1"         重装环境并清空后重装框架目录
 #   $env:NEXUS_REINSTALL_ENV = "1"     只重装 Node/pnpm
 #   $env:NEXUS_SKIP_BOOT = "1"         只装不启
+#   $env:NEXUS_SKIP_NAPCAT = "1"       跳过 NapCat
+#   $env:NEXUS_SKIP_DESK = "1"         不进启动台
+#   $env:NEXUS_FOREGROUND = "1"        前台启动
 #   $env:NEXUS_ENV = "desktop"         desktop|server
 #   $env:NEXUS_INSTALL_DIR             默认 $HOME\Fengyun-Nexus
 #   $env:NEXUS_BRANCH = "main"
@@ -150,6 +153,42 @@ function Ensure-Pnpm {
   }
 }
 
+function Ensure-Pm2 {
+  if (Test-Cmd "pm2") {
+    Write-Ok "PM2 $((pm2 -v) 2>$null)"
+    return
+  }
+  Write-Log "安装 PM2"
+  npm install -g pm2
+  $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+    [System.Environment]::GetEnvironmentVariable("Path", "User")
+  if (Test-Cmd "pm2") {
+    Write-Ok "PM2 $((pm2 -v) 2>$null)"
+  } else {
+    Write-Warn "PM2 安装后仍不可用，请重开终端"
+  }
+}
+
+function Ensure-RuntimeExtras {
+  Push-Location $InstallDir
+  try {
+    Write-Log "企业运行时：PM2 + NapCat"
+    if (-not (Test-Path "node_modules")) {
+      Write-Log "首次 pnpm install…"
+      pnpm install
+    }
+    if ($env:NEXUS_SKIP_NAPCAT -eq "1") {
+      node scripts/ensure-runtime.mjs --pm2-only
+    } else {
+      node scripts/ensure-runtime.mjs
+    }
+  } catch {
+    Write-Warn $_.Exception.Message
+  } finally {
+    Pop-Location
+  }
+}
+
 function Test-Framework {
   return (Test-Path (Join-Path $InstallDir "package.json")) -and (Test-Path (Join-Path $InstallDir "start.bat"))
 }
@@ -240,6 +279,7 @@ Write-Host ""
 Ensure-Git
 Ensure-Node
 Ensure-Pnpm
+Ensure-Pm2
 Write-Ok "环境  node=$(node -v)  pnpm=$(pnpm -v)  姿态=$NexusEnv"
 
 Ensure-Framework
@@ -265,7 +305,21 @@ if ($SkipBoot) {
   exit 0
 }
 
-Write-Log "启动  控制台 http://127.0.0.1:8787/"
+Ensure-RuntimeExtras
+
+if ($env:NEXUS_FOREGROUND -eq "1") {
+  Write-Log "前台启动"
+  Set-Location $InstallDir
+  & .\start.bat
+  exit $LASTEXITCODE
+}
+
+Write-Log "PM2 后台启动 + 启动台"
 Set-Location $InstallDir
-& .\start.bat
-exit $LASTEXITCODE
+pnpm --filter @fengyun/nexus-cli start -- start
+if ($env:NEXUS_SKIP_DESK -ne "1") {
+  pnpm --filter @fengyun/nexus-cli start -- desk
+} else {
+  Write-Ok "已后台。启动台：.\nexus.cmd desk  日志：.\nexus.cmd logs -f"
+}
+exit 0

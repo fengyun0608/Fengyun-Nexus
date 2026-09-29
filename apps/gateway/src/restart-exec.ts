@@ -28,9 +28,19 @@ export function consumeRestartFlag(root: string): boolean {
   return true;
 }
 
+/** 是否在 PM2 托管的 boot.mjs 之下（网关子进程仍用 exit 75，由 boot 同窗再拉） */
+export function underPm2Boot(): boolean {
+  return (
+    process.env.NEXUS_UNDER_PM2 === "1" ||
+    Boolean(process.env.pm_id) ||
+    process.env.name === "nexus"
+  );
+}
+
 /**
  * Same-window restart: write flag + exit 75.
- * boot.mjs / pnpm boot 父进程检测到后原地再拉网关，不新开终端窗口。
+ * PM2 托管时进程是 boot.mjs，exit 75 仍由 boot 循环处理（不与 pm2 restart 打架）。
+ * 运维整进程重启请用：nexus restart / pm2 restart nexus
  */
 export function scheduleSystemRestart(root: string): {
   ok: boolean;
@@ -41,7 +51,7 @@ export function scheduleSystemRestart(root: string): {
     writeRestartFlag(root);
     return {
       ok: true,
-      message: "正在重启",
+      message: underPm2Boot() ? "正在重启（PM2 · boot 同窗）" : "正在重启",
       exitCode: NEXUS_RESTART_EXIT_CODE,
     };
   } catch {

@@ -1,12 +1,8 @@
 #!/usr/bin/env node
 /**
- * Nexus CLI — configure by commands (no need to hand-edit files).
- * Local files written here stay gitignored.
+ * Nexus CLI — 配置 / PM2 启停 / 启动台入口
  */
-import {
-  createInterface,
-  type Interface,
-} from "node:readline";
+import { createInterface, type Interface } from "node:readline";
 import {
   existsSync,
   mkdirSync,
@@ -15,7 +11,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync, execSync } from "node:child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [cmd, sub, ...rest] = process.argv.slice(2);
@@ -24,13 +20,19 @@ const isWin = process.platform === "win32";
 function help() {
   console.log(`Fengyun Nexus
 
-  nexus boot
-  nexus setup
-  nexus env [desktop|mobile|server|termux]
-  nexus set llm-key|llm-url|llm-model <value>
+  nexus start              PM2 后台启动框架
+  nexus stop               停止框架
+  nexus restart            重启框架
+  nexus logs [-f] [行数]   框架日志（-f 跟随）
+  nexus desk [QQ] [端口]   启动台：填 QQ/端口 → 配好 → 启 NapCat → 跟日志
+  nexus nc start|stop|logs|status
+  nexus boot               前台启动（调试）
+  nexus setup              首次改密
+  nexus env [姿态]
   nexus status
-  nexus create plugin <name>
   nexus help
+
+  一键安装后默认 PM2 后台；看日志：nexus logs -f
 `);
 }
 
@@ -103,12 +105,49 @@ function setEnv(id: string): void {
     console.error("可用：desktop | mobile | server | termux");
     process.exit(1);
   }
-  writeJson(join(root, "configs/runtime.local.json"), { env: id, updatedAt: new Date().toISOString() });
+  writeJson(join(root, "configs/runtime.local.json"), {
+    env: id,
+    updatedAt: new Date().toISOString(),
+  });
   const envMap = readEnvFile();
   envMap.NEXUS_ENV = id;
   writeEnvFile(envMap);
-  console.log(`已切换环境姿态 → ${id}（已写入本地配置，不会上传）`);
-  console.log("下次 nexus boot 生效。");
+  console.log(`已切换环境姿态 → ${id}`);
+}
+
+function runNodeScript(scriptRel: string, args: string[]): number {
+  const script = join(root, scriptRel);
+  const r = spawnSync(process.execPath, [script, ...args], {
+    cwd: root,
+    stdio: "inherit",
+    env: process.env,
+  });
+  return r.status ?? 1;
+}
+
+function runOps(args: string[]): number {
+  const r = spawnSync(
+    isWin ? "pnpm.cmd" : "pnpm",
+    ["exec", "tsx", join(root, "scripts/nexus-ops.ts"), ...args],
+    { cwd: root, stdio: "inherit", shell: isWin, env: process.env },
+  );
+  return r.status ?? 1;
+}
+
+function hasPm2(): boolean {
+  try {
+    execSync(isWin ? "where pm2" : "command -v pm2", { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ensurePm2OrTip(): boolean {
+  if (hasPm2()) return true;
+  console.log(">>> 未检测到 PM2，正在安装…");
+  const code = runNodeScript("scripts/ensure-runtime.mjs", ["--pm2-only"]);
+  return code === 0 && hasPm2();
 }
 
 async function setupInteractive(): Promise<void> {
@@ -136,7 +175,7 @@ async function setupInteractive(): Promise<void> {
       sessionHours: 12,
       setupCompleted: true,
     });
-    console.log("已保存。请 nexus boot 后用新账号登录（旧登录态会失效）。");
+    console.log("已保存。请 nexus start 后用新账号登录。");
   } finally {
     rl.close();
   }
@@ -161,7 +200,23 @@ function setKey(kind: string, value: string): void {
   }
   map[envKey] = value;
   writeEnvFile(map);
-  console.log(`已写入本地 .env → ${envKey}=${mask(value)}（不上传）`);
+  console.log(`已写入本地 .env → ${envKey}=${mask(value)}`);
+}
+
+function frameworkPm2Line(): string {
+  try {
+    const raw = execSync("pm2 jlist", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const list = JSON.parse(raw || "[]") as Array<{
+      name?: string;
+      pid?: number;
+      pm2_env?: { status?: string };
+    }>;
+    const hit = list.find((p) => p.name === "nexus");
+    if (!hit) return "框架 PM2: nexus · stopped";
+    return `框架 PM2: nexus · ${hit.pm2_env?.status || "?"}${hit.pid ? ` · pid ${hit.pid}` : ""}`;
+  } catch {
+    return hasPm2() ? "框架 PM2: 无法读取" : "框架 PM2: 未安装";
+  }
 }
 
 function status(): void {
@@ -170,12 +225,31 @@ function status(): void {
     {},
   );
   const envMap = readEnvFile();
+  const onebot = readJson<{
+    enabled?: boolean;
+    bots?: Array<{ selfId?: string }>;
+  }>(join(root, "configs/onebot.local.json"), {});
+  const markerPath = join(root, "data/runtimes/napcat/installed.json");
+  const marker = readJson<{ home?: string; flavor?: string }>(markerPath, {});
   console.log(`环境姿态: ${currentEnv()}`);
   console.log(`Termux 检测: ${isTermux() ? "是" : "否"}`);
+  console.log(frameworkPm2Line());
+  console.log(
+    `NapCat 安装: ${marker.home || join(root, "data/runtimes/napcat")}${marker.flavor ? `（${marker.flavor}）` : ""}`,
+  );
+  console.log(
+    `OneBot: ${onebot.enabled === false ? "关" : "开"} · 号 ${onebot.bots?.filter((b) => b.selfId).length || 0}`,
+  );
   console.log(`管理用户: ${admin.username || "console（初始）"}`);
   console.log(`已完成首次改密: ${admin.setupCompleted ? "是" : "否"}`);
   console.log(`LLM Key: ${mask(envMap.NEXUS_LLM_API_KEY)}`);
-  console.log("本地文件不会上传：.env、configs/*.local.json");
+  if (hasPm2()) {
+    try {
+      runOps(["nc", "status"]);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 function createPlugin(name: string) {
@@ -228,12 +302,12 @@ export default definePlugin({
   console.log("created", dir);
 }
 
-function boot(mode?: string): void {
-  const args = ["boot"];
+function bootForeground(mode?: string): void {
   if (mode === "lite" || mode === "full") {
     process.env.NEXUS_BOOT_MODE = mode;
   }
-  const child = spawn(isWin ? "pnpm.cmd" : "pnpm", args, {
+  process.env.NEXUS_FOREGROUND = "1";
+  const child = spawn(isWin ? "pnpm.cmd" : "pnpm", ["boot"], {
     cwd: root,
     stdio: "inherit",
     shell: isWin,
@@ -247,8 +321,29 @@ async function main() {
     help();
     return;
   }
+  if (cmd === "start") {
+    if (!ensurePm2OrTip()) process.exit(1);
+    process.exit(runNodeScript("scripts/pm2-nexus.mjs", ["start"]));
+  }
+  if (cmd === "stop") {
+    process.exit(runNodeScript("scripts/pm2-nexus.mjs", ["stop"]));
+  }
+  if (cmd === "restart") {
+    if (!ensurePm2OrTip()) process.exit(1);
+    process.exit(runNodeScript("scripts/pm2-nexus.mjs", ["restart"]));
+  }
+  if (cmd === "logs") {
+    const args = [sub, ...rest].filter(Boolean);
+    process.exit(runNodeScript("scripts/pm2-nexus.mjs", ["logs", ...args]));
+  }
+  if (cmd === "desk") {
+    process.exit(runOps(["desk", sub, ...rest].filter(Boolean)));
+  }
+  if (cmd === "nc") {
+    process.exit(runOps(["nc", sub, ...rest].filter(Boolean)));
+  }
   if (cmd === "boot") {
-    boot(sub);
+    bootForeground(sub);
     return;
   }
   if (cmd === "env") {

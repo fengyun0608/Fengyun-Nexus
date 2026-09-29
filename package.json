@@ -1,6 +1,6 @@
 {
   "name": "fengyun-nexus",
-  "version": "0.2.183",
+  "version": "0.2.184",
   "private": true,
   "description": "é£äºæ¢çº½ Fengyun Nexus â?é£äºç½ç»åºåçæ¬å?AI å¯¹è¯ä¸èªå¨åæ¢çº½",
   "license": "MIT",
@@ -19,7 +19,8 @@
     "build": "pnpm run build:packages && pnpm --filter @fengyun/nexus-web build",
     "build:web": "pnpm --filter @fengyun/nexus-web build",
     "start": "pnpm --filter @fengyun/nexus-gateway start",
-    "nexus": "pnpm --filter @fengyun/nexus-cli start",
+    "nexus": "pnpm --filter @fengyun/nexus-cli start --",
+    "ensure:runtime": "node scripts/ensure-runtime.mjs",
     "typecheck": "pnpm -r typecheck"
   },
   "engines": {
