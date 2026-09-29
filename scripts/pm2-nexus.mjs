@@ -165,10 +165,11 @@ try {
     else if (a2 && /^\d+$/.test(a2)) lines = Number(a2);
     const r = logs(lines, follow);
     if (typeof r === "number") process.exit(r);
-    return;
+    // follow 模式：子进程 inherit，等其退出
+  } else {
+    console.error("用法：node scripts/pm2-nexus.mjs start|stop|restart|logs|status");
+    process.exit(1);
   }
-  console.error("用法：node scripts/pm2-nexus.mjs start|stop|restart|logs|status");
-  process.exit(1);
 } catch (e) {
   console.error(e instanceof Error ? e.message : e);
   process.exit(1);
