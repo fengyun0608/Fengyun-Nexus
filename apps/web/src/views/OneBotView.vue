@@ -11,6 +11,7 @@ import {
   NSpin,
   NDescriptions,
   NDescriptionsItem,
+  NModal,
   useMessage,
 } from "naive-ui";
 import { api } from "@/api/client";
@@ -28,6 +29,14 @@ type NapCatInfo = {
   docsUrl?: string;
   steps?: string[];
   tip?: string;
+  pm2?: {
+    name?: string;
+    online?: boolean;
+    status?: string;
+    pid?: number;
+    restarts?: number;
+    available?: boolean;
+  };
 };
 
 type OneBotInfo = {
@@ -64,6 +73,9 @@ const saving = ref(false);
 const acting = ref("");
 const err = ref("");
 const info = ref<OneBotInfo | null>(null);
+const logOpen = ref(false);
+const logText = ref("");
+const logLoading = ref(false);
 
 const enabled = ref(false);
 const reverseWsPath = ref("/onebot/v11/ws");
@@ -127,22 +139,57 @@ async function save() {
 async function launchNapCat() {
   acting.value = "launch";
   try {
-    const res = await api<{ message?: string; webuiUrl?: string; terminal?: string; logFile?: string }>(
-      "/v1/admin/napcat/launch",
-      {
-        method: "POST",
-        token: auth.token,
-      },
-    );
+    const res = await api<{
+      message?: string;
+      webuiUrl?: string;
+      terminal?: string;
+      logFile?: string;
+    }>("/v1/admin/napcat/launch", {
+      method: "POST",
+      token: auth.token,
+    });
     message.success(res.message || "已启动");
     const url = String(res.webuiUrl || "").trim();
     if (url.startsWith("http")) {
       window.open(url, "_blank", "noopener,noreferrer");
     }
+    await load(true);
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {
     acting.value = "";
+  }
+}
+
+async function stopNapCat() {
+  acting.value = "stop";
+  try {
+    const res = await api<{ message?: string }>("/v1/admin/napcat/stop", {
+      method: "POST",
+      token: auth.token,
+    });
+    message.success(res.message || "已停止");
+    await load(true);
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    acting.value = "";
+  }
+}
+
+async function showLogs() {
+  logOpen.value = true;
+  logLoading.value = true;
+  logText.value = "";
+  try {
+    const res = await api<{ logs?: string; message?: string }>("/v1/admin/napcat/logs?lines=120", {
+      token: auth.token,
+    });
+    logText.value = res.logs || res.message || "（空）";
+  } catch (e) {
+    logText.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    logLoading.value = false;
   }
 }
 
@@ -175,7 +222,7 @@ onUnmounted(() => {
   <div class="page">
     <header class="page-head">
       <h1>OneBot 11 · QQ</h1>
-      <p class="muted">NapCat 反向 WebSocket。装好扫码，连接变绿就能用。</p>
+      <p class="muted">NapCat 用 PM2 后台跑。本页轻量启动 / 停止 / 看日志，扫码后连上即可。</p>
     </header>
     <n-spin :show="loading">
       <p v-if="err" class="err">{{ err }}</p>
@@ -188,12 +235,21 @@ onUnmounted(() => {
           <n-space style="margin-top: 10px">
             <n-button type="primary" @click="router.push('/env-setup')">去环境配置安装 NapCat</n-button>
             <n-button
+              type="primary"
               :loading="acting === 'launch'"
               :disabled="!(info?.napcat?.canLaunch || info?.napcat?.installed)"
               @click="launchNapCat"
             >
               启动 NapCat
             </n-button>
+            <n-button
+              :loading="acting === 'stop'"
+              :disabled="!info?.napcat?.pm2?.available"
+              @click="stopNapCat"
+            >
+              停止
+            </n-button>
+            <n-button :disabled="!info?.napcat?.pm2?.available" @click="showLogs">日志</n-button>
             <n-button
               :loading="acting === 'wire'"
               :disabled="!(info?.napcat?.home || info?.napcat?.installed)"
@@ -211,8 +267,34 @@ onUnmounted(() => {
             </a>
           </n-space>
           <p v-if="info?.napcat?.home" class="hint">安装目录：{{ info.napcat.home }}</p>
-          <p v-if="info?.napcat?.launchCmd" class="hint">启动命令：{{ info.napcat.launchCmd }}</p>
+          <p v-if="info?.napcat?.pm2" class="hint">
+            PM2：
+            <template v-if="!info.napcat.pm2.available">未安装（服务器执行 npm i -g pm2）</template>
+            <template v-else>
+              {{ info.napcat.pm2.name }} · {{ info.napcat.pm2.status
+              }}{{ info.napcat.pm2.pid ? ` · pid ${info.napcat.pm2.pid}` : "" }}
+            </template>
+          </p>
+          <p v-else-if="info?.napcat?.launchCmd" class="hint">启动命令：{{ info.napcat.launchCmd }}</p>
         </n-card>
+
+        <n-modal
+          v-model:show="logOpen"
+          preset="card"
+          title="NapCat · PM2 日志"
+          style="width: min(920px, 94vw)"
+          :bordered="false"
+        >
+          <n-spin :show="logLoading">
+            <pre class="log-box">{{ logText || "—" }}</pre>
+          </n-spin>
+          <template #footer>
+            <n-space justify="end">
+              <n-button @click="showLogs">刷新</n-button>
+              <n-button type="primary" @click="logOpen = false">关闭</n-button>
+            </n-space>
+          </template>
+        </n-modal>
 
         <n-card title="状态" size="small" style="margin-bottom: 14px">
           <n-descriptions :column="2" label-placement="left" size="small">
@@ -224,6 +306,20 @@ onUnmounted(() => {
             <n-descriptions-item label="NapCat">
               <n-tag :type="info?.napcat?.installed ? 'success' : 'warning'" size="small">
                 {{ info?.napcat?.installed ? `已装 ${info?.napcat?.version || ""}` : "未安装" }}
+              </n-tag>
+            </n-descriptions-item>
+            <n-descriptions-item label="PM2">
+              <n-tag
+                :type="info?.napcat?.pm2?.online ? 'success' : info?.napcat?.pm2?.available ? 'warning' : 'default'"
+                size="small"
+              >
+                {{
+                  !info?.napcat?.pm2?.available
+                    ? "无 PM2"
+                    : info?.napcat?.pm2?.online
+                      ? "运行中"
+                      : info?.napcat?.pm2?.status || "已停"
+                }}
               </n-tag>
             </n-descriptions-item>
             <n-descriptions-item label="客户端">{{ info?.clients ?? 0 }}</n-descriptions-item>
@@ -282,8 +378,21 @@ onUnmounted(() => {
 .hint {
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: 0.84rem;
+  font-size: 0.85rem;
   word-break: break-all;
+}
+.log-box {
+  margin: 0;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #0f1a17;
+  color: #d7f5e8;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .doc-link {
   display: inline-flex;

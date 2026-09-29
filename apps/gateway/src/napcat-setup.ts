@@ -35,6 +35,15 @@ export type NapCatStatus = {
   steps: string[];
   tip: string;
   configFiles: string[];
+  /** PM2 进程状态（有 pm2 时） */
+  pm2?: {
+    name: string;
+    online: boolean;
+    status: string;
+    pid?: number;
+    restarts?: number;
+    available: boolean;
+  };
 };
 
 export type NapCatWireOpts = {
@@ -1485,10 +1494,10 @@ export function getNapCatStatus(opts: {
       : "请先点「重新写入反向 WS」或到环境配置安装";
 
   const steps = [
-    "打开「环境配置」→ NapCat → 安装（本机自动选 Windows Shell / Linux / Termux）",
-    "安装完成后运行启动脚本，按窗口提示扫码登录",
-    "登录成功后配置已指向 Nexus 反向 WS，回到本页看「已连接」",
-    "再在「消息通道 → OneBot」确认机器人 QQ，即可用 #菜单 / #禁言 等",
+    "打开「环境配置」→ NapCat → 安装",
+    "本页点「启动 NapCat」：用 PM2 后台拉起（扫码登录）",
+    "需要排障时点「日志」看 PM2 输出；连上后本页变「已连接」",
+    "再确认机器人 QQ，即可用 #菜单 / #禁言 等",
   ];
 
   let tip = "未安装：请到环境配置一键安装 NapCat";
@@ -1501,7 +1510,7 @@ export function getNapCatStatus(opts: {
   ) {
     tip = "已装 NapCat 但缺 LinuxQQ：点「启动 NapCat」会尝试补装 qq，或到环境配置重装";
   } else if (installed && !opts.connected) {
-    tip = "已安装未连接：请启动 NapCat 并扫码，或检查反向 WS 地址";
+    tip = "已安装未连接：点「启动 NapCat」（PM2 后台），再扫码或点「日志」看 WebUI 链接";
   }
   if (opts.connected) tip = `已连接${opts.selfId ? `（QQ ${opts.selfId}）` : ""}，可以收发消息了`;
 
@@ -1512,6 +1521,8 @@ export function getNapCatStatus(opts: {
       if (/^onebot11.*\.json$/i.test(n)) configFiles.push(join(cfg, n));
     }
   }
+
+  const pm2 = getNapCatPm2Status();
 
   return {
     installed,
@@ -1525,16 +1536,168 @@ export function getNapCatStatus(opts: {
     steps,
     tip,
     configFiles,
+    pm2,
   };
 }
 
-/** 尝试拉起本机 NapCat：开终端看日志，并尽量解析 WebUI 扫码页 */
+export const NAPCAT_PM2_NAME = "nexus-napcat";
+
+function pm2Bin(): string | null {
+  return whichCmd("pm2") || (isWin() ? whichCmd("pm2.cmd") : null);
+}
+
+export function getNapCatPm2Status(): {
+  name: string;
+  online: boolean;
+  status: string;
+  pid?: number;
+  restarts?: number;
+  available: boolean;
+} {
+  const bin = pm2Bin();
+  if (!bin) {
+    return { name: NAPCAT_PM2_NAME, online: false, status: "no-pm2", available: false };
+  }
+  try {
+    const out = execSync(`"${bin}" jlist`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 15_000,
+    });
+    const list = JSON.parse(out || "[]") as Array<{
+      name?: string;
+      pid?: number;
+      pm2_env?: { status?: string; restart_time?: number };
+    }>;
+    const hit = list.find((p) => p.name === NAPCAT_PM2_NAME);
+    if (!hit) {
+      return { name: NAPCAT_PM2_NAME, online: false, status: "stopped", available: true };
+    }
+    const status = hit.pm2_env?.status || "unknown";
+    return {
+      name: NAPCAT_PM2_NAME,
+      online: status === "online",
+      status,
+      pid: hit.pid,
+      restarts: hit.pm2_env?.restart_time,
+      available: true,
+    };
+  } catch {
+    return { name: NAPCAT_PM2_NAME, online: false, status: "error", available: true };
+  }
+}
+
+function launchNapCatViaPm2(script: string, home: string, interpreter: "bash" | "cmd"): {
+  ok: boolean;
+  message: string;
+} {
+  const bin = pm2Bin();
+  if (!bin) {
+    return { ok: false, message: "未安装 PM2。请先：npm i -g pm2" };
+  }
+  try {
+    execSync(`"${bin}" delete ${NAPCAT_PM2_NAME}`, { stdio: "ignore", timeout: 20_000 });
+  } catch {
+    /* 没有旧进程 */
+  }
+  try {
+    if (interpreter === "bash") {
+      execSync(
+        `"${bin}" start "${script}" --name ${NAPCAT_PM2_NAME} --interpreter bash --cwd "${home}"`,
+        { stdio: "pipe", encoding: "utf8", timeout: 30_000 },
+      );
+    } else {
+      execSync(
+        `"${bin}" start "${script}" --name ${NAPCAT_PM2_NAME} --interpreter cmd --cwd "${home}"`,
+        { stdio: "pipe", encoding: "utf8", timeout: 30_000 },
+      );
+    }
+    try {
+      execSync(`"${bin}" save`, { stdio: "ignore", timeout: 15_000 });
+    } catch {
+      /* ignore */
+    }
+    return { ok: true, message: `已用 PM2 后台启动（${NAPCAT_PM2_NAME}）` };
+  } catch (e) {
+    const err = e instanceof Error ? e.message : String(e);
+    const stderr =
+      e && typeof e === "object" && "stderr" in e
+        ? String((e as { stderr?: string }).stderr || "")
+        : "";
+    return { ok: false, message: `PM2 启动失败：${(stderr || err).slice(0, 280)}` };
+  }
+}
+
+export function stopNapCatPm2(): { ok: boolean; message: string } {
+  const bin = pm2Bin();
+  if (!bin) return { ok: false, message: "未安装 PM2" };
+  try {
+    execSync(`"${bin}" stop ${NAPCAT_PM2_NAME}`, { stdio: "pipe", timeout: 20_000 });
+    return { ok: true, message: `已停止 ${NAPCAT_PM2_NAME}` };
+  } catch {
+    try {
+      execSync(`"${bin}" delete ${NAPCAT_PM2_NAME}`, { stdio: "ignore", timeout: 20_000 });
+      return { ok: true, message: `已移除 ${NAPCAT_PM2_NAME}` };
+    } catch (e) {
+      return {
+        ok: false,
+        message: `停止失败：${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+  }
+}
+
+export function getNapCatPm2Logs(lines = 80): { ok: boolean; message: string; logs: string } {
+  const bin = pm2Bin();
+  const n = Math.min(500, Math.max(20, Math.floor(Number(lines) || 80)));
+  if (!bin) {
+    return { ok: false, message: "未安装 PM2", logs: "" };
+  }
+  try {
+    const out = execSync(`"${bin}" logs ${NAPCAT_PM2_NAME} --nostream --lines ${n}`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 20_000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return { ok: true, message: "ok", logs: out.trim() || "（暂无日志）" };
+  } catch (e) {
+    // 兜底读默认日志文件
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    const candidates = [
+      join(home, ".pm2", "logs", `${NAPCAT_PM2_NAME}-out.log`),
+      join(home, ".pm2", "logs", `${NAPCAT_PM2_NAME}-error.log`),
+    ];
+    const chunks: string[] = [];
+    for (const p of candidates) {
+      try {
+        if (!existsSync(p)) continue;
+        const text = readFileSync(p, "utf8");
+        const all = text.split(/\r?\n/);
+        chunks.push(`--- ${p} ---\n${all.slice(-n).join("\n")}`);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (chunks.length) {
+      return { ok: true, message: "ok", logs: chunks.join("\n\n") };
+    }
+    return {
+      ok: false,
+      message: `读日志失败：${e instanceof Error ? e.message : String(e)}`,
+      logs: "",
+    };
+  }
+}
+
+/** 尝试拉起本机 NapCat：优先 PM2 后台，并尽量解析 WebUI 扫码页 */
 export function tryLaunchNapCat(root: string): {
   ok: boolean;
   message: string;
   webuiUrl?: string;
   terminal?: string;
   logFile?: string;
+  pm2?: ReturnType<typeof getNapCatPm2Status>;
 } {
   const home = resolveNapCatHome(root);
   mkdirSync(home, { recursive: true });
@@ -1548,11 +1711,70 @@ export function tryLaunchNapCat(root: string): {
     };
   }
 
+  if (!isWin()) {
+    if (existsSync(join(home, "libnapcat_launcher.so")) && !resolveSystemQq()) {
+      const qq = ensureLinuxQqSync(root, home, (line) => {
+        try {
+          writeFileSync(logFile, `${line}\n`, { flag: "a" });
+        } catch {
+          /* ignore */
+        }
+      });
+      if (!qq) {
+        return {
+          ok: false,
+          message:
+            "未找到 LinuxQQ（qq）。请确认仓库 vendor/napcat/packages 有 QQ 分卷，或到环境配置重装 NapCat",
+          logFile,
+        };
+      }
+    }
+  }
+
+  const sh = join(home, "start-nexus.sh");
+  const bat =
+    [join(home, "start-nexus.bat"), join(home, "launcher.bat"), join(home, "launcher-win10.bat")].find(
+      (p) => existsSync(p),
+    ) || "";
+
+  // 优先 PM2 后台
+  if (pm2Bin()) {
+    if (isWin()) {
+      if (!bat) {
+        return { ok: false, message: "未找到启动脚本，请先到环境配置安装或点「重新写入反向 WS」" };
+      }
+      const r = launchNapCatViaPm2(bat, home, "cmd");
+      if (!r.ok) return { ...r, logFile };
+    } else {
+      if (!existsSync(sh)) {
+        return { ok: false, message: "未找到 start-nexus.sh，请到环境配置点「重新写入反向 WS」" };
+      }
+      const r = launchNapCatViaPm2(sh, home, "bash");
+      if (!r.ok) return { ...r, logFile };
+    }
+    const webuiUrl = readWebUiHint(home, 12000);
+    const pm2 = getNapCatPm2Status();
+    if (webuiUrl) {
+      return {
+        ok: true,
+        message: `${rMessage(pm2)}请打开扫码页：${webuiUrl}`,
+        webuiUrl,
+        terminal: "pm2",
+        logFile,
+        pm2,
+      };
+    }
+    return {
+      ok: true,
+      message: `${rMessage(pm2)}点「日志」看 WebUI 链接；或打开 http://127.0.0.1:6099/webui`,
+      terminal: "pm2",
+      logFile,
+      pm2,
+    };
+  }
+
+  // 无 PM2：回退旧行为，并提示安装
   if (isWin()) {
-    const bat =
-      [join(home, "start-nexus.bat"), join(home, "launcher.bat"), join(home, "launcher-win10.bat")].find(
-        (p) => existsSync(p),
-      ) || "";
     if (!bat) {
       return { ok: false, message: "未找到启动脚本，请先到环境配置安装或点「重新写入反向 WS」" };
     }
@@ -1562,51 +1784,41 @@ export function tryLaunchNapCat(root: string): {
       stdio: "ignore",
       windowsHide: true,
     }).unref();
-    return { ok: true, message: "已拉起 NapCat 窗口，请扫码登录", terminal: "cmd" };
+    return {
+      ok: true,
+      message: "已拉起 NapCat 窗口（建议安装 PM2：npm i -g pm2，之后可后台托管）",
+      terminal: "cmd",
+      logFile,
+    };
   }
 
-  const sh = join(home, "start-nexus.sh");
   if (!existsSync(sh)) {
     return { ok: false, message: "未找到 start-nexus.sh，请到环境配置点「重新写入反向 WS」" };
   }
-  // 半截安装：有 so 没 qq 时先补装，再开终端
-  if (existsSync(join(home, "libnapcat_launcher.so")) && !resolveSystemQq()) {
-    const qq = ensureLinuxQqSync(root, home, (line) => {
-      try {
-        writeFileSync(logFile, `${line}\n`, { flag: "a" });
-      } catch {
-        /* ignore */
-      }
-    });
-    if (!qq) {
-      return {
-        ok: false,
-        message:
-          "未找到 LinuxQQ（qq）。请确认仓库 vendor/napcat/packages 有 QQ 分卷，或到环境配置重装 NapCat",
-        logFile,
-      };
-    }
-  }
   const opened = openNapCatInTerminal(sh, home);
-  const webuiUrl = readWebUiHint(home, 20000);
+  const webuiUrl = readWebUiHint(home, 12000);
+  const tipPm2 = "（建议 npm i -g pm2，之后控制台一键后台托管）";
   if (webuiUrl) {
     return {
       ok: true,
-      message: `已启动（${opened.detail}）。请打开扫码页：${webuiUrl}`,
+      message: `已启动（${opened.detail}）${tipPm2}。扫码页：${webuiUrl}`,
       webuiUrl,
       terminal: opened.detail,
       logFile,
     };
   }
-  let message = `已后台启动，日志：${logFile}；扫码页一般是 http://127.0.0.1:6099/webui`;
-  if (opened.mode === "terminal") {
-    message = `已打开终端窗口（${opened.detail}），请看日志里的 WebUI 链接扫码`;
-  } else if (opened.mode === "screen") {
-    message = `已在 screen 启动。执行 ${opened.detail} 看日志；扫码页一般是 http://127.0.0.1:6099/webui`;
-  } else if (opened.mode === "tmux") {
-    message = `已在 tmux 启动。执行 ${opened.detail} 看日志；扫码页一般是 http://127.0.0.1:6099/webui`;
-  }
-  return { ok: true, message, terminal: opened.detail, logFile };
+  return {
+    ok: true,
+    message: `已后台启动（${opened.detail}）${tipPm2}；日志 ${logFile}`,
+    terminal: opened.detail,
+    logFile,
+  };
+}
+
+function rMessage(pm2: ReturnType<typeof getNapCatPm2Status>): string {
+  return pm2.online
+    ? `PM2 ${pm2.name} 已在跑（pid ${pm2.pid || "?"}）。`
+    : `已提交 PM2 启动 ${pm2.name}（状态 ${pm2.status}）。`;
 }
 
 /** 接线时补写启动脚本（缺 start-nexus.sh 时） */

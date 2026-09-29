@@ -77,6 +77,8 @@ import {
   buildReverseWsUrl,
   ensureNapCatLaunchScripts,
   getNapCatStatus,
+  getNapCatPm2Logs,
+  stopNapCatPm2,
   tryLaunchNapCat,
   wireNapCatConfigs,
   wireNapCatForAccount,
@@ -3352,7 +3354,19 @@ async function bootstrap(): Promise<void> {
       webuiUrl: r.webuiUrl || "",
       terminal: r.terminal || "",
       logFile: r.logFile || "",
+      pm2: r.pm2 || null,
     });
+  });
+
+  app.post("/v1/admin/napcat/stop", authMiddleware, (_req, res) => {
+    const r = stopNapCatPm2();
+    res.status(r.ok ? 200 : 400).json({ ok: r.ok, message: r.message });
+  });
+
+  app.get("/v1/admin/napcat/logs", authMiddleware, (req, res) => {
+    const lines = Number((req.query as { lines?: string }).lines || 80);
+    const r = getNapCatPm2Logs(lines);
+    res.status(r.ok ? 200 : 400).json({ ok: r.ok, message: r.message, logs: r.logs });
   });
 
   app.post("/v1/admin/napcat/wire", authMiddleware, (_req, res) => {
