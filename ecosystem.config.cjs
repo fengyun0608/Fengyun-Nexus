@@ -11,6 +11,7 @@ module.exports = {
       script: path.join(root, "scripts", "boot.mjs"),
       interpreter: "node",
       instances: 1,
+      exec_mode: "fork",
       autorestart: true,
       max_restarts: 20,
       min_uptime: "8s",
