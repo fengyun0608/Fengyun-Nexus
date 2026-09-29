@@ -13,6 +13,7 @@ import {
   unlinkSync,
   renameSync,
   statSync,
+  copyFileSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -670,7 +671,110 @@ function resolveSystemQq(): string | null {
   return null;
 }
 
-/** 官方 LinuxQQ 下载页配置（会变）；失败再回退写死地址 */
+/** 本仓预置包：vendor/napcat/packages（QQ 分卷 + Shell.zip） */
+function napcatVendorPackages(root: string): string {
+  return join(root, "vendor", "napcat", "packages");
+}
+
+/** 合并 QQ.deb.part.* → QQ.deb；已有完整包则直接返回路径 */
+function assembleVendorQqDeb(pkgDir: string, log: InstallNapCatLog = () => undefined): string | null {
+  const full = join(pkgDir, "QQ.deb");
+  if (existsSync(full)) {
+    try {
+      if (statSync(full).size >= 5_000_000) return full;
+    } catch {
+      /* fallthrough */
+    }
+  }
+  let parts: string[] = [];
+  try {
+    parts = readdirSync(pkgDir)
+      .filter((n) => /^QQ\.deb\.part\./i.test(n))
+      .sort()
+      .map((n) => join(pkgDir, n));
+  } catch {
+    return null;
+  }
+  if (!parts.length) {
+    const linuxqq = readdirSync(pkgDir).find((n) => /^linuxqq_.*\.deb$/i.test(n) || /^QQ_.*\.deb$/i.test(n));
+    if (linuxqq) {
+      const p = join(pkgDir, linuxqq);
+      try {
+        if (statSync(p).size >= 5_000_000) return p;
+      } catch {
+        /* ignore */
+      }
+    }
+    return null;
+  }
+  log(`合并 LinuxQQ 分卷（${parts.length} 段）→ QQ.deb …`);
+  try {
+    // 大文件用系统 cat，避免 Node 一次读进内存
+    if (!isWin()) {
+      execSync(`cat ${parts.map((p) => `"${p}"`).join(" ")} > "${full}"`, {
+        stdio: "ignore",
+        shell: "/bin/bash",
+      });
+    } else {
+      const chunks: Buffer[] = [];
+      for (const p of parts) chunks.push(readFileSync(p));
+      writeFileSync(full, Buffer.concat(chunks));
+    }
+    const sz = statSync(full).size;
+    if (sz < 5_000_000) {
+      try {
+        unlinkSync(full);
+      } catch {
+        /* ignore */
+      }
+      log("合并后体积异常，放弃预置包");
+      return null;
+    }
+    log(`QQ.deb 已合并（${(sz / 1024 / 1024).toFixed(1)} MB）`);
+    return full;
+  } catch (e) {
+    log(`合并分卷失败：${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
+/** 把预置 Shell.zip / QQ.deb 铺到安装工作目录，让官方脚本跳过外网下载 */
+function stageNapCatVendorPackages(
+  root: string,
+  workDir: string,
+  log: InstallNapCatLog = () => undefined,
+): { shellZip?: string; qqDeb?: string } {
+  const pkg = napcatVendorPackages(root);
+  const out: { shellZip?: string; qqDeb?: string } = {};
+  if (!existsSync(pkg)) {
+    log("未找到 vendor/napcat/packages，将尝试联网下载");
+    return out;
+  }
+  mkdirSync(workDir, { recursive: true });
+  const shellSrc = join(pkg, "NapCat.Shell.zip");
+  if (existsSync(shellSrc)) {
+    const dest = join(workDir, "NapCat.Shell.zip");
+    try {
+      copyFileSync(shellSrc, dest);
+      out.shellZip = dest;
+      log("已铺预置 NapCat.Shell.zip");
+    } catch (e) {
+      log(`铺 Shell.zip 失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const deb = assembleVendorQqDeb(pkg, log);
+  if (deb) {
+    const dest = join(workDir, "QQ.deb");
+    try {
+      if (deb !== dest) copyFileSync(deb, dest);
+      out.qqDeb = dest;
+      log("已铺预置 QQ.deb（跳过 qqdl）");
+    } catch (e) {
+      log(`铺 QQ.deb 失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return out;
+}
 function resolveLinuxQqDownloadUrls(arch: "amd64" | "arm64"): { deb: string[]; rpm: string[] } {
   const fallbackDeb =
     arch === "arm64"
@@ -739,8 +843,12 @@ function downloadLinuxPackage(urls: string[], outFile: string, log: InstallNapCa
   return false;
 }
 
-/** 安装脚本常半截失败：有 so / launcher 却没系统 qq。启动前尽量补装。 */
-function ensureLinuxQqSync(home: string, log: InstallNapCatLog = () => undefined): string | null {
+/** 安装脚本常半截失败：有 so / launcher 却没系统 qq。优先本仓预置包，再联网。 */
+function ensureLinuxQqSync(
+  root: string,
+  home: string,
+  log: InstallNapCatLog = () => undefined,
+): string | null {
   const hit = resolveSystemQq();
   if (hit) {
     log(`已检测到 LinuxQQ：${hit}`);
@@ -748,6 +856,29 @@ function ensureLinuxQqSync(home: string, log: InstallNapCatLog = () => undefined
   }
   if (isWin() || isTermux()) return null;
   mkdirSync(home, { recursive: true });
+
+  const staged = stageNapCatVendorPackages(root, home, log);
+  if (staged.qqDeb && (whichCmd("apt-get") || whichCmd("dpkg"))) {
+    log("使用预置 QQ.deb 安装 LinuxQQ…");
+    try {
+      execSync(`apt-get install -y -f --allow-downgrades -qq "${staged.qqDeb}"`, {
+        stdio: "inherit",
+      });
+      try {
+        execSync("apt-get install -y -qq libnss3 libgbm1", { stdio: "ignore" });
+      } catch {
+        /* ignore */
+      }
+      const again = resolveSystemQq();
+      if (again) {
+        log(`LinuxQQ 已从预置包装好：${again}`);
+        return again;
+      }
+    } catch (e) {
+      log(`预置包安装失败，改试联网：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   let arch: "amd64" | "arm64" = "amd64";
   try {
     const m = execSync("uname -m", { encoding: "utf8" }).trim();
@@ -756,12 +887,12 @@ function ensureLinuxQqSync(home: string, log: InstallNapCatLog = () => undefined
     /* default amd64 */
   }
   const urls = resolveLinuxQqDownloadUrls(arch);
-  log("未找到 qq，正在补装 LinuxQQ…");
+  log("未找到 qq，正在联网补装 LinuxQQ…");
   try {
     if (whichCmd("apt-get") || whichCmd("dpkg")) {
       const deb = join(home, "QQ.deb");
       if (!downloadLinuxPackage(urls.deb, deb, log)) {
-        log("所有 deb 源均失败，请手动装：https://im.qq.com/linuxqq/");
+        log("联网下载失败。请确认仓库里有 vendor/napcat/packages/QQ.deb.part.*");
         return null;
       }
       execSync(`apt-get install -y -f --allow-downgrades -qq "${deb}"`, { stdio: "inherit" });
@@ -773,7 +904,7 @@ function ensureLinuxQqSync(home: string, log: InstallNapCatLog = () => undefined
     } else if (whichCmd("dnf") || whichCmd("rpm")) {
       const rpm = join(home, "QQ.rpm");
       if (!downloadLinuxPackage(urls.rpm, rpm, log)) {
-        log("所有 rpm 源均失败，请手动装：https://im.qq.com/linuxqq/");
+        log("所有 rpm 源均失败");
         return null;
       }
       execSync(`dnf localinstall -y "${rpm}"`, { stdio: "inherit" });
@@ -787,7 +918,7 @@ function ensureLinuxQqSync(home: string, log: InstallNapCatLog = () => undefined
   }
   const again = resolveSystemQq();
   if (again) log(`LinuxQQ 补装完成：${again}`);
-  else log("补装结束仍未找到 qq，请到环境配置重装 NapCat");
+  else log("补装结束仍未找到 qq");
   return again;
 }
 
@@ -917,6 +1048,9 @@ export async function installNapCat(opts: {
 
   if (flavor === "linux") {
     progress(15);
+    // 先铺预置 Shell.zip / QQ.deb，官方脚本同目录有就不走外网
+    stageNapCatVendorPackages(opts.root, home, log);
+    ensureLinuxQqSync(opts.root, home, log);
     const script = join(home, "napcat.sh");
     // 国内优先 moeyy 镜像，失败再官方 raw（downloadFile 不会再二次套镜像）
     await downloadFirst(
@@ -929,15 +1063,15 @@ export async function installNapCat(opts: {
       signal,
     );
     progress(50);
-    log("执行 Linux Launcher 安装脚本（工作目录内，不破坏系统 QQ）…");
+    log("执行 Linux Launcher 安装脚本（工作目录内，优先用预置包）…");
     const code = await runShell(script, home, log);
     if (code !== 0) {
       log("安装脚本非零退出；若产物已生成可继续接线");
     }
     const shellDir = findShellDir(home) || home;
-    const qq = ensureLinuxQqSync(shellDir, log);
+    const qq = ensureLinuxQqSync(opts.root, shellDir, log);
     if (!qq) {
-      log("警告：系统仍无 LinuxQQ（qq）。启动前会再尝试补装；也可重装 NapCat");
+      log("警告：系统仍无 LinuxQQ（qq）。请确认 vendor/napcat/packages 有 QQ 分卷，或到环境配置重装");
     }
     wireNapCatConfigs(shellDir, url, token);
     const launch = writeStartScripts(shellDir, flavor);
@@ -1437,7 +1571,7 @@ export function tryLaunchNapCat(root: string): {
   }
   // 半截安装：有 so 没 qq 时先补装，再开终端
   if (existsSync(join(home, "libnapcat_launcher.so")) && !resolveSystemQq()) {
-    const qq = ensureLinuxQqSync(home, (line) => {
+    const qq = ensureLinuxQqSync(root, home, (line) => {
       try {
         writeFileSync(logFile, `${line}\n`, { flag: "a" });
       } catch {
@@ -1448,7 +1582,7 @@ export function tryLaunchNapCat(root: string): {
       return {
         ok: false,
         message:
-          "未找到 LinuxQQ（qq）。请到环境配置重装 NapCat，或手动：curl 下 QQ.deb 后 apt install -y ./QQ.deb",
+          "未找到 LinuxQQ（qq）。请确认仓库 vendor/napcat/packages 有 QQ 分卷，或到环境配置重装 NapCat",
         logFile,
       };
     }

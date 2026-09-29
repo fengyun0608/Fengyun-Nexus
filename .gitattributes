@@ -1,0 +1,7 @@
+* text=auto eol=lf
+
+# NapCat 预置二进制（分卷 <100MB）
+vendor/napcat/packages/**/*.zip binary
+vendor/napcat/packages/**/*.deb binary
+vendor/napcat/packages/**/*.rpm binary
+vendor/napcat/packages/**/*.part.* binary
