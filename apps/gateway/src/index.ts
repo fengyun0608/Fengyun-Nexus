@@ -3346,7 +3346,13 @@ async function bootstrap(): Promise<void> {
 
   app.post("/v1/admin/napcat/launch", authMiddleware, (_req, res) => {
     const r = tryLaunchNapCat(ROOT);
-    res.status(r.ok ? 200 : 400).json({ ok: r.ok, message: r.message });
+    res.status(r.ok ? 200 : 400).json({
+      ok: r.ok,
+      message: r.message,
+      webuiUrl: r.webuiUrl || "",
+      terminal: r.terminal || "",
+      logFile: r.logFile || "",
+    });
   });
 
   app.post("/v1/admin/napcat/wire", authMiddleware, (_req, res) => {

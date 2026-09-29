@@ -127,11 +127,18 @@ async function save() {
 async function launchNapCat() {
   acting.value = "launch";
   try {
-    const res = await api<{ message?: string }>("/v1/admin/napcat/launch", {
-      method: "POST",
-      token: auth.token,
-    });
+    const res = await api<{ message?: string; webuiUrl?: string; terminal?: string; logFile?: string }>(
+      "/v1/admin/napcat/launch",
+      {
+        method: "POST",
+        token: auth.token,
+      },
+    );
     message.success(res.message || "已启动");
+    const url = String(res.webuiUrl || "").trim();
+    if (url.startsWith("http")) {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {

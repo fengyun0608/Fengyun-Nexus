@@ -457,41 +457,199 @@ function writeStartScripts(shellDir: string, flavor: string): string {
     );
     return bat;
   }
+
+  // Linux / Termux：修好官方 launcher.sh（qq 不在 PATH 会挂），并写带日志+扫码提示的 start-nexus.sh
+  const fixedLauncher = join(shellDir, "launcher.sh");
+  writeFileSync(
+    fixedLauncher,
+    [
+      "#!/usr/bin/env bash",
+      "cd \"$(dirname \"$0\")\"",
+      "exec bash ./start-nexus.sh",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
   const sh = join(shellDir, "start-nexus.sh");
   writeFileSync(
     sh,
     [
       "#!/usr/bin/env bash",
-      "set -e",
-      "cd \"$(dirname \"$0\")\"",
+      "set -u",
+      "ROOT=\"$(cd \"$(dirname \"$0\")\" && pwd)\"",
+      "cd \"$ROOT\"",
+      "LOG=\"$ROOT/napcat-nexus.log\"",
+      "WEB_HINT=\"$ROOT/webui.url\"",
       "echo \"Fengyun Nexus — 启动 NapCat（扫码后会连本机反向 WS）\"",
-      "if [ -f ./napcat.mjs ]; then",
-      "  exec node ./napcat.mjs",
+      "echo \"日志：$LOG\"",
+      "echo \"扫码页通常在 http://127.0.0.1:6099/webui （完整带 token 链接见日志）\"",
+      ": > \"$LOG\"",
+      "rm -f \"$WEB_HINT\"",
+      "",
+      "resolve_qq() {",
+      "  if command -v qq >/dev/null 2>&1; then command -v qq; return 0; fi",
+      "  for p in /opt/QQ/qq /usr/bin/qq /usr/local/bin/qq \"$ROOT/qq\" \"$ROOT/opt/QQ/qq\"; do",
+      "    if [ -x \"$p\" ]; then echo \"$p\"; return 0; fi",
+      "  done",
+      "  return 1",
+      "}",
+      "",
+      "watch_webui() {",
+      "  for _ in $(seq 1 180); do",
+      "    sleep 1",
+      "    url=$(grep -Eo 'https?://[^ ]+' \"$LOG\" 2>/dev/null | grep -E '6099|webui' | tail -1 || true)",
+      "    if [ -n \"${url:-}\" ]; then",
+      "      echo \"$url\" > \"$WEB_HINT\"",
+      "      echo \"\"",
+      "      echo \"======== 扫码登录 ========\"",
+      "      echo \"请打开浏览器：$url\"",
+      "      echo \"==========================\"",
+      "      if [ -n \"${DISPLAY:-}\" ] && command -v xdg-open >/dev/null 2>&1; then",
+      "        xdg-open \"$url\" >/dev/null 2>&1 || true",
+      "      fi",
+      "      return 0",
+      "    fi",
+      "  done",
+      "}",
+      "",
+      "watch_webui &",
+      "WATCH_PID=$!",
+      "trap 'kill $WATCH_PID 2>/dev/null || true' EXIT",
+      "",
+      "# Shell 包（无注入 so 时）直接跑 node",
+      "if [ -f \"$ROOT/napcat.mjs\" ] && [ ! -f \"$ROOT/libnapcat_launcher.so\" ]; then",
+      "  node \"$ROOT/napcat.mjs\" 2>&1 | tee -a \"$LOG\"",
+      "  exit $?",
       "fi",
-      "if [ -f ./launcher.sh ]; then",
-      "  exec bash ./launcher.sh",
+      "if [ -f \"$ROOT/napcat/napcat.mjs\" ] && [ ! -f \"$ROOT/libnapcat_launcher.so\" ]; then",
+      "  (cd \"$ROOT/napcat\" && node ./napcat.mjs) 2>&1 | tee -a \"$LOG\"",
+      "  exit $?",
       "fi",
-      "if [ -f ./qq ] && [ -f ./libnapcat_launcher.so ]; then",
-      "  export DISPLAY=${DISPLAY:-:1}",
-      "  export LD_PRELOAD=./libnapcat_launcher.so",
-      "  exec ./qq",
+      "",
+      "QQ_BIN=\"$(resolve_qq || true)\"",
+      "if [ -z \"${QQ_BIN}\" ]; then",
+      "  echo \"未找到 LinuxQQ（qq）。请到控制台「环境配置」重装 NapCat，或手动安装 QQ deb/rpm 后再启动。\" | tee -a \"$LOG\"",
+      "  exit 1",
       "fi",
-      "if [ -f ./opt/QQ/qq ]; then",
-      "  export DISPLAY=${DISPLAY:-:1}",
-      "  exec xvfb-run -a ./opt/QQ/qq --no-sandbox",
+      "",
+      "export DISPLAY=\"${DISPLAY:-:1}\"",
+      "if ! (command -v xdpyinfo >/dev/null 2>&1 && xdpyinfo -display \"$DISPLAY\" >/dev/null 2>&1); then",
+      "  if command -v Xvfb >/dev/null 2>&1; then",
+      "    Xvfb \"$DISPLAY\" -screen 0 1x1x8 +extension GLX +render >/dev/null 2>&1 &",
+      "    sleep 1",
+      "  fi",
       "fi",
-      "echo \"未找到 NapCat 可执行文件，请回到控制台点「重装/接线」或看官网 Shell 说明\"",
-      "exit 1",
+      "",
+      "if [ -f \"$ROOT/libnapcat_launcher.so\" ]; then",
+      "  export LD_PRELOAD=\"$ROOT/libnapcat_launcher.so${LD_PRELOAD:+:$LD_PRELOAD}\"",
+      "fi",
+      "echo \"QQ=$QQ_BIN  DISPLAY=$DISPLAY  LD_PRELOAD=${LD_PRELOAD:-无}\" | tee -a \"$LOG\"",
+      "\"$QQ_BIN\" --no-sandbox 2>&1 | tee -a \"$LOG\"",
       "",
     ].join("\n"),
     "utf8",
   );
   try {
-    execSync(`chmod +x "${sh}"`, { stdio: "ignore" });
+    execSync(`chmod +x "${sh}" "${fixedLauncher}"`, { stdio: "ignore" });
   } catch {
     /* ignore */
   }
   return sh;
+}
+
+function whichCmd(bin: string): string | null {
+  try {
+    const out = execSync(isWin() ? `where ${bin}` : `command -v ${bin}`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out.split(/\r?\n/)[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+/** 在可见终端里跑启动脚本；无桌面则进 screen */
+function openNapCatInTerminal(script: string, cwd: string): { mode: string; detail: string } {
+  const run = `cd "${cwd}" && bash "${script}"; echo; echo '（进程已结束，按回车关闭）'; read _`;
+  if (process.env.DISPLAY) {
+    const candidates: Array<{ bin: string; args: string[] }> = [
+      { bin: "gnome-terminal", args: ["--working-directory", cwd, "--", "bash", "-lc", run] },
+      { bin: "xfce4-terminal", args: ["--working-directory", cwd, "-e", `bash -lc ${JSON.stringify(run)}`] },
+      { bin: "konsole", args: ["--workdir", cwd, "-e", "bash", "-lc", run] },
+      { bin: "x-terminal-emulator", args: ["-e", "bash", "-lc", run] },
+      { bin: "xterm", args: ["-T", "Fengyun Nexus · NapCat", "-e", "bash", "-lc", run] },
+    ];
+    for (const c of candidates) {
+      if (!whichCmd(c.bin)) continue;
+      spawn(c.bin, c.args, { cwd, detached: true, stdio: "ignore" }).unref();
+      return { mode: "terminal", detail: c.bin };
+    }
+  }
+  if (whichCmd("screen")) {
+    try {
+      execSync("screen -S nexus-napcat -X quit", { stdio: "ignore" });
+    } catch {
+      /* no prior session */
+    }
+    spawn("screen", ["-dmS", "nexus-napcat", "bash", "-lc", `cd "${cwd}" && bash "${script}"`], {
+      cwd,
+      detached: true,
+      stdio: "ignore",
+    }).unref();
+    return { mode: "screen", detail: "screen -r nexus-napcat" };
+  }
+  if (whichCmd("tmux")) {
+    try {
+      execSync("tmux kill-session -t nexus-napcat", { stdio: "ignore" });
+    } catch {
+      /* ignore */
+    }
+    spawn("tmux", ["new-session", "-d", "-s", "nexus-napcat", `cd "${cwd}" && bash "${script}"`], {
+      cwd,
+      detached: true,
+      stdio: "ignore",
+    }).unref();
+    return { mode: "tmux", detail: "tmux attach -t nexus-napcat" };
+  }
+  spawn("bash", [script], { cwd, detached: true, stdio: "ignore" }).unref();
+  return { mode: "background", detail: `日志 ${join(cwd, "napcat-nexus.log")}` };
+}
+
+function readWebUiHint(home: string, waitMs = 18000): string {
+  const hint = join(home, "webui.url");
+  const log = join(home, "napcat-nexus.log");
+  const deadline = Date.now() + Math.max(0, waitMs);
+  const extract = (): string => {
+    try {
+      if (existsSync(hint)) {
+        const u = readFileSync(hint, "utf8").trim();
+        if (u.startsWith("http")) return u;
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (existsSync(log)) {
+        const text = readFileSync(log, "utf8");
+        const m = text.match(/https?:\/\/[^\s"'<>]+(?:6099|webui)[^\s"'<>]*/i);
+        if (m?.[0]) return m[0];
+      }
+    } catch {
+      /* ignore */
+    }
+    return "";
+  };
+  let url = extract();
+  while (!url && Date.now() < deadline) {
+    try {
+      execSync(isWin() ? "ping -n 1 127.0.0.1 >nul" : "sleep 0.5", { stdio: "ignore" });
+    } catch {
+      /* ignore */
+    }
+    url = extract();
+  }
+  return url;
 }
 
 /** 解析实际 NapCat 目录：优先 marker，再扫 runtimes/napcat */
@@ -696,7 +854,13 @@ export async function installNapCat(opts: {
 
 function findShellDir(dir: string): string | null {
   if (!existsSync(dir)) return null;
-  if (existsSync(join(dir, "launcher.bat")) || existsSync(join(dir, "napcat.mjs"))) return dir;
+  if (
+    existsSync(join(dir, "launcher.bat")) ||
+    existsSync(join(dir, "napcat.mjs")) ||
+    existsSync(join(dir, "libnapcat_launcher.so"))
+  ) {
+    return dir;
+  }
   try {
     for (const name of readdirSync(dir)) {
       const p = join(dir, name);
@@ -1081,10 +1245,17 @@ export function getNapCatStatus(opts: {
   };
 }
 
-/** 尝试拉起本机 NapCat（Windows 优先） */
-export function tryLaunchNapCat(root: string): { ok: boolean; message: string } {
+/** 尝试拉起本机 NapCat：开终端看日志，并尽量解析 WebUI 扫码页 */
+export function tryLaunchNapCat(root: string): {
+  ok: boolean;
+  message: string;
+  webuiUrl?: string;
+  terminal?: string;
+  logFile?: string;
+} {
   const home = resolveNapCatHome(root);
   mkdirSync(home, { recursive: true });
+  const logFile = join(home, "napcat-nexus.log");
   try {
     ensureNapCatLaunchScripts(root);
   } catch (e) {
@@ -1108,15 +1279,33 @@ export function tryLaunchNapCat(root: string): { ok: boolean; message: string } 
       stdio: "ignore",
       windowsHide: true,
     }).unref();
-    return { ok: true, message: "已拉起 NapCat 窗口，请扫码登录" };
+    return { ok: true, message: "已拉起 NapCat 窗口，请扫码登录", terminal: "cmd" };
   }
 
   const sh = join(home, "start-nexus.sh");
   if (!existsSync(sh)) {
     return { ok: false, message: "未找到 start-nexus.sh，请到环境配置点「重新写入反向 WS」" };
   }
-  spawn("bash", [sh], { cwd: home, detached: true, stdio: "ignore" }).unref();
-  return { ok: true, message: "已后台尝试启动，请看终端或扫码窗口" };
+  const opened = openNapCatInTerminal(sh, home);
+  const webuiUrl = readWebUiHint(home, 20000);
+  if (webuiUrl) {
+    return {
+      ok: true,
+      message: `已启动（${opened.detail}）。请打开扫码页：${webuiUrl}`,
+      webuiUrl,
+      terminal: opened.detail,
+      logFile,
+    };
+  }
+  let message = `已后台启动，日志：${logFile}；扫码页一般是 http://127.0.0.1:6099/webui`;
+  if (opened.mode === "terminal") {
+    message = `已打开终端窗口（${opened.detail}），请看日志里的 WebUI 链接扫码`;
+  } else if (opened.mode === "screen") {
+    message = `已在 screen 启动。执行 ${opened.detail} 看日志；扫码页一般是 http://127.0.0.1:6099/webui`;
+  } else if (opened.mode === "tmux") {
+    message = `已在 tmux 启动。执行 ${opened.detail} 看日志；扫码页一般是 http://127.0.0.1:6099/webui`;
+  }
+  return { ok: true, message, terminal: opened.detail, logFile };
 }
 
 /** 接线时补写启动脚本（缺 start-nexus.sh 时） */
