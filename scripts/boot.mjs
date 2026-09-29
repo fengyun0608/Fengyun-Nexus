@@ -209,7 +209,17 @@ async function detectDeps() {
     throw new Error(`需要 Node.js 20 或更高（当前 ${process.versions.node}）`);
   }
   bootLog("OK", ANSI.green, `Node ${process.versions.node}`);
-
+  {
+    const parts = process.versions.node.split(".").map((x) => Number(x) || 0);
+    const sqliteOk = parts[0] > 22 || (parts[0] === 22 && parts[1] >= 5);
+    if (!sqliteOk) {
+      bootLog(
+        "WARN",
+        ANSI.yellow,
+        `Node < 22.5：内置 SQLite 不可用，将自动用 JSON 库（可升级 Node 后再切回 SQLite）`,
+      );
+    }
+  }
   if (isTermux()) {
     process.env.NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS = "false";
     bootLog("OK", ANSI.green, "Termux：已关闭 pnpm 原生二进制切换");

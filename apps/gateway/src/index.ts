@@ -596,9 +596,36 @@ async function bootstrap(): Promise<void> {
   await bootGroup("数据库");
   await bootLine("开始打开数据库");
   let dbCfg = loadDbConfig(ROOT);
-  const dbOpen = resolveDbOpenOpts(ROOT, dbCfg);
+  let dbOpen = resolveDbOpenOpts(ROOT, dbCfg);
   let db = new NexusDatabase({ driver: dbOpen.driver, filePath: dbOpen.filePath });
-  await db.open();
+  try {
+    await db.open();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const sqliteUnavailable =
+      dbOpen.driver === "sqlite" && /SQLite|node:sqlite|Node\s*≥\s*22/i.test(msg);
+    if (!sqliteUnavailable) throw e;
+    // 一键装常落在 Node 20：默认 SQLite 会起不来；自动改 JSON 并写入 local，避免反复炸
+    await bootLine("SQLite 不可用（需 Node ≥ 22.5），已改用 JSON 文件库");
+    log.warn(msg);
+    dbCfg = {
+      ...dbCfg,
+      active: "json",
+      backends: {
+        ...dbCfg.backends,
+        sqlite: { ...(dbCfg.backends.sqlite || { enabled: true, label: "SQLite" }), enabled: true },
+        json: {
+          ...(dbCfg.backends.json || { enabled: true, label: "JSON 文件库", path: "data/nexus.db.json" }),
+          enabled: true,
+          path: dbCfg.backends.json?.path || "data/nexus.db.json",
+        },
+      },
+    };
+    saveDbConfig(ROOT, dbCfg);
+    dbOpen = resolveDbOpenOpts(ROOT, dbCfg);
+    db = new NexusDatabase({ driver: dbOpen.driver, filePath: dbOpen.filePath });
+    await db.open();
+  }
   await bootLine(`数据库已打开：${dbOpen.driver}`);
   const sessions = new SessionManager();
   sessions.bindStore(join(ROOT, "data", "sessions.json"));

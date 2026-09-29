@@ -343,6 +343,11 @@ node_major() {
   node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0
 }
 
+# SQLite（node:sqlite）需要 ≥22.5；网关在旧 Node 上会自动改用 JSON
+node_ok_for_sqlite() {
+  node -p "const [a,b]=process.versions.node.split('.').map(Number); (a>22)||(a===22&&b>=5)" 2>/dev/null | grep -q true
+}
+
 ensure_node() {
   local force=0
   [ "${NEXUS_REINSTALL:-0}" = "1" ] && force=1
@@ -351,13 +356,21 @@ ensure_node() {
   if [ "$force" != "1" ] && command -v node >/dev/null 2>&1; then
     local maj
     maj="$(node_major)"
-    if [ "$maj" -ge 20 ] 2>/dev/null; then
+    if [ "$maj" -ge 22 ] 2>/dev/null; then
+      if ! node_ok_for_sqlite; then
+        warn "当前 Node $(node -v)，建议 ≥ 22.5 才能用 SQLite（否则自动用 JSON 库）"
+      fi
       return 0
     fi
-    warn "当前 Node $(node -v)，需要 ≥ 20"
+    if [ "$maj" -ge 20 ] 2>/dev/null; then
+      warn "当前 Node $(node -v) < 22：默认 SQLite 不可用，将尝试升级到 Node 22（失败也可靠 JSON 库启动）"
+      # 继续往下装 22，不 return
+    else
+      warn "当前 Node $(node -v)，需要 ≥ 20"
+    fi
   fi
 
-  log "安装 / 升级 Node.js 20+"
+  log "安装 / 升级 Node.js 22+（内置 SQLite 需 ≥22.5）"
   if is_termux && command -v pkg >/dev/null 2>&1; then
     termux_repair_apt || true
     export DEBIAN_FRONTEND=noninteractive
@@ -368,10 +381,10 @@ ensure_node() {
       pkg install -y $dpkg_opts nodejs
     fi
   elif command -v apt-get >/dev/null 2>&1 && have_sudo; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | run_root bash - || true
+    curl -fsSL https://deb.nodesource.com/setup_22.x | run_root bash - || true
     pkg_install nodejs || true
   elif command -v brew >/dev/null 2>&1; then
-    brew install node@20 || brew install node || true
+    brew install node@22 || brew install node || true
   else
     pkg_install nodejs npm || true
   fi
@@ -382,6 +395,8 @@ ensure_node() {
   fi
   if [ "$(node_major)" -lt 20 ] 2>/dev/null; then
     warn "Node $(node -v) 仍低于 20，启动可能失败"
+  elif ! node_ok_for_sqlite; then
+    warn "Node $(node -v) 仍低于 22.5：可用 JSON 库启动；要 SQLite 请升级 Node"
   fi
 }
 

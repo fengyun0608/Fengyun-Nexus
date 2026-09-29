@@ -105,15 +105,24 @@ function Ensure-Node {
   if (-not $need -and (Test-Cmd "node")) {
     $maj = 0
     try { $maj = [int]((node -p "process.versions.node.split('.')[0]")) } catch { $maj = 0 }
-    if ($maj -ge 20) { return }
-    Write-Warn "当前 Node 版本偏低，需要 ≥ 20"
-    $need = $true
+    if ($maj -ge 22) { return }
+    if ($maj -ge 20) {
+      Write-Warn "当前 Node 为 $maj.x：SQLite 需 ≥22.5，将尝试升级到 Node 22（也可改用 JSON 库）"
+      $need = $true
+    } else {
+      Write-Warn "当前 Node 版本偏低，需要 ≥ 20"
+      $need = $true
+    }
   }
   if (-not $need -and (Test-Cmd "node")) { return }
 
-  Write-Log "安装 / 升级 Node.js 20+"
+  Write-Log "安装 / 升级 Node.js 22+（内置 SQLite 需 ≥22.5）"
   if (Test-Cmd "winget") {
-    winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements | Out-Null
+    # Current 通常是较新主版本；失败再回退 LTS
+    winget install --id OpenJS.NodeJS -e --accept-source-agreements --accept-package-agreements 2>$null | Out-Null
+    if (-not (Test-Cmd "node")) {
+      winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements | Out-Null
+    }
   }
   # 刷新 PATH
   $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +

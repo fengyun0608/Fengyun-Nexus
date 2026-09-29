@@ -338,6 +338,26 @@ export function checkPluginUpdates(
 }
 
 /** 远程拉下来的插件没有 pnpm 链接时，补上 @fengyun/nexus-plugin-sdk → packages/plugin-sdk */
+function pluginSdkLinkHealthy(link: string): boolean {
+  try {
+    const pkgPath = join(link, "package.json");
+    if (!existsSync(pkgPath)) return false;
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+      main?: string;
+      exports?: { "."?: string | { import?: string; require?: string; default?: string } };
+    };
+    const exp = pkg.exports?.["."];
+    const entry =
+      typeof exp === "string"
+        ? exp
+        : exp?.import || exp?.default || exp?.require || pkg.main || "";
+    if (!entry) return false;
+    return existsSync(join(link, entry));
+  } catch {
+    return false;
+  }
+}
+
 export function ensurePluginSdkLink(root: string, pluginDirName: string): boolean {
   const pluginRoot = join(root, "plugins", pluginDirName);
   const pkgPath = join(pluginRoot, "package.json");
@@ -355,9 +375,21 @@ export function ensurePluginSdkLink(root: string, pluginDirName: string): boolea
   }
   if (!needs) return false;
   const link = join(pluginRoot, "node_modules", "@fengyun", "nexus-plugin-sdk");
-  if (existsSync(link)) return false;
   const sdk = join(root, "packages", "plugin-sdk");
   if (!existsSync(sdk)) return false;
+  if (existsSync(link) && pluginSdkLinkHealthy(link)) return false;
+  // 坏链 / 空壳（常见于 .pnpm 幽灵包）先拆掉再接到本仓 SDK
+  if (existsSync(link)) {
+    try {
+      rmSync(link, { recursive: true, force: true });
+    } catch {
+      try {
+        rmSync(link, { force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
   mkdirSync(dirname(link), { recursive: true });
   try {
     symlinkSync(sdk, link, process.platform === "win32" ? "junction" : "dir");

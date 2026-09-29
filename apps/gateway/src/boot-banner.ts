@@ -34,10 +34,25 @@ async function bootPace(): Promise<void> {
 
 /** node:sqlite 的实验警告会插进启动日志中间，这里收掉。 */
 export function quietNodeSqliteWarning(): void {
-  process.on("warning", (w) => {
-    if (w.name === "ExperimentalWarning" && /SQLite/i.test(w.message)) return;
-    console.warn(w.stack || `${w.name}: ${w.message}`);
-  });
+  const orig = process.emitWarning.bind(process);
+  process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+    const msg =
+      typeof warning === "string"
+        ? warning
+        : warning instanceof Error
+          ? warning.message
+          : String(warning);
+    const name =
+      typeof args[0] === "string"
+        ? args[0]
+        : warning instanceof Error && "name" in warning
+          ? String((warning as Error).name)
+          : "";
+    if (/SQLite/i.test(msg) || (/ExperimentalWarning/i.test(name) && /SQLite/i.test(msg))) {
+      return;
+    }
+    return (orig as (w: string | Error, ...a: unknown[]) => void)(warning, ...args);
+  }) as typeof process.emitWarning;
 }
 
 /** 一条消息或插件抛错时，记下来，别把整个网关打退出。 */
