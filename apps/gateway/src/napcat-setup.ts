@@ -652,6 +652,80 @@ function readWebUiHint(home: string, waitMs = 18000): string {
   return url;
 }
 
+function resolveSystemQq(): string | null {
+  if (isWin()) return null;
+  try {
+    const out = execSync("command -v qq", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (out) return out.split(/\r?\n/)[0] || null;
+  } catch {
+    /* ignore */
+  }
+  for (const p of ["/opt/QQ/qq", "/usr/bin/qq", "/usr/local/bin/qq"]) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** 安装脚本常半截失败：有 so / launcher 却没系统 qq。启动前尽量补装。 */
+function ensureLinuxQqSync(home: string, log: InstallNapCatLog = () => undefined): string | null {
+  const hit = resolveSystemQq();
+  if (hit) {
+    log(`已检测到 LinuxQQ：${hit}`);
+    return hit;
+  }
+  if (isWin() || isTermux()) return null;
+  mkdirSync(home, { recursive: true });
+  let arch = "amd64";
+  try {
+    const m = execSync("uname -m", { encoding: "utf8" }).trim();
+    if (/aarch64|arm64/i.test(m)) arch = "arm64";
+  } catch {
+    /* default amd64 */
+  }
+  const debUrl =
+    arch === "arm64"
+      ? "https://qqdl.gtimg.cn/qqfile/QQNT/9.9.32/release/c390e792/QQ_3.2.31_260710_arm64_01.deb"
+      : "https://qqdl.gtimg.cn/qqfile/QQNT/9.9.32/release/c390e792/QQ_3.2.31_260710_amd64_01.deb";
+  const rpmUrl =
+    arch === "arm64"
+      ? "https://qqdl.gtimg.cn/qqfile/QQNT/9.9.32/release/c390e792/QQ_3.2.31_260710_aarch64_01.rpm"
+      : "https://qqdl.gtimg.cn/qqfile/QQNT/9.9.32/release/c390e792/QQ_3.2.31_260710_x86_64_01.rpm";
+  log("未找到 qq，正在补装 LinuxQQ…");
+  try {
+    if (whichCmd("apt-get") || whichCmd("dpkg")) {
+      const deb = join(home, "QQ.deb");
+      execSync(`curl -k -L --connect-timeout 30 --max-time 600 -o "${deb}" "${debUrl}"`, {
+        stdio: "inherit",
+      });
+      execSync(`apt-get install -y -f --allow-downgrades -qq "${deb}"`, { stdio: "inherit" });
+      try {
+        execSync("apt-get install -y -qq libnss3 libgbm1", { stdio: "ignore" });
+      } catch {
+        /* ignore */
+      }
+    } else if (whichCmd("dnf") || whichCmd("rpm")) {
+      const rpm = join(home, "QQ.rpm");
+      execSync(`curl -k -L --connect-timeout 30 --max-time 600 -o "${rpm}" "${rpmUrl}"`, {
+        stdio: "inherit",
+      });
+      execSync(`dnf localinstall -y "${rpm}"`, { stdio: "inherit" });
+    } else {
+      log("无法自动补装：未找到 apt-get / dnf");
+      return null;
+    }
+  } catch (e) {
+    log(`补装 LinuxQQ 失败：${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+  const again = resolveSystemQq();
+  if (again) log(`LinuxQQ 补装完成：${again}`);
+  else log("补装结束仍未找到 qq，请到环境配置重装 NapCat");
+  return again;
+}
+
 /** 解析实际 NapCat 目录：优先 marker，再扫 runtimes/napcat */
 function resolveNapCatHome(root: string): string {
   const base = napcatHome(root);
@@ -796,6 +870,10 @@ export async function installNapCat(opts: {
       log("安装脚本非零退出；若产物已生成可继续接线");
     }
     const shellDir = findShellDir(home) || home;
+    const qq = ensureLinuxQqSync(shellDir, log);
+    if (!qq) {
+      log("警告：系统仍无 LinuxQQ（qq）。启动前会再尝试补装；也可重装 NapCat");
+    }
     wireNapCatConfigs(shellDir, url, token);
     const launch = writeStartScripts(shellDir, flavor);
     writeNapCatMarker(opts.root, { version: "linux-launcher", flavor, home: shellDir });
@@ -1217,6 +1295,12 @@ export function getNapCatStatus(opts: {
   let tip = "未安装：请到环境配置一键安装 NapCat";
   if (installed && !canLaunch) {
     tip = "安装不完整（缺启动脚本）：请点「重新写入反向 WS」补脚本，或到环境配置重装";
+  } else if (
+    !isWin() &&
+    existsSync(join(home, "libnapcat_launcher.so")) &&
+    !resolveSystemQq()
+  ) {
+    tip = "已装 NapCat 但缺 LinuxQQ：点「启动 NapCat」会尝试补装 qq，或到环境配置重装";
   } else if (installed && !opts.connected) {
     tip = "已安装未连接：请启动 NapCat 并扫码，或检查反向 WS 地址";
   }
@@ -1285,6 +1369,24 @@ export function tryLaunchNapCat(root: string): {
   const sh = join(home, "start-nexus.sh");
   if (!existsSync(sh)) {
     return { ok: false, message: "未找到 start-nexus.sh，请到环境配置点「重新写入反向 WS」" };
+  }
+  // 半截安装：有 so 没 qq 时先补装，再开终端
+  if (existsSync(join(home, "libnapcat_launcher.so")) && !resolveSystemQq()) {
+    const qq = ensureLinuxQqSync(home, (line) => {
+      try {
+        writeFileSync(logFile, `${line}\n`, { flag: "a" });
+      } catch {
+        /* ignore */
+      }
+    });
+    if (!qq) {
+      return {
+        ok: false,
+        message:
+          "未找到 LinuxQQ（qq）。请到环境配置重装 NapCat，或手动：curl 下 QQ.deb 后 apt install -y ./QQ.deb",
+        logFile,
+      };
+    }
   }
   const opened = openNapCatInTerminal(sh, home);
   const webuiUrl = readWebUiHint(home, 20000);
