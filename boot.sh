@@ -51,10 +51,10 @@ fi
 
 if command -v pm2 >/dev/null 2>&1; then
   echo "[Nexus] PM2 后台启动"
-  pnpm --filter @fengyun/nexus-cli start -- start
+  pnpm --filter @fengyun/nexus-cli exec tsx src/index.ts start
   # 交互终端且未跳过启动台 → 进 desk
   if [ -t 0 ] && [ "${NEXUS_SKIP_DESK:-0}" != "1" ]; then
-    pnpm --filter @fengyun/nexus-cli start -- desk || true
+    pnpm --filter @fengyun/nexus-cli exec tsx src/index.ts desk || true
   else
     PORT_SHOW="${PORT:-8787}"
     echo "已后台运行。控制台 http://127.0.0.1:${PORT_SHOW}/"

@@ -316,9 +316,9 @@ if ($env:NEXUS_FOREGROUND -eq "1") {
 
 Write-Log "PM2 后台启动 + 启动台"
 Set-Location $InstallDir
-pnpm --filter @fengyun/nexus-cli start -- start
+pnpm --filter @fengyun/nexus-cli exec tsx src/index.ts start
 if ($env:NEXUS_SKIP_DESK -ne "1") {
-  pnpm --filter @fengyun/nexus-cli start -- desk
+  pnpm --filter @fengyun/nexus-cli exec tsx src/index.ts desk
 } else {
   Write-Ok "已后台。启动台：.\nexus.cmd desk  日志：.\nexus.cmd logs -f"
 }

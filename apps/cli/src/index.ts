@@ -14,7 +14,8 @@ import { fileURLToPath } from "node:url";
 import { spawn, spawnSync, execSync } from "node:child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const [cmd, sub, ...rest] = process.argv.slice(2);
+const rawArgs = process.argv.slice(2).filter((a) => a !== "--");
+const [cmd, sub, ...rest] = rawArgs;
 const isWin = process.platform === "win32";
 
 function help() {

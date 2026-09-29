@@ -662,10 +662,10 @@ boot_now() {
 
   if command -v pm2 >/dev/null 2>&1; then
     log "PM2 后台启动框架"
-    pnpm --filter @fengyun/nexus-cli start -- start || ./boot.sh
+    pnpm --filter @fengyun/nexus-cli exec tsx src/index.ts start || ./boot.sh
     if [ -t 0 ] && [ "${NEXUS_SKIP_DESK:-0}" != "1" ]; then
       log "进入启动台（填 QQ / 端口 → 启 NapCat）"
-      pnpm --filter @fengyun/nexus-cli start -- desk || true
+      pnpm --filter @fengyun/nexus-cli exec tsx src/index.ts desk || true
     else
       ok "已后台运行。启动台：cd $INSTALL_DIR && ./nexus.sh desk"
       ok "日志：./nexus.sh logs -f"

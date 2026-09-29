@@ -50,9 +50,9 @@ if errorlevel 1 (
 )
 
 echo [Nexus] PM2 background start
-call pnpm --filter @fengyun/nexus-cli start -- start
+call pnpm --filter @fengyun/nexus-cli exec tsx src/index.ts start
 if not "%NEXUS_SKIP_DESK%"=="1" (
-  call pnpm --filter @fengyun/nexus-cli start -- desk
+  call pnpm --filter @fengyun/nexus-cli exec tsx src/index.ts desk
 )
 echo Done. Console http://127.0.0.1:8787/  Logs: nexus.cmd logs -f
 exit /b 0
