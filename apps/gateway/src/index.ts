@@ -75,11 +75,13 @@ import {
 } from "./env-tasks.js";
 import {
   buildReverseWsUrl,
+  ensureNapCatLaunchScripts,
   getNapCatStatus,
   tryLaunchNapCat,
   wireNapCatConfigs,
   wireNapCatForAccount,
   readNapCatMarker,
+  napcatHome,
 } from "./napcat-setup.js";
 import { applyRemoteUpdate, checkRemoteUpdate, readLocalVersion } from "./update-check.js";
 import { applyFullUpdate } from "./full-update.js";
@@ -3355,20 +3357,28 @@ async function bootstrap(): Promise<void> {
       token: onebot.tokenFor(0),
     });
     const marker = readNapCatMarker(ROOT);
-    const home = marker?.home;
-    if (!home) {
+    const home = marker?.home || napcatHome(ROOT);
+    if (!existsSync(home) && !marker) {
       res.status(400).json({ error: "尚未安装 NapCat，请先到环境配置安装" });
       return;
     }
+    mkdirSync(home, { recursive: true });
     const files = wireNapCatConfigs(home, reverseWsUrl, onebot.tokenFor(0));
+    let launchScript = "";
+    try {
+      launchScript = ensureNapCatLaunchScripts(ROOT);
+    } catch {
+      /* ignore */
+    }
     const next = { ...cfg, enabled: true };
     persistOneBotConfig(next);
     onebot.updateConfig(next);
     res.json({
       ok: true,
-      message: `已写入 ${files.length} 个配置，并启用 OneBot`,
+      message: `已写入 ${files.length} 个配置并补齐启动脚本，已启用 OneBot`,
       reverseWsUrl,
       files,
+      launchScript,
     });
   });
 
