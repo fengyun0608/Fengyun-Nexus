@@ -19,6 +19,7 @@ module.exports = {
       env: {
         NEXUS_UNDER_PM2: "1",
         NODE_ENV: "production",
+        CI: "true",
       },
     },
   ],
