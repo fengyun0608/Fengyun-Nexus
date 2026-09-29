@@ -19,7 +19,9 @@ export function warnBootGaps(opts: {
   if (opts.onebotEnabled) {
     setTimeout(() => {
       if (!opts.onebotConnected()) {
-        log.warn("OneBot 还没连上。QQ 指令暂不可用，控制台里看反向地址");
+        log.warn(
+          "OneBot 还没连上：控制台 → OneBot →「启动 NapCat」扫码；或看反向 WS 地址是否写对",
+        );
       }
     }, 4000);
   }

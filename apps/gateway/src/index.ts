@@ -4393,7 +4393,7 @@ async function bootstrap(): Promise<void> {
       log.warn(`重启报告出图失败：${e instanceof Error ? e.message : String(e)}`);
     }
     if (!sendPayload) {
-      log.warn("重启成功图没画出来，不发文字");
+      log.warn("重启成功图没画出来，不发文字（可到控制台「环境配置」安装截图浏览器）");
       return;
     }
 
@@ -4408,6 +4408,10 @@ async function bootstrap(): Promise<void> {
     });
 
     if (pending.channel === "onebot11") {
+      if (!onebot.status().connected && !onebot.listConnectedSelfIds().length) {
+        log.warn("重启成功图已生成，但 OneBot 未连接，等 NapCat 扫码连上后再发 #状态 即可");
+        return;
+      }
       const gid =
         pending.groupId ||
         (pending.chatId.startsWith("group:") ? pending.chatId.slice(6) : undefined);
@@ -4445,7 +4449,7 @@ async function bootstrap(): Promise<void> {
         log.warn("重启成功图没发出，不改发文字");
         return;
       }
-      log.warn("重启成功图未发出：目标号没连上");
+      log.warn("等 OneBot 连上超时，重启成功图未发出（先启动 NapCat 并扫码）");
       return;
     }
 
