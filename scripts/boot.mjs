@@ -241,11 +241,11 @@ async function detectDeps() {
 
   if (!existsSync(join(root, "node_modules"))) {
     bootLog("INFO", ANSI.cyan, "正在安装依赖…");
-    await run(["install", "--config.confirmModulesPurge=false"]);
+    await run(["install", "--no-frozen-lockfile", "--config.confirmModulesPurge=false"]);
     bootLog("OK", ANSI.green, "依赖已装好");
   } else if (pluginsMissingSdkLinks()) {
     bootLog("INFO", ANSI.cyan, "检测到新插件未链接 SDK，正在 pnpm install…");
-    await run(["install", "--config.confirmModulesPurge=false"]);
+    await run(["install", "--no-frozen-lockfile", "--config.confirmModulesPurge=false"]);
     bootLog("OK", ANSI.green, "插件依赖已链接");
   } else {
     bootLog("OK", ANSI.green, "依赖已就绪");
