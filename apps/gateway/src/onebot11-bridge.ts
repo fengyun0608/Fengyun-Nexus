@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as pathResolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { OneBot11Channel, extractOb11Records, type Ob11MessageEvent } from "@fengyun/nexus-channel";
@@ -58,7 +58,12 @@ function warnSendFail(action: string, retcode: number, message?: string): void {
   if (/rich media|网络连接异常|1006514/i.test(raw)) {
     if (now - lastRichMediaWarn < 20_000) return;
     lastRichMediaWarn = now;
-    const tip = /rich media/i.test(raw) ? "发图被 QQ 拒绝" : "QQ 内核暂时发不出（1006514）";
+    const isFile = /upload_.*_file/i.test(action);
+    const tip = /rich media/i.test(raw)
+      ? isFile
+        ? "群/私聊文件被 QQ 拒绝（勿对 upload_*_file 用 base64）"
+        : "发图被 QQ 拒绝"
+      : "QQ 内核暂时发不出（1006514）";
     log.warn(`OneBot ${action} ${tip}。同一条不再连打`);
     return;
   }
@@ -868,7 +873,8 @@ export class OneBot11Bridge {
   }
 
   /**
-   * 发文件。群聊走 upload_group_file；私聊尽量 upload_private_file，不行再发文字路径提示。
+   * 发文件。群聊走 upload_group_file；私聊尽量 upload_private_file。
+   * 注意：upload_*_file 要本地绝对路径（或 file://），不要塞 base64://（那是发图用的）。
    */
   async sendFile(
     filePath: string,
@@ -877,32 +883,48 @@ export class OneBot11Bridge {
   ): Promise<{ ok: boolean; message: string }> {
     const path = String(filePath || "").trim();
     if (!path || !existsSync(path)) return { ok: false, message: "文件不存在" };
-    const name = String(opts?.name || path.split(/[/\\]/).pop() || "file").slice(0, 120);
+    const abs = pathResolve(path);
+    const name = String(opts?.name || abs.split(/[/\\]/).pop() || "file").slice(0, 120);
     const botId = String(ctx.meta?.botId || ctx.meta?.selfId || "");
     const mt = (ctx.meta?.messageType as string | undefined) ?? "private";
-    let fileRef = path;
-    try {
-      if (statSync(path).size <= 2_000_000) fileRef = localMediaForNapCat(path);
-    } catch {
-      /* keep path */
-    }
+    // NapCat upload_group_file / upload_private_file：本地绝对路径；勿用 base64（会变 rich media 拒收）
+    const fileRef = abs;
+    const callOpts = { botId: botId || undefined, prefer: opts?.prefer, timeoutMs: 60_000 };
+
     if (mt === "group") {
-      const gid = Number(ctx.meta?.groupId ?? String(ctx.chatId).replace(/^group:/, ""));
-      const ok = await this.callSend(
+      const gidRaw = ctx.meta?.groupId ?? String(ctx.chatId).replace(/^group:/, "");
+      const gid = Number(gidRaw);
+      if (!gid) {
+        return {
+          ok: false,
+          message: `缺群号（messageType=group 但 groupId 空，chatId=${ctx.chatId}）`,
+        };
+      }
+      const r = await this.callAction(
         "upload_group_file",
         { group_id: gid, file: fileRef, name },
-        { botId: botId || undefined, prefer: opts?.prefer, timeoutMs: 60_000 },
+        callOpts,
       );
-      return { ok, message: ok ? `已发文件 ${name}` : "群文件发送失败" };
+      if (r.ok) return { ok: true, message: `已发文件 ${name} → 群 ${gid}` };
+      warnSendFail("upload_group_file", Number(r.retcode ?? -1), r.message);
+      return {
+        ok: false,
+        message: `群文件发送失败：${String(r.message || `ret=${r.retcode ?? "?"}`).slice(0, 160)}`,
+      };
     }
     const uid = Number(ctx.userId) || 0;
-    const ok = await this.callSend(
+    if (!uid) return { ok: false, message: "缺私聊对方 QQ" };
+    const r = await this.callAction(
       "upload_private_file",
       { user_id: uid, file: fileRef, name },
-      { botId: botId || undefined, prefer: opts?.prefer, timeoutMs: 60_000 },
+      callOpts,
     );
-    if (ok) return { ok: true, message: `已发文件 ${name}` };
-    return { ok: false, message: "私聊文件发送失败（当前协议可能不支持）" };
+    if (r.ok) return { ok: true, message: `已发文件 ${name}` };
+    warnSendFail("upload_private_file", Number(r.retcode ?? -1), r.message);
+    return {
+      ok: false,
+      message: `私聊文件发送失败：${String(r.message || `ret=${r.retcode ?? "?"}`).slice(0, 160)}`,
+    };
   }
 
   /** 下载入站语音到本地路径（base64 或 url） */

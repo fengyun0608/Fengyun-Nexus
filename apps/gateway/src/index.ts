@@ -514,7 +514,8 @@ function frameworkSystemPrompt(opts?: {
       "有人要搜网页、查资料、看某个网址，调用 nexus_web_search 或 nexus_web_read。不要说没有搜索。",
       "用户发了图或引用图：你能看见图。先分清 person_photo（真人/自拍）/ meme（梗图表情包）/ screenshot / art / other。查出处用 nexus_image_trace（先填 kind、description、ocr_text）。真人照默认不公开反搜，除非主人明确说反查人像。",
       "若系统提示写了「无视觉」并附上相似度线索：不要假装看见图，按线索回答即可。",
-      "要发图、发文件、发语音到 QQ：用 nexus_qq_send_image / nexus_qq_send_file / nexus_qq_send_voice。",
+      "要发图、发文件、发语音到 QQ：用 nexus_qq_send_image / nexus_qq_send_file / nexus_qq_send_voice。群聊时系统会标注【当前会话】group_id，工具默认当前群，不要误判成私聊；发文件 path 用本地绝对路径，框架会走 upload_group_file，不要自己 POST OneBot HTTP。",
+      "主人·能力模式下一回合能用一整套 function tools（shell/工作区/QQ 发图发文件/群文件/禁言/搜网/截屏等），不是只有几个；按任务直接调，不要空转猜协议。",
       "主人说戳我、戳一下：有 nexus_qq_poke 就调；没有就自己查 OneBot 地址（nexus_onebot_get），用 shell 调 send_poke / group_poke。不要只文字假装戳，也不要为此新建插件。",
       "有人说截图、截屏、截个图、电脑画面发群里：调用 nexus_screen。那是本机真实屏幕，不是状态卡片。不要用 nexus_shot 充数。没有显示器就照工具结果说明截不了。",
       "nexus_shot 只渲菜单或 HTML 图，不能拿来代替电脑截图。",
@@ -1773,6 +1774,23 @@ async function bootstrap(): Promise<void> {
       ? `${msg.meta.senderName}（${msg.userId}）`
       : String(msg.userId);
     const ctxLines: string[] = [`【本条消息】说话人：${speaker}`];
+    {
+      const mt = String(msg.meta?.messageType || "");
+      const gid = String(msg.meta?.groupId || "").trim();
+      const bot = String(msg.meta?.botId || msg.meta?.selfId || "").trim();
+      if (mt === "group" && gid) {
+        ctxLines.push(
+          `【当前会话】群聊 group_id=${gid}${bot ? ` bot=${bot}` : ""}。发文件/图/语音用 nexus_qq_send_* 即可，不必再问群号；可选传 group_id=${gid}。`,
+        );
+      } else if (mt === "private") {
+        ctxLines.push(
+          `【当前会话】私聊 user_id=${msg.userId}${bot ? ` bot=${bot}` : ""}。要发到某群须显式传 group_id。`,
+        );
+      } else if (String(msg.chatId || "").startsWith("group:")) {
+        const fromChat = String(msg.chatId).slice(6);
+        ctxLines.push(`【当前会话】群聊 group_id=${fromChat}（来自 chatId）。`);
+      }
+    }
     if (msg.meta?.quoteMessageId) {
       const qWho =
         msg.meta.quoteSenderName || msg.meta.quoteUserId

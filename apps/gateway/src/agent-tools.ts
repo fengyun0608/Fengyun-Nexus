@@ -377,12 +377,12 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     ),
     tool(
       "nexus_qq_send_file",
-      "向当前 QQ 会话发本地文件。",
+      "向当前 QQ 会话发本地文件（群聊走 upload_group_file）。path 必须是本机已有文件的绝对路径（如 .pptx/.zip），不要传 URL/base64。群聊默认当前群；也可显式传 group_id。成功回执会带群号。",
       {
-        path: { type: "string" },
-        name: { type: "string", description: "显示文件名" },
-        group_id: { type: "string" },
-        user_id: { type: "string" },
+        path: { type: "string", description: "本地绝对路径，例如 D:\\\\项目\\\\...\\\\a.pptx" },
+        name: { type: "string", description: "群里显示的文件名，可选" },
+        group_id: { type: "string", description: "群号；群聊默认可不传（用当前会话）" },
+        user_id: { type: "string", description: "私聊对方 QQ；一般不用" },
       },
       ["path"],
     ),
