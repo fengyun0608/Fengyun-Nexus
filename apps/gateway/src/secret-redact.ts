@@ -1,11 +1,18 @@
 /**
- * AI 出站机密打码：IP / 密码 / token / 账密连接串等。
+ * AI 出站机密打码：IP / 端口 / 密码 / token / 账密连接串等。
  * 用于思考合并转发、回话气泡、会话落库，降低误泄露。
  * 不会改写 [CQ:…] 段与 base64 媒体，避免发图坏掉。
  */
 
 const IPV4_RE =
   /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})\b/g;
+
+/** host:port / IP:port */
+const HOST_PORT_RE =
+  /(\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})|(?:localhost)|(?:[a-z0-9-]+\.)+[a-z]{2,})(:\d{2,5})\b/gi;
+
+const PORT_LABEL_RE =
+  /((?:端口|埠|port|listen(?:Port)?|ListenPort|PORT)\s*[=：:\s]*)(\d{2,5})\b/gi;
 
 const SECRET_KEY =
   "(?:密码|口令|口令码|通行码|passwd|password|pwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|auth|credential|私钥|密钥|access_token|secret_key)";
@@ -85,7 +92,21 @@ export function redactSecrets(text: string): string {
         "-----BEGIN PRIVATE KEY----- ***已打码*** -----END PRIVATE KEY-----",
       );
 
-      // IPv4（:端口保留，只打码 IP）
+      // host:port / IP:port → 端口改 :****（先于纯 IP，避免拆开）
+      s = s.replace(HOST_PORT_RE, (_full, host: string) => {
+        const h =
+          /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})$/.test(
+            host,
+          )
+            ? maskIpv4(host)
+            : host;
+        return `${h}:****`;
+      });
+
+      // 端口=8787 / port: 7878 / ListenPort 3000
+      s = s.replace(PORT_LABEL_RE, (_m, label: string) => `${label}****`);
+
+      // IPv4
       s = s.replace(IPV4_RE, (ip) => maskIpv4(ip));
 
       return s;
