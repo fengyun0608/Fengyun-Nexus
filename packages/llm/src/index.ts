@@ -17,6 +17,11 @@ export interface LlmMessage {
   name?: string;
   tool_call_id?: string;
   tool_calls?: LlmToolCall[];
+  /**
+   * DeepSeek 思考模式：能力模式带 tools 时，后续请求必须回传本字段，否则 API 400。
+   * 见 https://api-docs.deepseek.com/guides/thinking_mode/
+   */
+  reasoning_content?: string;
 }
 
 export interface LlmToolCall {
@@ -78,6 +83,30 @@ function speakOutsideTags(text: string): string {
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
     .replace(/<\/?think(?:ing)?>/gi, "")
     .trim();
+}
+
+/** 从正文抠出 <think>，供 DeepSeek 回传 reasoning_content */
+function peelThinkTags(raw: string): { think: string; speak: string } {
+  const chunks: string[] = [];
+  let speak = String(raw || "");
+  speak = speak.replace(/<think>([\s\S]*?)<\/think>/gi, (_m, t: string) => {
+    const s = String(t || "").trim();
+    if (s) chunks.push(s);
+    return "";
+  });
+  speak = speak.replace(/<thinking>([\s\S]*?)<\/thinking>/gi, (_m, t: string) => {
+    const s = String(t || "").trim();
+    if (s) chunks.push(s);
+    return "";
+  });
+  speak = speak.replace(/<\/?think(?:ing)?>/gi, "").trim();
+  return { think: chunks.join("\n\n").trim(), speak };
+}
+
+function isDeepSeekProvider(baseUrl: string, model: string): boolean {
+  const u = String(baseUrl || "").toLowerCase();
+  const m = String(model || "").toLowerCase();
+  return /deepseek\.com/i.test(u) || /(^|[/\s._-])deepseek/i.test(m) || m.startsWith("deepseek");
 }
 
 /** 回话是否几乎全是英文（技术报告刷屏） */
@@ -375,12 +404,23 @@ export class LlmRouter {
         cmd,
       );
     };
-    const runCalls = async (calls: LlmToolCall[], content: string, hideContent: boolean) => {
-      history.push({
+    const runCalls = async (
+      calls: LlmToolCall[],
+      content: string,
+      hideContent: boolean,
+      reasoning?: string,
+    ) => {
+      const row: LlmMessage = {
         role: "assistant",
         content: hideContent ? "" : content || "",
         tool_calls: calls,
-      });
+      };
+      // DeepSeek + tools：必须回传 reasoning_content，否则下一轮 400
+      if (reasoning) row.reasoning_content = reasoning;
+      else if (isDeepSeekProvider(this.opts.baseUrl || "", this.opts.model || "")) {
+        row.reasoning_content = "";
+      }
+      history.push(row);
       for (const call of calls) {
         const args = parseArgs(call.function.arguments || "{}");
         let result: unknown;
@@ -446,7 +486,15 @@ export class LlmRouter {
             "我这边绕远了。请再说一下要我做哪一步，我直接干。",
           );
         }
-        history.push({ role: "assistant", content: turn.content || "" });
+        const assist: LlmMessage = {
+          role: "assistant",
+          content: turnSpeak || turn.content || "",
+        };
+        if (turnThink) assist.reasoning_content = turnThink;
+        else if (isDeepSeekProvider(this.opts.baseUrl || "", this.opts.model || "")) {
+          assist.reasoning_content = turn.reasoning || "";
+        }
+        history.push(assist);
         nudge(
           "回话必须用简体中文。刚才若只有思考或大段英文报告，请用两三句中文直接回答用户，写在 <think> 标签外面；不要 IDENTITY/DEMO/TIMELINE 英文标题，不要「思考：」前缀，不要工具名或 JSON。",
           "空回话催中文",
@@ -466,7 +514,12 @@ export class LlmRouter {
       if (digThis) shellDig += digThis;
       else shellDig = Math.max(0, shellDig - 1);
 
-      await runCalls(calls, contentForTools, leaked.length > 0);
+      await runCalls(
+        calls,
+        contentForTools,
+        leaked.length > 0,
+        turn.reasoning || turnThink || undefined,
+      );
 
       if (shellDig >= 3) {
         shellDig = 0;
@@ -524,13 +577,42 @@ export class LlmRouter {
     tools: LlmToolDef[] | undefined,
     stream: boolean,
   ): Record<string, unknown> {
+    const model = this.opts.model ?? "gpt-4o-mini";
+    const deepseek = isDeepSeekProvider(this.opts.baseUrl || "", model);
+    const withTools = Boolean(tools?.length);
     const body: Record<string, unknown> = {
-      model: this.opts.model ?? "gpt-4o-mini",
+      model,
       messages: messages.map((m) => {
-        const row: Record<string, unknown> = { role: m.role, content: m.content };
+        let content: string | LlmContentPart[] = m.content;
+        let reasoning = m.reasoning_content;
+        // 会话里可能把思考写进 <think>；DeepSeek 带 tools 时要拆成 reasoning_content 回传
+        if (
+          deepseek &&
+          withTools &&
+          m.role === "assistant" &&
+          typeof content === "string" &&
+          !reasoning
+        ) {
+          const peeled = peelThinkTags(content);
+          if (peeled.think) {
+            reasoning = peeled.think;
+            content = peeled.speak;
+          }
+        }
+        const row: Record<string, unknown> = { role: m.role, content };
         if (m.name) row.name = m.name;
         if (m.tool_call_id) row.tool_call_id = m.tool_call_id;
         if (m.tool_calls?.length) row.tool_calls = m.tool_calls;
+        if (m.role === "assistant" && reasoning != null && reasoning !== undefined) {
+          row.reasoning_content = reasoning;
+        } else if (
+          deepseek &&
+          withTools &&
+          m.role === "assistant" &&
+          (m.tool_calls?.length || reasoning === "")
+        ) {
+          row.reasoning_content = reasoning || "";
+        }
         return row;
       }),
       stream,
@@ -538,6 +620,11 @@ export class LlmRouter {
     if (tools?.length) {
       body.tools = tools;
       body.tool_choice = "auto";
+    }
+    // DeepSeek V4 等：显式开思考（官方默认也开，写死避免被兼容层关掉）
+    if (deepseek) {
+      body.thinking = { type: "enabled" };
+      body.reasoning_effort = "high";
     }
     return body;
   }
