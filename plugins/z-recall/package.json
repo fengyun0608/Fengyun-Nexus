@@ -1,7 +1,7 @@
 {
-  "name": "@fengyun/z-all-speak",
+  "name": "z-recall",
   "version": "0.1.0",
-  "private": false,
+  "private": true,
   "type": "module",
   "dependencies": {
     "@fengyun/nexus-plugin-sdk": "workspace:*"

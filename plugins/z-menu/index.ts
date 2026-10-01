@@ -32,6 +32,14 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    title: "撤回",
+    lines: [
+      "引用消息后 #撤回 — 按机器人群职权删",
+      "#撤回菜单 — 说明",
+      "仅主人可用",
+    ],
+  },
+  {
     title: "全部发言",
     lines: [
       "#全部发言 @对方 — 按日汇总本群发言并合并转发",
@@ -89,7 +97,7 @@ export class ZMenuPlugin extends Plugin {
   manifest = {
     id: "z.menu",
     name: "菜单",
-    version: "0.3.1",
+    version: "0.3.2",
     priority: 10,
     category: "basic" as const,
     kind: "framework" as const,

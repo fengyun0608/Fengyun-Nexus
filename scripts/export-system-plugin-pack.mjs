@@ -27,6 +27,8 @@ const PLUGINS = [
   "z-master",
   "z-media-parse",
   "z-exec",
+  "z-all-speak",
+  "z-recall",
 ];
 const SKIP = new Set(["node_modules", "dist", ".git"]);
 
@@ -99,6 +101,8 @@ const packMeta = {
     { dir: "plugins/z-master", id: "z.master", menu: ["#主人菜单"] },
     { dir: "plugins/z-media-parse", id: "z.media-parse", menu: ["#抖音登录"] },
     { dir: "plugins/z-exec", id: "z.exec", menu: ["#执行菜单", "#py", "#sh"] },
+    { dir: "plugins/z-all-speak", id: "z.all.speak", menu: ["#全部发言", "#全部发言菜单"] },
+    { dir: "plugins/z-recall", id: "z.recall", menu: ["#撤回", "#撤回菜单"] },
   ],
   combos: [
     "主人管理 + 群管：踢禁等指令认通道主人级别",
@@ -107,6 +111,8 @@ const packMeta = {
     "菜单 + 生图：截图同一套视觉壳",
     "影链解析：群内抖音/快手短链自动解析；过大改群文件",
     "命令执行：主人 #py/#sh，环境配置就绪后才可调用",
+    "全部发言：按日汇总某人发言并合并转发",
+    "撤回：主人引用消息 #撤回，按机器人群职权",
   ],
 };
 
@@ -134,6 +140,8 @@ const readme = `# Fengyun Nexus · 系统插件包
 | \`plugins/z-master\` | \`#主人菜单\` | 核心 / 新 / 普通主人 |
 | \`plugins/z-media-parse\` | \`#抖音登录\` | 抖音/快手短链自动解析；过大改群文件 |
 | \`plugins/z-exec\` | \`#执行菜单\` \`#py\` \`#sh\` | 主人执行多语言命令；危险二次确认 |
+| \`plugins/z-all-speak\` | \`#全部发言\` \`#全部发言菜单\` | 按日汇总某人发言并合并转发 |
+| \`plugins/z-recall\` | \`#撤回\` \`#撤回菜单\` | 主人引用消息撤回；按机器人群职权 |
 
 ## 组合
 
