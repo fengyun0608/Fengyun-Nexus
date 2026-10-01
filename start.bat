@@ -1,33 +1,37 @@
 @echo off
-REM Fengyun Nexus — 电脑双击：前台窗口跑；关窗口即停。不要用 PM2。
-REM 服务器 / 容器后台请用：nexus.cmd start 或 Linux 上 NEXUS_ENV=server ./boot.sh
+setlocal EnableExtensions
 cd /d "%~dp0"
-echo [Fengyun Nexus] 前台启动（电脑用双击；关本窗口即停止）
+
+REM ASCII-only: UTF-8 Chinese in .bat breaks cmd (not recognized as internal command).
+echo [Fengyun Nexus] Foreground start. Close this window to stop.
 
 where node >nul 2>nul
 if errorlevel 1 (
-  echo 未找到 Node.js。请先安装 Node.js 20+ ：https://nodejs.org/
-  pause
-  exit /b 1
+  echo [ERR] Node.js not found. Install Node.js 20+ from https://nodejs.org/
+  goto :fail
 )
 
 where pnpm >nul 2>nul
 if errorlevel 1 (
-  echo 未找到 pnpm，正在用 npm 安装…
+  echo [Nexus] pnpm missing, installing via npm...
   call npm install -g pnpm
   if errorlevel 1 (
-    echo 安装 pnpm 失败。请手动：npm install -g pnpm
-    pause
-    exit /b 1
+    echo [ERR] Failed to install pnpm. Run: npm install -g pnpm
+    goto :fail
   )
 )
 
-if not defined NEXUS_ENV set NEXUS_ENV=desktop
+if not defined NEXUS_ENV set "NEXUS_ENV=desktop"
 
 call pnpm boot
-set ERR=%ERRORLEVEL%
+set "ERR=%ERRORLEVEL%"
 if not "%ERR%"=="0" (
-  echo 启动失败，退出码 %ERR%
-  pause
+  echo [ERR] Boot failed, exit code %ERR%
+  goto :fail
 )
-exit /b %ERR%
+exit /b 0
+
+:fail
+echo.
+pause
+exit /b 1
