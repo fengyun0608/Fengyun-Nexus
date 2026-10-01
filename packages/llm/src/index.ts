@@ -73,6 +73,8 @@ function looksLikeForeignAgentSandbox(speak: string, think: string): boolean {
 function hasKimiFileLink(text: string): boolean {
   return /📎|kimi\.com\/apiv2-files|apiv2-files\/sign-obj/i.test(String(text || ""));
 }
+
+function wantsLocalDocSend(history: LlmMessage[], speak: string, think: string): boolean {
   const userBits = history
     .filter((m) => m.role === "user")
     .map((m) => (typeof m.content === "string" ? m.content : ""))
