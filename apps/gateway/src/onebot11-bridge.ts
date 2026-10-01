@@ -888,7 +888,7 @@ export class OneBot11Bridge {
     // 路径含非 ASCII（如 D:\项目\…）时，先拷到纯英文目录，避免乱码/对接层读不到
     if (/[^\x00-\x7F]/.test(abs)) {
       try {
-        const dir = join(process.cwd(), "data", "agent-send");
+        const dir = join(tmpdir(), "fengyun-nexus-send");
         mkdirSync(dir, { recursive: true });
         const m = abs.match(/(\.[A-Za-z0-9]{1,8})$/);
         const ext = m?.[1] || (name.includes(".") ? name.slice(name.lastIndexOf(".")) : "");
