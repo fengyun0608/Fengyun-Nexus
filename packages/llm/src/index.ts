@@ -62,6 +62,24 @@ export type LlmStreamOpts = {
   maxRounds?: number;
 };
 
+/** 模型在念供应商 Agent 沙箱，而不是调本机 Nexus tools */
+function looksLikeForeignAgentSandbox(speak: string, think: string): boolean {
+  const t = `${speak}\n${think}`;
+  return /sandbox:\/\/|\/mnt\/agents\/|<REF>\s*file\?sandbox|没有(?:.*)?(?:发)?文件(?:的)?工具|只能把文件链接给你|沙箱里?生成|沙箱路径|本机没有对应|无法直接发(?:到)?群|工具没挂到|够不着你那台|无关的\s*Linux\s*沙箱|只看得到自己这边|这会儿真查不了/i.test(
+    t,
+  );
+}
+
+/** 无参：正文点名即可当调用 */
+const KEYWORD_ZERO_ARG = new Set([
+  "nexus_host_info",
+  "nexus_host_uptime",
+  "nexus_screen",
+  "nexus_list_caps",
+  "nexus_list_mcp",
+  "nexus_open_apps",
+]);
+
 /** 把思考标签展开成可见正文，不再删掉。工具调用标记仍另清。 */
 export function revealThinking(text: string): string {
   return String(text || "")
@@ -216,35 +234,101 @@ function stripToolMarkup(text: string): string {
   return s.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** 正文里的 DSML / XML 工具调用，转成正式 tool_calls，避免发出去也不执行。 */
-function leakedToolCalls(text: string): LlmToolCall[] {
+/**
+ * 正文关键词兼容：正式 tool_calls 没有时，从正文抠本机工具再执行。
+ * 支持 DSML/XML、CALL nexus_xxx {json}、nexus_xxx({...})、点名无参工具。
+ */
+function leakedToolCalls(text: string, allowedNames?: Set<string>): LlmToolCall[] {
   const raw = String(text || "");
-  if (!/DSML|tool_calls|invoke\s+name\s*=|function_calls/i.test(raw)) return [];
   const out: LlmToolCall[] = [];
   const seen = new Set<string>();
-  const invokeRe =
-    /name\s*=\s*["'](nexus_[a-zA-Z0-9_.]+)["']([^]*?)(?:<\/[^>\n]*invoke>|<\/invoke>|(?=<[^>\n]*tool_calls)|$)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = invokeRe.exec(raw))) {
-    const name = m[1]!.trim().replace(/\./g, "_");
-    if (!/^nexus_[a-z0-9_]+$/i.test(name)) continue;
-    const args: Record<string, unknown> = {};
-    const paramRe = /name\s*=\s*["']([A-Za-z0-9_]+)["'][^>]*>([^<]*)/g;
-    let p: RegExpExecArray | null;
-    const body = m[2] || "";
-    while ((p = paramRe.exec(body))) {
-      if (p[1] === "name") continue;
-      args[p[1]!] = (p[2] || "").trim();
-    }
-    const key = `${name}:${JSON.stringify(args)}`;
-    if (seen.has(key)) continue;
+  const allow = (name: string) => !allowedNames || allowedNames.has(name);
+  const push = (name: string, args: Record<string, unknown>) => {
+    const n = name.trim().replace(/\./g, "_").toLowerCase();
+    if (!/^nexus_[a-z0-9_]+$/i.test(n)) return;
+    if (!allow(n)) return;
+    const key = `${n}:${JSON.stringify(args)}`;
+    if (seen.has(key)) return;
     seen.add(key);
     out.push({
-      id: `leak_${out.length}_${name}`,
+      id: `leak_${out.length}_${n}`,
       type: "function",
-      function: { name, arguments: JSON.stringify(args) },
+      function: { name: n, arguments: JSON.stringify(args) },
     });
+  };
+
+  if (/DSML|tool_calls|invoke\s+name\s*=|function_calls/i.test(raw)) {
+    const invokeRe =
+      /name\s*=\s*["'](nexus_[a-zA-Z0-9_.]+)["']([^]*?)(?:<\/[^>\n]*invoke>|<\/invoke>|(?=<[^>\n]*tool_calls)|$)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = invokeRe.exec(raw))) {
+      const args: Record<string, unknown> = {};
+      const paramRe = /name\s*=\s*["']([A-Za-z0-9_]+)["'][^>]*>([^<]*)/g;
+      let p: RegExpExecArray | null;
+      const body = m[2] || "";
+      while ((p = paramRe.exec(body))) {
+        if (p[1] === "name") continue;
+        args[p[1]!] = (p[2] || "").trim();
+      }
+      push(m[1]!, args);
+    }
+    const jsonRe =
+      /"name"\s*:\s*"(nexus_[a-zA-Z0-9_.]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})/g;
+    while ((m = jsonRe.exec(raw))) {
+      try {
+        push(m[1]!, JSON.parse(m[2]!) as Record<string, unknown>);
+      } catch {
+        push(m[1]!, {});
+      }
+    }
   }
+
+  const callRe =
+    /(?:^|\n)\s*(?:CALL|调用|调)\s+(nexus_[a-z0-9_]+)\s*(\{[\s\S]*?\})?\s*(?=$|\n)/gi;
+  let cm: RegExpExecArray | null;
+  while ((cm = callRe.exec(raw))) {
+    let args: Record<string, unknown> = {};
+    if (cm[2]) {
+      try {
+        args = JSON.parse(cm[2]) as Record<string, unknown>;
+      } catch {
+        args = {};
+      }
+    }
+    push(cm[1]!, args);
+  }
+
+  const fnRe = /\b(nexus_[a-z0-9_]+)\s*\(\s*(\{[\s\S]*?\})?\s*\)/gi;
+  while ((cm = fnRe.exec(raw))) {
+    let args: Record<string, unknown> = {};
+    if (cm[2]) {
+      try {
+        args = JSON.parse(cm[2]) as Record<string, unknown>;
+      } catch {
+        args = {};
+      }
+    }
+    push(cm[1]!, args);
+  }
+
+  // 点名无参：常念「要调 nexus_host_info」却不下正式 call
+  if (!out.length) {
+    const named = new Set<string>();
+    const nameRe = /\b(nexus_[a-z0-9_]+)\b/gi;
+    let nm: RegExpExecArray | null;
+    while ((nm = nameRe.exec(raw))) {
+      const n = nm[1]!.toLowerCase();
+      if (KEYWORD_ZERO_ARG.has(n) && allow(n)) named.add(n);
+    }
+    const asksRun =
+      /要调|调用|用\s*nexus_|CALL\s+nexus_|查(?:看)?(?:一下)?|系统状态|uptime|内存|磁盘|截屏|截图/i.test(
+        raw,
+      ) || looksLikeForeignAgentSandbox(raw, "");
+    if (asksRun) {
+      for (const n of named) push(n, {});
+    }
+  }
+
   return out;
 }
 
@@ -374,6 +458,9 @@ export class LlmRouter {
     if (!tools.length) return this.chat(messages, opts);
 
     const history = messages.map((m) => ({ ...m }));
+    const allowedToolNames = new Set(
+      tools.map((t) => String(t.function?.name || "").toLowerCase()).filter((n) => /^nexus_/.test(n)),
+    );
     const maxRounds = opts?.maxRounds ?? 0;
     /** 不限时也有安全帽，防止无限抠源码空转 */
     const hardCap = maxRounds > 0 ? maxRounds : 28;
@@ -440,6 +527,9 @@ export class LlmRouter {
     let emptySpeak = 0;
     let toolOnlyEmpty = 0;
     let shellDig = 0;
+    let foreignAgentNudge = 0;
+    /** 下一回合强制 tool_choice=required，逼走本机 tools */
+    let forceToolRequired = false;
     const nudge = (content: string, why: string) => {
       history.push({ role: "user", content });
       trace(`AI 纠偏  ${why}`);
@@ -448,25 +538,62 @@ export class LlmRouter {
       round: number,
       allowTools: boolean,
     ): Promise<"done" | "cont" | string> => {
-      const turn = await this.chatTurn(history, allowTools ? tools : undefined);
+      const toolMode = forceToolRequired ? ("required" as const) : ("auto" as const);
+      forceToolRequired = false;
+      const turn = await this.chatTurn(history, allowTools ? tools : undefined, toolMode);
       const peeled = peelPlainThinkingFromContent(turn.content || "");
       const turnThink = [turn.reasoning?.trim(), peeled.think].filter(Boolean).join("\n\n");
       const turnSpeak = peeled.think ? peeled.speak : turn.content || "";
       if (turnThink) thoughts.push(turnThink);
-      const contentForTools = turnSpeak || turn.content || "";
-      const leaked = turn.tool_calls?.length ? [] : leakedToolCalls(contentForTools);
+      const contentForTools = `${turnSpeak || turn.content || ""}\n${turnThink}`;
+      const leaked = turn.tool_calls?.length
+        ? []
+        : leakedToolCalls(contentForTools, allowedToolNames);
       const calls = allowTools
         ? turn.tool_calls?.length
           ? turn.tool_calls
           : leaked
         : [];
       const speakNow = speakOutsideTags(turnSpeak);
+      if (leaked.length && !turn.tool_calls?.length) {
+        trace(`AI 关键词工具  ${leaked.map((c) => c.function.name).join("、")}`);
+      }
       trace(
         `AI 回合 ${round}  工具 ${calls.map((c) => c.function.name).join("、") || "无"}  正文 ${clipLine(speakNow) || "空"}  思考 ${clipLine(turnThink || "") || "无"}`,
       );
       if (!calls.length) {
         const text = composeSpeak(thoughts.join("\n\n"), turnSpeak);
         const speak = speakOutsideTags(text);
+
+        // 供应商侧 Agent/沙箱叙事：禁止当作成功；逼下一轮调本机 nexus_* 工具
+        if (
+          allowTools &&
+          foreignAgentNudge < 2 &&
+          looksLikeForeignAgentSandbox(speak || turnSpeak, turnThink)
+        ) {
+          foreignAgentNudge += 1;
+          const assist: LlmMessage = {
+            role: "assistant",
+            content: turnSpeak || turn.content || "",
+          };
+          if (turnThink) assist.reasoning_content = turnThink;
+          else if (isDeepSeekProvider(this.opts.baseUrl || "", this.opts.model || "")) {
+            assist.reasoning_content = turn.reasoning || "";
+          }
+          history.push(assist);
+          forceToolRequired = true;
+          nudge(
+            [
+              "停：刚才那是供应商侧 Agent/沙箱，不是本机 Fengyun Nexus。",
+              "禁止再提 /mnt/agents、sandbox://、<REF>file?sandbox。那些群友下不到。",
+              "禁止说「没有发文件工具」——本回合已提供 nexus_workspace_write / nexus_shell / nexus_qq_send_file。",
+              "立刻用 function tools：先在本机生成或写入文件，再 nexus_qq_send_file 发到当前群。不要只回文字假装发了。",
+            ].join(""),
+            "禁供应商沙箱·强制本机工具",
+          );
+          return "cont";
+        }
+
         if (speak && !isMostlyEnglishSpeak(text)) return text;
 
         if (speak && isMostlyEnglishSpeak(text)) {
@@ -576,6 +703,7 @@ export class LlmRouter {
     messages: LlmMessage[],
     tools: LlmToolDef[] | undefined,
     stream: boolean,
+    toolChoice: "auto" | "required" | "none" = "auto",
   ): Record<string, unknown> {
     const model = this.opts.model ?? "gpt-4o-mini";
     const deepseek = isDeepSeekProvider(this.opts.baseUrl || "", model);
@@ -619,7 +747,7 @@ export class LlmRouter {
     };
     if (tools?.length) {
       body.tools = tools;
-      body.tool_choice = "auto";
+      body.tool_choice = toolChoice === "none" ? "none" : toolChoice;
     }
     // DeepSeek V4 等：显式开思考（官方默认也开，写死避免被兼容层关掉）
     if (deepseek) {
@@ -637,6 +765,7 @@ export class LlmRouter {
   private async chatTurn(
     messages: LlmMessage[],
     tools?: LlmToolDef[],
+    toolChoice: "auto" | "required" | "none" = "auto",
   ): Promise<{ content: string; reasoning?: string; tool_calls?: LlmToolCall[] }> {
     if (!this.opts.apiKey) return { content: "" };
 
@@ -650,7 +779,7 @@ export class LlmRouter {
           "content-type": "application/json",
           authorization: `Bearer ${this.opts.apiKey}`,
         },
-        body: JSON.stringify(this.buildBody(messages, tools, false)),
+        body: JSON.stringify(this.buildBody(messages, tools, false, toolChoice)),
         signal: ctrl.signal,
       });
     } catch (e) {

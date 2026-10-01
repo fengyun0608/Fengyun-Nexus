@@ -190,6 +190,8 @@ export function stripLeakedToolMarkup(text: string): string {
   s = s.replace(/<REF>\s*file\?sandbox:\/\/[^<]*<\/REF>/gi, "");
   s = s.replace(/\bsandbox:\/\/\/mnt\/agents\/[^\s"'`<>）)\]]+/gi, "");
   s = s.replace(/\/mnt\/agents\/[^\s"'`<>）)\]]+/gi, "");
+  // 关键词 CALL 行已执行，不发给用户
+  s = s.replace(/(?:^|\n)\s*(?:CALL|调用)\s+nexus_[a-z0-9_]+[^\n]*/gi, "\n");
   s = s
     .split(/\r?\n/)
     .filter((line) => !/DSML|tool_calls|invoke\s+name\s*=|function_calls/i.test(line))
