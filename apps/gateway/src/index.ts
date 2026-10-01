@@ -1761,7 +1761,13 @@ async function bootstrap(): Promise<void> {
     ];
     const skillBlock = skillsPromptBlock(agentSkills);
     if (skillBlock) history.push({ role: "system", content: skillBlock });
-    const persona = String(chSettings.systemPrompt || "").trim();
+    // 通道人设以磁盘为准：改 configs/channels.local.json 后下一句就生效，不必重启
+    try {
+      channelCfg = loadChannelsConfig(ROOT);
+    } catch {
+      /* 读盘失败继续用内存 */
+    }
+    const persona = String(getChannelSettings(channelCfg, msg.channel).systemPrompt || "").trim();
     if (persona) history.push({ role: "system", content: persona });
     // 给模型：去掉 @ 和呼唤前缀
     let userAsk = stripAtMentions(
