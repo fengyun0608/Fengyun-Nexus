@@ -632,12 +632,12 @@ export function buildAgentToolDefs(_mcp: McpHost): LlmToolDef[] {
     tool("nexus_channel_get", "查看当前消息通道设置（主人、人设、回复群等）", {}),
     tool(
       "nexus_channel_patch",
-      "改当前通道。systemPrompt 只是「角色人设」，不是框架系统提示。仅当主人明确说改人设/角色时才改 systemPrompt；只写角色内容，禁止把思考标签、多段回消息、工具用法等框架规则写进去；不要擅自整段覆盖别人已写好的人设。可改 label、replyGroupIds、onlyMasters、note。不能改密码。",
+      "改当前通道配置。systemPrompt 只是「通道人设/角色说话方式」，与框架系统提示（思考标签、工具、多段回话）不是同一处——后者改不了。仅当主人明确说改人设时才改 systemPrompt；只写角色，禁止塞框架规则，禁止整段瞎覆盖。还可改 label、replyGroupIds、onlyMasters、note。不能改密码。",
       {
         label: { type: "string" },
         systemPrompt: {
           type: "string",
-          description: "仅角色人设正文；勿写框架规则。改前先 nexus_channel_get 看清原文。",
+          description: "仅通道人设（角色）；不是框架系统提示。改前先 nexus_channel_get。",
         },
         replyGroupIds: { type: "string", description: "逗号分隔群号" },
         onlyMasters: { type: "boolean" },
