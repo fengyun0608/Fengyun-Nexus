@@ -152,14 +152,40 @@ function pickCleanChineseBody(speak: string): string {
   return body;
 }
 
-function slideLinesFromBody(body: string, titleHint: string): string[] {
+function slideLinesFromBody(body: string, titleHint: string, count: number): string[] {
   const parts = body
     .split(/[。！？\n]+/)
     .map((s) => s.trim())
     .filter((s) => s.length >= 4);
-  const slides = [titleHint || "本机文稿", ...parts].slice(0, 8);
-  while (slides.length < 3) slides.push("（待补充）");
-  return slides;
+  const n = Math.min(40, Math.max(3, count || 8));
+  const stock = [
+    "世界很大，但今天先把眼前这杯奶茶喝完。",
+    "秩序让日子能过，混乱让日子有趣。",
+    "信息像潮水，我会挑对主人有用的捞上来。",
+    "工具在手边，就别空喊做不到。",
+    "被需要的时候，世界会亮一点点。",
+    "矛盾也是真的：想撒娇，也想把事办妥。",
+    "愿望很简单：陪着主人，把难的事拆小。",
+    "最后一页：喵。",
+  ];
+  const slides = [titleHint || "本机文稿", ...parts];
+  let i = 0;
+  while (slides.length < n) {
+    slides.push(stock[i % stock.length]!);
+    i += 1;
+  }
+  return slides.slice(0, n);
+}
+
+function wantedSlideCount(history: LlmMessage[], speak: string, think: string): number {
+  const userBits = history
+    .filter((m) => m.role === "user")
+    .map((m) => (typeof m.content === "string" ? m.content : ""))
+    .join("\n");
+  const t = `${userBits}\n${speak}\n${think}`;
+  const m = t.match(/(\d{1,2})\s*(?:页|张|P|p)/);
+  if (m) return Math.min(40, Math.max(3, Number(m[1])));
+  return 8;
 }
 
 async function trySendLocalFile(
@@ -248,17 +274,22 @@ async function frameworkLocalDocSend(
   if (ppt) {
     const base = `local-ppt-${stamp}`;
     const relPy = `reports/${base}_make.py`;
-    const slides = slideLinesFromBody(body || "今天也想被需要。世界很大，日子要过得有温度。", title);
+    const slideCount = wantedSlideCount(history, speak, thoughts.join("\n"));
+    const slides = slideLinesFromBody(
+      body || "今天也想被需要。世界很大，日子要过得有温度。",
+      title,
+      slideCount,
+    );
     const pyCode = [
       "# -*- coding: utf-8 -*-",
       "from pathlib import Path",
       "try:",
       "    from pptx import Presentation",
-      "    from pptx.util import Pt, Inches",
+      "    from pptx.util import Inches",
       "except Exception as e:",
       "    print('NO_PPTX', e)",
       "    raise SystemExit(2)",
-      `out = Path(r'''__OUT__''')`,
+      "out = Path(__file__).with_suffix('.pptx')",
       "prs = Presentation()",
       "prs.slide_width = Inches(13.333)",
       "prs.slide_height = Inches(7.5)",
@@ -273,32 +304,30 @@ async function frameworkLocalDocSend(
       "            shape.text = '喵璃 · 本机生成' if i == 0 else str(t)[:120]",
       "            break",
       "prs.save(out)",
-      "print(out)",
+      "print('PPT_OK')",
+      "print(out.name)",
     ].join("\n");
-    // 先占位写 py，再用 shell 把 OUT 换成同目录 pptx 绝对路径
     const pyWritten = (await onTool("nexus_workspace_write", {
       path: relPy,
-      content: pyCode.replace(
-        "out = Path(r'''__OUT__''')",
-        "out = Path(__file__).with_suffix('.pptx')",
-      ),
+      content: pyCode,
     })) as { path?: string };
     const pyAbs = String(pyWritten?.path || "").trim();
     if (!pyAbs) return "本机写 PPT 脚本失败。";
-    trace(`AI 框架代跑  本机生成 PPT`);
+    // 不用 stdout 里的绝对路径（PowerShell 中文盘符常乱码），直接由脚本旁路径推导
+    const pptPath = pyAbs.replace(/\.py$/i, ".pptx");
+    const sendName = `${base}.pptx`;
+    trace(`AI 框架代跑  本机生成 PPT ${slideCount} 页`);
     const run = (await onTool("nexus_shell", {
-      command: `python ${JSON.stringify(pyAbs)}`,
+      command: `python ${JSON.stringify(pyAbs)}; if (Test-Path -LiteralPath ${JSON.stringify(pptPath)}) { 'EXISTS' } else { 'MISS' }`,
     })) as { ok?: boolean; stdout?: string; message?: string };
-    const pptPath = String(run?.stdout || "")
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .find((l) => /\.pptx$/i.test(l) && /^[A-Za-z]:\\/.test(l));
-    if (pptPath) {
-      const r = await trySendLocalFile(onTool, pptPath, `${title}.pptx`.slice(0, 80), trace);
-      if (r.ok) return `好了，已发到群里：${title}.pptx`;
+    const out = String(run?.stdout || "");
+    if (/NO_PPTX/i.test(out) || !/PPT_OK|EXISTS/i.test(out)) {
+      trace(`AI 框架代跑  PPT 未成 ${run?.message || out.slice(0, 160)}`);
+    } else {
+      const r = await trySendLocalFile(onTool, pptPath, sendName, trace);
+      if (r.ok) return `好了，已发到群里：${sendName}`;
       return `PPT 已生成到本机，发送失败。${r.tip}`;
     }
-    trace(`AI 框架代跑  PPT 未成 ${run?.message || run?.stdout || ""}`);
   }
 
   // 备用：干净中文 md（绝不塞英文思考）
