@@ -186,6 +186,10 @@ export function stripLeakedToolMarkup(text: string): string {
     /<[^>\n]{0,80}(?:DSML|tool_calls|tool_call|function_calls|invoke|parameter)[^>]*>[\s\S]*?<\/[^>\n]{0,80}(?:DSML|tool_calls|tool_call|function_calls|invoke|parameter)[^>]*>/gi,
     "",
   );
+  // 供应商 Agent 沙箱伪链接，本机没有对应文件
+  s = s.replace(/<REF>\s*file\?sandbox:\/\/[^<]*<\/REF>/gi, "");
+  s = s.replace(/\bsandbox:\/\/\/mnt\/agents\/[^\s"'`<>）)\]]+/gi, "");
+  s = s.replace(/\/mnt\/agents\/[^\s"'`<>）)\]]+/gi, "");
   s = s
     .split(/\r?\n/)
     .filter((line) => !/DSML|tool_calls|invoke\s+name\s*=|function_calls/i.test(line))
