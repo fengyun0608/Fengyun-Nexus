@@ -2,7 +2,7 @@
 /**
  * Fengyun Nexus boot — detect deps, build packages + Vite console, start gateway.
  */
-import { existsSync, readFileSync, unlinkSync, cpSync, statSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, cpSync, statSync, mkdirSync, readdirSync } from "node:fs";
 import { spawn, execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -252,7 +252,31 @@ async function detectDeps() {
   }
 }
 
+/** 剥掉 package.json 的 UTF-8 BOM，避免 Vite/PostCSS JSON.parse 失败 */
+function stripPackageJsonBom() {
+  const targets = [
+    join(root, "package.json"),
+    join(root, "apps/web/package.json"),
+    join(root, "apps/gateway/package.json"),
+  ];
+  for (const p of targets) {
+    if (!existsSync(p)) continue;
+    try {
+      const buf = readFileSync(p);
+      if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+        writeFileSync(p, buf.subarray(3));
+        bootLog("WARN", ANSI.yellow, `已去掉 BOM：${p.slice(root.length + 1)}`);
+      }
+    } catch {
+      /* 不挡启动 */
+    }
+  }
+}
+
 async function ensureBuild() {
+  // Windows 编辑器偶发给 package.json 写 UTF-8 BOM，Vite 读 PostCSS/JSON 会炸
+  stripPackageJsonBom();
+
   // 与 package.json build:packages 对齐；任一包源码新于 dist 就整编，避免 llm 等方法未进 dist
   const packageDirs = [
     "packages/shared",
