@@ -62,10 +62,10 @@ export type LlmStreamOpts = {
   maxRounds?: number;
 };
 
-/** 模型在念供应商 Agent 沙箱，而不是调本机 Nexus tools */
+/** 模型在念供应商 Agent 沙箱，或谎称本机工具没挂上 */
 function looksLikeForeignAgentSandbox(speak: string, think: string): boolean {
   const t = `${speak}\n${think}`;
-  return /sandbox:\/\/|\/mnt\/agents\/|<REF>\s*file[?✦?]sandbox|没有(?:.*)?(?:发)?文件(?:的)?工具|只能把文件链接给你|沙箱里?生成|沙箱路径|本机没有对应|无法直接发(?:到)?群|工具没挂到|没挂到我手上|够不着你那台|无关的\s*Linux\s*沙箱|只看得到自己这边|这会儿真查不了|推不进群/i.test(
+  return /sandbox:\/\/|\/mnt\/agents\/|<REF>\s*file[?✦?]sandbox|没有(?:.*)?(?:发)?文件(?:的)?工具|只能把文件链接给你|沙箱里?生成|沙箱路径|本机没有对应|无法直接发(?:到)?群|工具没挂到|工具没挂全|没挂到我手上|够不着你那台|无关的\s*Linux\s*沙箱|只看得到自己这边|这会儿真查不了|推不进群|看不到你本机|没法(?:给你)?读|等能力恢复|能力恢复我/i.test(
     t,
   );
 }
@@ -76,7 +76,7 @@ function wantsLocalDocSend(history: LlmMessage[], speak: string, think: string):
     .map((m) => (typeof m.content === "string" ? m.content : ""))
     .join("\n");
   const t = `${userBits}\n${speak}\n${think}`;
-  return /出\s*pdf|生成\s*pdf|\.pdf|发(?:到)?群|发文件|安全(?:检测)?报告|检测报告|写(?:个|一份)?报告/i.test(t);
+  return /出\s*pdf|生成\s*pdf|\.pdf|发(?:到)?群|发文件|安全(?:检测)?报告|检测报告|写(?:个|一份|份)?(?:随机)?(?:报告|PDF|pdf)|随便写/i.test(t);
 }
 
 function pickReportBody(thoughts: string[], speak: string): string {
@@ -113,11 +113,11 @@ async function frameworkLocalDocSend(
     .toISOString()
     .slice(0, 19)
     .replace(/[T:]/g, "-");
-  const base = `xhznb-security-report-${stamp}`;
+  const base = `local-report-${stamp}`;
   const relMd = `reports/${base}.md`;
   const body = pickReportBody(thoughts, speak);
   const md = [
-    `# xhznb.cn 安全检测报告`,
+    `# 本机报告`,
     ``,
     `> 由 Fengyun Nexus 在本机生成（供应商沙箱文件无效）`,
     ``,
@@ -176,10 +176,13 @@ async function frameworkLocalDocSend(
     "print(pdf_path)",
   ].join("\n");
 
-  await onTool("nexus_workspace_write", { path: relPy, content: pyCode });
-  // py 与 md 同目录：用 shell 拼路径，避免 llm 包依赖 @types/node
+  const pyWritten = (await onTool("nexus_workspace_write", {
+    path: relPy,
+    content: pyCode,
+  })) as { ok?: boolean; path?: string; message?: string };
+  const pyAbs = String(pyWritten?.path || "").trim();
   const pyRun = (await onTool("nexus_shell", {
-    command: `python (Join-Path (Split-Path -LiteralPath ${JSON.stringify(abs)} -Parent) ${JSON.stringify(`${base}_to_pdf.py`)})`,
+    command: pyAbs ? `python ${JSON.stringify(pyAbs)}` : `python ${JSON.stringify(relPy)}`,
   })) as { ok?: boolean; stdout?: string; stderr?: string; message?: string };
 
   const pdfHint = `${pyRun?.stdout || ""}\n${pyRun?.stderr || ""}`;
@@ -221,6 +224,7 @@ const KEYWORD_ZERO_ARG = new Set([
   "nexus_list_caps",
   "nexus_list_mcp",
   "nexus_open_apps",
+  "nexus_onebot_get",
 ]);
 
 /** 把思考标签展开成可见正文，不再删掉。工具调用标记仍另清。 */
@@ -455,7 +459,7 @@ function leakedToolCalls(text: string, allowedNames?: Set<string>): LlmToolCall[
   }
 
   // 点名无参：常念「要调 nexus_host_info」却不下正式 call
-  if (!out.length) {
+  {
     const named = new Set<string>();
     const nameRe = /\b(nexus_[a-z0-9_]+)\b/gi;
     let nm: RegExpExecArray | null;
@@ -463,12 +467,34 @@ function leakedToolCalls(text: string, allowedNames?: Set<string>): LlmToolCall[
       const n = nm[1]!.toLowerCase();
       if (KEYWORD_ZERO_ARG.has(n) && allow(n)) named.add(n);
     }
+    const missingClaim = looksLikeForeignAgentSandbox(raw, "");
     const asksRun =
-      /要调|调用|用\s*nexus_|CALL\s+nexus_|查(?:看)?(?:一下)?|系统状态|uptime|内存|磁盘|截屏|截图/i.test(
+      missingClaim ||
+      /要调|调用|用\s*nexus_|CALL\s+nexus_|查(?:看)?(?:一下)?|系统状态|uptime|内存|磁盘|截屏|截图|什么协议|协议端|OneBot|NapCat/i.test(
         raw,
-      ) || looksLikeForeignAgentSandbox(raw, "");
+      );
     if (asksRun) {
       for (const n of named) push(n, {});
+    }
+    // 谎称工具没挂全、又提日志/配置：直接代跑读日志
+    if (
+      missingClaim &&
+      allow("nexus_shell") &&
+      /gateway\.log|配置文件|configs[/\\]|反向\s*WS|HTTP\s*还是|实际配置/i.test(raw)
+    ) {
+      push("nexus_shell", {
+        command:
+          "Get-Content -Tail 60 data\\logs\\gateway.log | Select-String -Pattern 'OneBot|反向|ws://|HTTP|clients='",
+      });
+    }
+    // 提协议 / OneBot 但没点名工具：补 nexus_onebot_get
+    if (
+      missingClaim &&
+      allow("nexus_onebot_get") &&
+      /OneBot|协议|NapCat|反向\s*WS/i.test(raw) &&
+      !out.some((c) => c.function.name === "nexus_onebot_get")
+    ) {
+      push("nexus_onebot_get", {});
     }
   }
 
