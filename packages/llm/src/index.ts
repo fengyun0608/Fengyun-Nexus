@@ -71,32 +71,41 @@ function looksLikeForeignAgentSandbox(speak: string, think: string): boolean {
 }
 
 function hasKimiFileLink(text: string): boolean {
-  return /📎|kimi\.com\/apiv2-files|apiv2-files\/sign-obj/i.test(String(text || ""));
+  return /📎\s*\[[^\]]+\]\(\s*https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/|kimi\.com\/apiv2-files\/sign-obj/i.test(
+    String(text || ""),
+  );
 }
 
+/** 朋友上游自动注入：📎 [文件名](https://www.kimi.com/apiv2-files/sign-obj/…) */
 function extractKimiFileLinks(text: string): Array<{ name: string; url: string }> {
   const raw = String(text || "");
   const out: Array<{ name: string; url: string }> = [];
   const seen = new Set<string>();
   const re =
-    /(?:📎\s*)?\[([^\]]{1,200})\]\((https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/[^)\s]+)\)/gi;
+    /📎?\s*\[([^\]]{1,200})\]\(\s*(https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/[^)\s]+)\s*\)/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw))) {
     const name = String(m[1] || "file").trim() || "file";
-    const url = String(m[2] || "").trim();
+    const url = String(m[2] || "").trim().replace(/[)，。；;]+$/, "");
     if (!url || seen.has(url)) continue;
     seen.add(url);
     out.push({ name, url });
   }
-  // 裸链
-  const bare = /https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/sign-obj\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+/gi;
+  // 裸链（无 markdown）
+  const bare =
+    /https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/sign-obj\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+/gi;
   while ((m = bare.exec(raw))) {
     const url = m[0].replace(/[)，。；;]+$/, "");
     if (seen.has(url)) continue;
     seen.add(url);
-    out.push({ name: "kimi-file", url });
+    const fromName = url.match(/\/([^/?#]+\.(?:pptx?|pdf|docx?|xlsx?|zip|txt|md|png|jpe?g))(?:\?|#|$)/i);
+    out.push({ name: fromName?.[1] || "kimi-file", url });
   }
   return out;
+}
+
+function formatKimiPaperclips(links: Array<{ name: string; url: string }>): string {
+  return links.map((x) => `📎 [${x.name}](${x.url})`).join("\n");
 }
 
 function wantsLocalDocSend(history: LlmMessage[], speak: string, think: string): boolean {
@@ -869,11 +878,27 @@ export class LlmRouter {
         const text = composeSpeak(thoughts.join("\n\n"), turnSpeak);
         const speak = speakOutsideTags(text);
 
-        // 供应商侧沙箱/假文件：优先下载 Kimi 签名链上传；否则本机生成干净文稿/PPT
+        // 朋友上游自动注入的 📎 kimi 签名链：正文原样带回回形针，并尝试下载发群
+        if (allowTools && hasKimiFileLink(`${speak || turnSpeak}\n${turnThink}`)) {
+          const blob = `${speak || turnSpeak}\n${turnThink}`;
+          const links = extractKimiFileLinks(blob);
+          const paper = formatKimiPaperclips(links);
+          const body = pickCleanChineseBody(speak || turnSpeak);
+          trace(`AI 截到 Kimi 文件链  ${links.length} 条`);
+          const via = links.length
+            ? await tryKimiDownloadAndSend(onTool, speak || turnSpeak, turnThink, trace)
+            : null;
+          const parts = [body, paper, via].filter((x) => String(x || "").trim());
+          return composeSpeak(
+            thoughts.join("\n\n"),
+            parts.join("\n\n") || paper || "文件链已截到。",
+          );
+        }
+
+        // 只有沙箱 REF、没有签名链：本机生成干净文稿/PPT 兜底
         if (
           allowTools &&
-          (looksLikeForeignAgentSandbox(speak || turnSpeak, turnThink) ||
-            hasKimiFileLink(speak || turnSpeak)) &&
+          looksLikeForeignAgentSandbox(speak || turnSpeak, turnThink) &&
           wantsLocalDocSend(history, speak || turnSpeak, turnThink)
         ) {
           foreignAgentNudge += 1;
@@ -884,16 +909,6 @@ export class LlmRouter {
             turnSpeak,
             trace,
           );
-          // 下载失败且仍有 Kimi 链：附带原链方便主人手动点开
-          if (hasKimiFileLink(speak || turnSpeak) && !/已发到群里/.test(takeover)) {
-            const links = extractKimiFileLinks(`${speak || turnSpeak}\n${turnThink}`)
-              .map((x) => `📎 [${x.name}](${x.url})`)
-              .join("\n");
-            return composeSpeak(
-              thoughts.join("\n\n"),
-              links ? `${takeover}\n\n${links}` : takeover,
-            );
-          }
           return composeSpeak(thoughts.join("\n\n"), takeover);
         }
 
