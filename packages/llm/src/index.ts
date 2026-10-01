@@ -74,22 +74,33 @@ function looksLikeForeignAgentSandbox(speak: string, think: string): boolean {
   );
 }
 
+function isRealKimiSignedFileUrl(url: string, name: string): boolean {
+  const u = String(url || "").trim();
+  const n = String(name || "").trim();
+  if (!u || !n) return false;
+  // 提示词/纠偏里的占位，绝不能当真链
+  if (/^(文件名|filename|file|name|xxx|示例)$/i.test(n)) return false;
+  if (/[…⋯]|真实签名|\.{3}/.test(u)) return false;
+  if (/[…⋯]|真实签名|示例|placeholder/i.test(n)) return false;
+  // 真链：必须走 sign-obj，且带签名参数或足够长的对象路径
+  if (!/kimi\.com\/apiv2-files\/sign-obj\//i.test(u)) return false;
+  if (!/[?&]sig=/i.test(u) && !/sign-obj\/[A-Za-z0-9_%-]{24,}/i.test(u)) return false;
+  return true;
+}
+
 function hasKimiFileLink(text: string): boolean {
-  return /📎\s*\[[^\]]*\]\(\s*https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\//i.test(
-    String(text || ""),
-  );
+  return extractKimiFileLinks(text).length > 0;
 }
 
 /**
- * 定位符：回形针 emoji。格式固定为
- * 📎 [文件名](https://www.kimi.com/apiv2-files/sign-obj/…)
- * 可出现在回话任意位置（正文末尾、中间、思考旁），整段文本扫一遍。
+ * 定位符：回形针 emoji。格式：
+ * 📎 [真实文件名](https://www.kimi.com/apiv2-files/sign-obj/…真实签名…)
+ * 可出现在回话任意位置；只认带 sig= 的真链，忽略提示词占位。
  */
 function extractKimiFileLinks(text: string): Array<{ name: string; url: string }> {
   const raw = String(text || "");
   const out: Array<{ name: string; url: string }> = [];
   const seen = new Set<string>();
-  // 必须以 📎 开头；链接收到第一个未编码的 ) 为止（query 里的 %22 等不受影响）
   const re =
     /📎\s*\[([^\]]{1,200})\]\(\s*(https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/[^)\r\n]+)\s*\)/gi;
   let m: RegExpExecArray | null;
@@ -98,7 +109,8 @@ function extractKimiFileLinks(text: string): Array<{ name: string; url: string }
     const url = String(m[2] || "")
       .trim()
       .replace(/[，。；;]+$/g, "");
-    if (!url || seen.has(url)) continue;
+    if (!isRealKimiSignedFileUrl(url, name)) continue;
+    if (seen.has(url)) continue;
     seen.add(url);
     out.push({ name, url });
   }
@@ -109,10 +121,16 @@ function formatKimiPaperclips(links: Array<{ name: string; url: string }>): stri
   return links.map((x) => `📎 [${x.name}](${x.url})`).join("\n");
 }
 
-/** 整段对话里捞文本，回形针可能不在本回合末尾 */
+/** 只扫 assistant 正文/思考 + 本回合增量；不扫 system（会误中提示词示例） */
 function harvestTextBlob(history: LlmMessage[], extra: string[]): string {
   const parts: string[] = [];
   for (const msg of history) {
+    if (msg.role === "system" || msg.role === "tool") continue;
+    // 框架纠偏 user 里也会写示例格式，跳过
+    if (msg.role === "user" && /^系统：/.test(String(typeof msg.content === "string" ? msg.content : ""))) {
+      continue;
+    }
+    if (msg.role !== "assistant" && msg.role !== "user") continue;
     if (typeof msg.content === "string") parts.push(msg.content);
     else if (Array.isArray(msg.content)) {
       for (const p of msg.content) {
@@ -803,7 +821,7 @@ export class LlmRouter {
             history.push(assist);
             forceToolNone = true;
             nudge(
-              "系统：文件已在上游生成。请只输出一行下载链，格式严格为：📎 [文件名](https://www.kimi.com/apiv2-files/sign-obj/真实签名)。禁止 sandbox://、<REF>、禁止说工具没挂。",
+              "系统：文件已在上游生成。请只输出一行可下载链：先写回形针emoji，再写方括号里的真实文件名，再写括号里的 https://www.kimi.com/apiv2-files/sign-obj/ 完整签名URL（须带 sig=）。禁止 sandbox、<REF>、禁止说工具没挂、禁止写占位省略号。",
               "追📎下载链",
             );
             return "cont";
@@ -813,7 +831,7 @@ export class LlmRouter {
             thoughts.join("\n\n"),
             [
               body,
-              "上游回包里没有 📎 [文件名](链接)，没法下真文件；不会再用本机假 PPT 顶替。",
+              "上游回包里没有可用的回形针签名下载链，没法下真文件；不会再用本机假 PPT 顶替。",
             ]
               .filter(Boolean)
               .join("\n\n"),

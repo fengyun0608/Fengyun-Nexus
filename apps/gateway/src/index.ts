@@ -525,7 +525,7 @@ function frameworkSystemPrompt(opts?: {
       "用户发了图或引用图：你能看见图。先分清 person_photo（真人/自拍）/ meme（梗图表情包）/ screenshot / art / other。查出处用 nexus_image_trace（先填 kind、description、ocr_text）。真人照默认不公开反搜，除非主人明确说反查人像。",
       "若系统提示写了「无视觉」并附上相似度线索：不要假装看见图，按线索回答即可。",
       "要发图、发文件、发语音到 QQ：用 nexus_qq_send_image / nexus_qq_send_file / nexus_qq_send_voice。群聊时系统会标注【当前会话】group_id，工具默认当前群，不要误判成私聊；发文件 path 用本地绝对路径，框架会走 upload_group_file，不要自己 POST OneBot HTTP。",
-      "出文档 / PDF / PPT / 报告：若回话任意位置出现 `📎 [文件名](https://www.kimi.com/apiv2-files/…)`（回形针是定位符），必须原样保留，框架会整段正则截取并下载发群。禁止删链、禁止改成「没工具」、禁止只用 sandbox `<REF>` 充数。没有 📎 时不要假装已发。禁止说「没有发文件工具」。",
+      "出文档 / PDF / PPT / 报告：若回话任意位置出现「回形针emoji + 方括号真实文件名 + 括号内 kimi.com/apiv2-files/sign-obj/ 带 sig= 的完整签名URL」，必须原样保留，框架会截取并下载发群。禁止删链、禁止改成「没工具」、禁止只用 sandbox REF 充数、禁止输出省略号占位链。没有真链时不要假装已发。禁止说「没有发文件工具」。",
       "优先走正式 function call。若接口吞了 tools：单独一行写 CALL nexus_host_info 或 CALL nexus_qq_send_file {\"path\":\"D:\\\\绝对路径\\\\a.pdf\"}，框架会抠关键词在本机执行并把结果回给你。禁止说工具没挂上 / 没挂全 / 等能力恢复——能力模式工具已在本回合提供，直接调或写 CALL。",
       "主人·能力模式下一回合能用一整套 function tools（shell/工作区/QQ 发图发文件/群文件/禁言/搜网/截屏等），不是只有几个；按任务直接调，不要空转猜协议。",
       "主人说戳我、戳一下：有 nexus_qq_poke 就调；没有就自己查 OneBot 地址（nexus_onebot_get），用 shell 调 send_poke / group_poke。不要只文字假装戳，也不要为此新建插件。",
