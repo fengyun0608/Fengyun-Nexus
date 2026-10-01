@@ -79,7 +79,7 @@ export function workspaceWrite(
   if (!hit.ok) return { ok: false, message: hit.message };
   mkdirSync(join(hit.abs, ".."), { recursive: true });
   writeFileSync(hit.abs, String(content ?? ""), "utf8");
-  return { ok: true, message: "已写入" };
+  return { ok: true, message: "已写入", path: hit.abs };
 }
 
 export function workspaceDelete(

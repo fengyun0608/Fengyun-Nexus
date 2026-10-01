@@ -65,9 +65,152 @@ export type LlmStreamOpts = {
 /** 模型在念供应商 Agent 沙箱，而不是调本机 Nexus tools */
 function looksLikeForeignAgentSandbox(speak: string, think: string): boolean {
   const t = `${speak}\n${think}`;
-  return /sandbox:\/\/|\/mnt\/agents\/|<REF>\s*file\?sandbox|没有(?:.*)?(?:发)?文件(?:的)?工具|只能把文件链接给你|沙箱里?生成|沙箱路径|本机没有对应|无法直接发(?:到)?群|工具没挂到|够不着你那台|无关的\s*Linux\s*沙箱|只看得到自己这边|这会儿真查不了/i.test(
+  return /sandbox:\/\/|\/mnt\/agents\/|<REF>\s*file[?✦?]sandbox|没有(?:.*)?(?:发)?文件(?:的)?工具|只能把文件链接给你|沙箱里?生成|沙箱路径|本机没有对应|无法直接发(?:到)?群|工具没挂到|没挂到我手上|够不着你那台|无关的\s*Linux\s*沙箱|只看得到自己这边|这会儿真查不了|推不进群/i.test(
     t,
   );
+}
+
+function wantsLocalDocSend(history: LlmMessage[], speak: string, think: string): boolean {
+  const userBits = history
+    .filter((m) => m.role === "user")
+    .map((m) => (typeof m.content === "string" ? m.content : ""))
+    .join("\n");
+  const t = `${userBits}\n${speak}\n${think}`;
+  return /出\s*pdf|生成\s*pdf|\.pdf|发(?:到)?群|发文件|安全(?:检测)?报告|检测报告|写(?:个|一份)?报告/i.test(t);
+}
+
+function pickReportBody(thoughts: string[], speak: string): string {
+  const cleaned = speakOutsideTags(speak)
+    .replace(/<REF>[\s\S]*?<\/REF>/gi, "")
+    .replace(/sandbox:\/\/[^\s"'`<>）)\]]+/gi, "")
+    .replace(/\/mnt\/agents\/[^\s"'`<>）)\]]+/gi, "")
+    .trim();
+  const fromThoughts = thoughts
+    .map((t) => String(t || "").trim())
+    .filter((t) => /[\u4e00-\u9fff]/.test(t) && t.length > 60)
+    .filter((t) => !/Owner asks|User says|I'll create|sandbox/i.test(t))
+    .slice(-4);
+  const parts = [...fromThoughts, cleaned].filter(Boolean);
+  let body = parts.join("\n\n").trim();
+  if (body.length > 12000) body = body.slice(0, 12000) + "\n\n…（已截断）";
+  if (body.length < 40) {
+    body =
+      "安全检测报告（框架本机代写）\n\n模型一直走供应商沙箱、未调用本机工具。此文件由 Fengyun Nexus 在主人电脑落盘，内容仅作占位，请主人核对或让我按完整结论重写。";
+  }
+  return body;
+}
+
+/**
+ * 供应商接口吞掉 tools 时：框架亲自在本机写报告并发群。
+ */
+async function frameworkLocalDocSend(
+  onTool: LlmToolHandler,
+  thoughts: string[],
+  speak: string,
+  trace: (line: string) => void,
+): Promise<string> {
+  const stamp = new Date()
+    .toISOString()
+    .slice(0, 19)
+    .replace(/[T:]/g, "-");
+  const base = `xhznb-security-report-${stamp}`;
+  const relMd = `reports/${base}.md`;
+  const body = pickReportBody(thoughts, speak);
+  const md = [
+    `# xhznb.cn 安全检测报告`,
+    ``,
+    `> 由 Fengyun Nexus 在本机生成（供应商沙箱文件无效）`,
+    ``,
+    body,
+    ``,
+  ].join("\n");
+
+  trace(`AI 框架代跑  本机写入 ${relMd}`);
+  const written = (await onTool("nexus_workspace_write", {
+    path: relMd,
+    content: md,
+  })) as { ok?: boolean; path?: string; message?: string; error?: string };
+
+  const abs = String(written?.path || "").trim();
+  if (!abs) {
+    return `本机落盘失败：${written?.message || written?.error || "无路径"}。请确认能力模式与工作区可用。`;
+  }
+
+  // 同目录再落一份本机 python，尝试生成简易 PDF（无第三方库；中文可能显示为 ?）
+  const relPy = `reports/${base}_to_pdf.py`;
+  const pdfAbs = abs.replace(/\.md$/i, ".pdf");
+  const pyCode = [
+    "# -*- coding: utf-8 -*-",
+    "from pathlib import Path",
+    `md_path = Path(r${JSON.stringify(abs)})`,
+    `pdf_path = Path(r${JSON.stringify(pdfAbs)})`,
+    "text = md_path.read_text(encoding='utf-8')",
+    "lines = [ln[:100] for ln in text.splitlines()[:55]] or ['(empty)']",
+    "def esc(s):",
+    "    s = ''.join(ch if ord(ch) < 128 else '?' for ch in s)",
+    "    return s.replace('\\\\', '\\\\\\\\').replace('(', '\\\\(').replace(')', '\\\\)')",
+    "parts = ['BT /F1 11 Tf 50 780 Td']",
+    "for i, ln in enumerate(lines):",
+    "    if i: parts.append('0 -14 Td')",
+    "    parts.append('(' + esc(ln) + ') Tj')",
+    "parts.append('ET')",
+    "stream = ('\\n'.join(parts)).encode('latin-1', 'replace')",
+    "objs = []",
+    "objs.append(b'1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\\n')",
+    "objs.append(b'2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\\n')",
+    "objs.append(b'3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\\n')",
+    "objs.append(b'4 0 obj<< /Length %d >>stream\\n' % len(stream) + stream + b'\\nendstream endobj\\n')",
+    "objs.append(b'5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\\n')",
+    "out = bytearray(b'%PDF-1.4\\n')",
+    "offsets = [0]",
+    "for o in objs:",
+    "    offsets.append(len(out))",
+    "    out.extend(o)",
+    "xref = len(out)",
+    "out.extend(f'xref\\n0 {len(objs)+1}\\n'.encode())",
+    "out.extend(b'0000000000 65535 f \\n')",
+    "for off in offsets[1:]:",
+    "    out.extend(f'{off:010d} 00000 n \\n'.encode())",
+    "out.extend(f'trailer<< /Size {len(objs)+1} /Root 1 0 R >>\\nstartxref\\n{xref}\\n%%EOF'.encode())",
+    "pdf_path.write_bytes(out)",
+    "print(pdf_path)",
+  ].join("\n");
+
+  await onTool("nexus_workspace_write", { path: relPy, content: pyCode });
+  // py 与 md 同目录：用 shell 拼路径，避免 llm 包依赖 @types/node
+  const pyRun = (await onTool("nexus_shell", {
+    command: `python (Join-Path (Split-Path -LiteralPath ${JSON.stringify(abs)} -Parent) ${JSON.stringify(`${base}_to_pdf.py`)})`,
+  })) as { ok?: boolean; stdout?: string; stderr?: string; message?: string };
+
+  const pdfHint = `${pyRun?.stdout || ""}\n${pyRun?.stderr || ""}`;
+  const pdfOk = pdfHint.includes(pdfAbs) || /PDF_OK/i.test(pdfHint);
+
+  const filesToSend: Array<{ path: string; name: string }> = [
+    { path: abs, name: `${base}.md` },
+  ];
+  if (pdfOk) {
+    filesToSend.unshift({ path: pdfAbs, name: `${base}.pdf` });
+    trace(`AI 框架代跑  本机 PDF 已生成`);
+  } else {
+    trace(`AI 框架代跑  PDF 未成（${pyRun?.message || "python 未跑通"}），先发 md`);
+  }
+
+  const tips: string[] = [];
+  for (const f of filesToSend) {
+    trace(`AI 框架代跑  发送 ${f.path}`);
+    const sent = (await onTool("nexus_qq_send_file", {
+      path: f.path,
+      name: f.name,
+    })) as { ok?: boolean; message?: string; error?: string };
+    if (sent?.ok) tips.push(`已发 ${f.name}（${sent.message || "ok"}）`);
+    else tips.push(`${f.name} 发群失败：${sent?.message || sent?.error || "未知"}`);
+  }
+
+  return [
+    "模型一直在供应商沙箱里假装出文件，没调本机工具。",
+    `我已在你电脑用代码写入：${abs}${pdfOk ? ` 与 ${pdfAbs}` : ""}。`,
+    ...tips,
+  ].join("\n");
 }
 
 /** 无参：正文点名即可当调用 */
@@ -565,7 +708,21 @@ export class LlmRouter {
         const text = composeSpeak(thoughts.join("\n\n"), turnSpeak);
         const speak = speakOutsideTags(text);
 
-        // 供应商侧 Agent/沙箱叙事：禁止当作成功；逼下一轮调本机 nexus_* 工具
+        // 供应商侧 Agent/沙箱 + 要出文档：对方接口不吐 tools，纠偏一轮后框架本机代写代发
+        if (
+          allowTools &&
+          looksLikeForeignAgentSandbox(speak || turnSpeak, turnThink) &&
+          wantsLocalDocSend(history, speak || turnSpeak, turnThink)
+        ) {
+          foreignAgentNudge += 1;
+          if (foreignAgentNudge >= 1) {
+            // 这类供应商几乎从不回 tool_calls，纠偏浪费时间；直接本机落盘发送
+            const takeover = await frameworkLocalDocSend(onTool, thoughts, turnSpeak, trace);
+            return composeSpeak(thoughts.join("\n\n"), takeover);
+          }
+          return "cont";
+        }
+
         if (
           allowTools &&
           foreignAgentNudge < 2 &&
@@ -585,9 +742,8 @@ export class LlmRouter {
           nudge(
             [
               "停：刚才那是供应商侧 Agent/沙箱，不是本机 Fengyun Nexus。",
-              "禁止再提 /mnt/agents、sandbox://、<REF>file?sandbox。那些群友下不到。",
-              "禁止说「没有发文件工具」——本回合已提供 nexus_workspace_write / nexus_shell / nexus_qq_send_file。",
-              "立刻用 function tools：先在本机生成或写入文件，再 nexus_qq_send_file 发到当前群。不要只回文字假装发了。",
+              "禁止再提 /mnt/agents、sandbox://、<REF>file。那些群友下不到。",
+              "立刻用本机 function tools（nexus_shell / nexus_workspace_* / nexus_qq_send_*），不要空喊工具名。",
             ].join(""),
             "禁供应商沙箱·强制本机工具",
           );
