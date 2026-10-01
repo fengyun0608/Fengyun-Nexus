@@ -1,3 +1,7 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 export interface LlmContentPartText {
   type: "text";
   text: string;
@@ -71,35 +75,32 @@ function looksLikeForeignAgentSandbox(speak: string, think: string): boolean {
 }
 
 function hasKimiFileLink(text: string): boolean {
-  return /📎\s*\[[^\]]+\]\(\s*https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/|kimi\.com\/apiv2-files\/sign-obj/i.test(
+  return /📎\s*\[[^\]]*\]\(\s*https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\//i.test(
     String(text || ""),
   );
 }
 
-/** 朋友上游自动注入：📎 [文件名](https://www.kimi.com/apiv2-files/sign-obj/…) */
+/**
+ * 定位符：回形针 emoji。格式固定为
+ * 📎 [文件名](https://www.kimi.com/apiv2-files/sign-obj/…)
+ * 可出现在回话任意位置（正文末尾、中间、思考旁），整段文本扫一遍。
+ */
 function extractKimiFileLinks(text: string): Array<{ name: string; url: string }> {
   const raw = String(text || "");
   const out: Array<{ name: string; url: string }> = [];
   const seen = new Set<string>();
+  // 必须以 📎 开头；链接收到第一个未编码的 ) 为止（query 里的 %22 等不受影响）
   const re =
-    /📎?\s*\[([^\]]{1,200})\]\(\s*(https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/[^)\s]+)\s*\)/gi;
+    /📎\s*\[([^\]]{1,200})\]\(\s*(https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/[^)\r\n]+)\s*\)/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw))) {
     const name = String(m[1] || "file").trim() || "file";
-    const url = String(m[2] || "").trim().replace(/[)，。；;]+$/, "");
+    const url = String(m[2] || "")
+      .trim()
+      .replace(/[，。；;]+$/g, "");
     if (!url || seen.has(url)) continue;
     seen.add(url);
     out.push({ name, url });
-  }
-  // 裸链（无 markdown）
-  const bare =
-    /https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/sign-obj\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+/gi;
-  while ((m = bare.exec(raw))) {
-    const url = m[0].replace(/[)，。；;]+$/, "");
-    if (seen.has(url)) continue;
-    seen.add(url);
-    const fromName = url.match(/\/([^/?#]+\.(?:pptx?|pdf|docx?|xlsx?|zip|txt|md|png|jpe?g))(?:\?|#|$)/i);
-    out.push({ name: fromName?.[1] || "kimi-file", url });
   }
   return out;
 }
@@ -108,24 +109,30 @@ function formatKimiPaperclips(links: Array<{ name: string; url: string }>): stri
   return links.map((x) => `📎 [${x.name}](${x.url})`).join("\n");
 }
 
+/** 整段对话里捞文本，回形针可能不在本回合末尾 */
+function harvestTextBlob(history: LlmMessage[], extra: string[]): string {
+  const parts: string[] = [];
+  for (const msg of history) {
+    if (typeof msg.content === "string") parts.push(msg.content);
+    else if (Array.isArray(msg.content)) {
+      for (const p of msg.content) {
+        if (p && typeof p === "object" && p.type === "text") parts.push(String(p.text || ""));
+      }
+    }
+    if (msg.reasoning_content) parts.push(String(msg.reasoning_content));
+  }
+  for (const x of extra) if (x) parts.push(x);
+  return parts.join("\n");
+}
+
 function wantsLocalDocSend(history: LlmMessage[], speak: string, think: string): boolean {
   const userBits = history
     .filter((m) => m.role === "user")
     .map((m) => (typeof m.content === "string" ? m.content : ""))
     .join("\n");
   const t = `${userBits}\n${speak}\n${think}`;
-  return /出\s*pdf|生成\s*pdf|\.pdf|\.pptx|PPT|ppt|发(?:到)?群|发文件|安全(?:检测)?报告|检测报告|写(?:个|一份|份)?(?:随机)?(?:报告|PDF|pdf|PPT|ppt)|随便写|对世界的看法/i.test(
+  return /出\s*pdf|生成\s*pdf|\.pdf|\.pptx|PPT|ppt|发(?:到)?群|发文件|安全(?:检测)?报告|检测报告|写(?:个|一份|份)?(?:随机)?(?:报告|PDF|pdf|PPT|ppt)|随便写|对世界的看法|简约/i.test(
     t,
-  );
-}
-
-function wantsPpt(history: LlmMessage[], speak: string, think: string): boolean {
-  const userBits = history
-    .filter((m) => m.role === "user")
-    .map((m) => (typeof m.content === "string" ? m.content : ""))
-    .join("\n");
-  return /\.pptx|\bPPT\b|幻灯片|做(?:个|一份)?ppt|写(?:个|一份)?ppt/i.test(
-    `${userBits}\n${speak}\n${think}`,
   );
 }
 
@@ -133,7 +140,7 @@ function wantsPpt(history: LlmMessage[], speak: string, think: string): boolean 
 function pickCleanChineseBody(speak: string): string {
   const cleaned = speakOutsideTags(speak)
     .replace(/<REF>[\s\S]*?<\/REF>/gi, "")
-    .replace(/(?:📎\s*)?\[[^\]]+\]\(https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/[^)]+\)/gi, "")
+    .replace(/📎\s*\[[^\]]+\]\(\s*https?:\/\/(?:www\.)?kimi\.com\/apiv2-files\/[^)]+\)/gi, "")
     .replace(/sandbox:\/\/[^\s"'`<>）)\]]+/gi, "")
     .replace(/\/mnt\/agents\/[^\s"'`<>）)\]]+/gi, "")
     .replace(/nexus_[a-z0-9_]+/gi, "")
@@ -161,42 +168,6 @@ function pickCleanChineseBody(speak: string): string {
   return body;
 }
 
-function slideLinesFromBody(body: string, titleHint: string, count: number): string[] {
-  const parts = body
-    .split(/[。！？\n]+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length >= 4);
-  const n = Math.min(40, Math.max(3, count || 8));
-  const stock = [
-    "世界很大，但今天先把眼前这杯奶茶喝完。",
-    "秩序让日子能过，混乱让日子有趣。",
-    "信息像潮水，我会挑对主人有用的捞上来。",
-    "工具在手边，就别空喊做不到。",
-    "被需要的时候，世界会亮一点点。",
-    "矛盾也是真的：想撒娇，也想把事办妥。",
-    "愿望很简单：陪着主人，把难的事拆小。",
-    "最后一页：喵。",
-  ];
-  const slides = [titleHint || "本机文稿", ...parts];
-  let i = 0;
-  while (slides.length < n) {
-    slides.push(stock[i % stock.length]!);
-    i += 1;
-  }
-  return slides.slice(0, n);
-}
-
-function wantedSlideCount(history: LlmMessage[], speak: string, think: string): number {
-  const userBits = history
-    .filter((m) => m.role === "user")
-    .map((m) => (typeof m.content === "string" ? m.content : ""))
-    .join("\n");
-  const t = `${userBits}\n${speak}\n${think}`;
-  const m = t.match(/(\d{1,2})\s*(?:页|张|P|p)/);
-  if (m) return Math.min(40, Math.max(3, Number(m[1])));
-  return 8;
-}
-
 async function trySendLocalFile(
   onTool: LlmToolHandler,
   path: string,
@@ -212,152 +183,60 @@ async function trySendLocalFile(
   return { ok: false, tip: `${name} 发送失败：${sent?.message || sent?.error || "未知"}` };
 }
 
-/** 优先：下载朋友接口给的 Kimi 签名链，再 upload 到群 */
+async function downloadUrlToAsciiTemp(
+  url: string,
+  filename: string,
+): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  const safe = filename.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "_").slice(0, 80) || "kimi-file";
+  const dir = join(tmpdir(), "fengyun-nexus-kimi");
+  mkdirSync(dir, { recursive: true });
+  const abs = join(dir, `${Date.now()}-${safe}`);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        accept: "*/*",
+        referer: "https://www.kimi.com/",
+      },
+      signal: AbortSignal.timeout(90_000),
+      redirect: "follow",
+    });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 32) return { ok: false, error: `空文件 ${buf.length}B` };
+    writeFileSync(abs, buf);
+    return { ok: true, path: abs };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** 下载朋友上游自动注入的 📎 kimi 签名链，再 upload 到群（不用本机造假 PPT） */
 async function tryKimiDownloadAndSend(
   onTool: LlmToolHandler,
-  speak: string,
-  think: string,
+  blob: string,
   trace: (line: string) => void,
 ): Promise<string | null> {
-  const links = extractKimiFileLinks(`${speak}\n${think}`);
+  const links = extractKimiFileLinks(blob);
   if (!links.length) return null;
   const sentNames: string[] = [];
   const failTips: string[] = [];
   for (const link of links) {
     const safe = link.name.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "_").slice(0, 80) || "kimi-file";
-    const stamp = Date.now();
-    const relHint = `data\\agent-workspace\\downloads\\${stamp}-${safe}`;
-    trace(`AI 框架代跑  下载 Kimi 文件 ${link.name}`);
-    const dl = (await onTool("nexus_shell", {
-      command: [
-        `$dir = Join-Path (Get-Location) 'data\\agent-workspace\\downloads';`,
-        `New-Item -ItemType Directory -Force -Path $dir | Out-Null;`,
-        `$out = Join-Path $dir (${JSON.stringify(`${stamp}-${safe}`)});`,
-        `try {`,
-        `  Invoke-WebRequest -Uri ${JSON.stringify(link.url)} -OutFile $out -UseBasicParsing -TimeoutSec 60;`,
-        `  if ((Test-Path $out) -and ((Get-Item $out).Length -gt 32)) { Write-Output $out } else { Write-Output 'FAIL empty' }`,
-        `} catch { Write-Output ('FAIL ' + $_.Exception.Message) }`,
-      ].join(" "),
-    })) as { ok?: boolean; stdout?: string; stderr?: string; message?: string };
-    const stdout = String(dl?.stdout || "").trim();
-    const abs = stdout
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .find((l) => /^[A-Za-z]:\\/.test(l) && !/^FAIL/i.test(l));
-    if (!abs) {
-      failTips.push(`${link.name} 下载失败：${stdout.slice(0, 120) || dl?.message || "未知"}`);
+    trace(`AI 框架代跑  下载上游文件 ${link.name}`);
+    const dl = await downloadUrlToAsciiTemp(link.url, safe);
+    if (!dl.ok) {
+      failTips.push(`${link.name} 下载失败：${dl.error}`);
       continue;
     }
-    const r = await trySendLocalFile(onTool, abs, safe, trace);
+    const r = await trySendLocalFile(onTool, dl.path, safe, trace);
     if (r.ok) sentNames.push(safe);
     else failTips.push(r.tip);
   }
   if (sentNames.length) return `好了，已发到群里：${sentNames.join("、")}`;
-  if (failTips.length) trace(`AI 框架代跑  Kimi 下载未成 ${failTips.join("；")}`);
+  if (failTips.length) trace(`AI 框架代跑  上游文件下载未成 ${failTips.join("；")}`);
   return null;
-}
-
-/**
- * 供应商不吐 tools 时：先下 Kimi 链上传；失败再本机生成干净文稿/PPT 发送。
- */
-async function frameworkLocalDocSend(
-  onTool: LlmToolHandler,
-  history: LlmMessage[],
-  thoughts: string[],
-  speak: string,
-  trace: (line: string) => void,
-): Promise<string> {
-  const viaKimi = await tryKimiDownloadAndSend(onTool, speak, thoughts.join("\n"), trace);
-  if (viaKimi) return viaKimi;
-
-  const stamp = new Date()
-    .toISOString()
-    .slice(0, 19)
-    .replace(/[T:]/g, "-");
-  const body = pickCleanChineseBody(speak);
-  const ppt = wantsPpt(history, speak, thoughts.join("\n"));
-  const title =
-    body.split(/\n/)[0]?.replace(/^#+\s*/, "").slice(0, 40) ||
-    (ppt ? "喵璃眼中的世界" : "本机文稿");
-
-  if (ppt) {
-    const base = `local-ppt-${stamp}`;
-    const relPy = `reports/${base}_make.py`;
-    const slideCount = wantedSlideCount(history, speak, thoughts.join("\n"));
-    const slides = slideLinesFromBody(
-      body || "今天也想被需要。世界很大，日子要过得有温度。",
-      title,
-      slideCount,
-    );
-    const pyCode = [
-      "# -*- coding: utf-8 -*-",
-      "from pathlib import Path",
-      "try:",
-      "    from pptx import Presentation",
-      "    from pptx.util import Inches",
-      "except Exception as e:",
-      "    print('NO_PPTX', e)",
-      "    raise SystemExit(2)",
-      "out = Path(__file__).with_suffix('.pptx')",
-      "prs = Presentation()",
-      "prs.slide_width = Inches(13.333)",
-      "prs.slide_height = Inches(7.5)",
-      "titles = " + JSON.stringify(slides),
-      "for i, t in enumerate(titles):",
-      "    layout = prs.slide_layouts[0] if i == 0 else prs.slide_layouts[1]",
-      "    slide = prs.slides.add_slide(layout)",
-      "    if slide.shapes.title:",
-      "        slide.shapes.title.text = str(t)[:80]",
-      "    for shape in slide.placeholders:",
-      "        if shape.placeholder_format.idx == 1:",
-      "            shape.text = '喵璃 · 本机生成' if i == 0 else str(t)[:120]",
-      "            break",
-      "prs.save(out)",
-      "print('PPT_OK')",
-      "print(out.name)",
-    ].join("\n");
-    const pyWritten = (await onTool("nexus_workspace_write", {
-      path: relPy,
-      content: pyCode,
-    })) as { path?: string };
-    const pyAbs = String(pyWritten?.path || "").trim();
-    if (!pyAbs) return "本机写 PPT 脚本失败。";
-    // 不用 stdout 里的绝对路径（PowerShell 中文盘符常乱码），直接由脚本旁路径推导
-    const pptPath = pyAbs.replace(/\.py$/i, ".pptx");
-    const sendName = `${base}.pptx`;
-    trace(`AI 框架代跑  本机生成 PPT ${slideCount} 页`);
-    const run = (await onTool("nexus_shell", {
-      command: `python ${JSON.stringify(pyAbs)}; if (Test-Path -LiteralPath ${JSON.stringify(pptPath)}) { 'EXISTS' } else { 'MISS' }`,
-    })) as { ok?: boolean; stdout?: string; message?: string };
-    const out = String(run?.stdout || "");
-    if (/NO_PPTX/i.test(out) || !/PPT_OK|EXISTS/i.test(out)) {
-      trace(`AI 框架代跑  PPT 未成 ${run?.message || out.slice(0, 160)}`);
-    } else {
-      const r = await trySendLocalFile(onTool, pptPath, sendName, trace);
-      if (r.ok) return `好了，已发到群里：${sendName}`;
-      return `PPT 已生成到本机，发送失败。${r.tip}`;
-    }
-  }
-
-  // 备用：干净中文 md（绝不塞英文思考）
-  const base = `local-doc-${stamp}`;
-  const relMd = `reports/${base}.md`;
-  const mdBody =
-    body ||
-    "文稿已在本机生成。供应商侧沙箱文件无效；如需完整 PPT/PDF，请再说一遍主题要点。";
-  const md = `# ${title}\n\n${mdBody}\n`;
-  trace(`AI 框架代跑  本机写入 ${relMd}`);
-  const written = (await onTool("nexus_workspace_write", {
-    path: relMd,
-    content: md,
-  })) as { ok?: boolean; path?: string; message?: string; error?: string };
-  const abs = String(written?.path || "").trim();
-  if (!abs) {
-    return `本机落盘失败：${written?.message || written?.error || "无路径"}`;
-  }
-  const r = await trySendLocalFile(onTool, abs, `${base}.md`, trace);
-  if (r.ok) return `好了，已发到群里：${base}.md`;
-  return `文件已写到本机，发送失败。${r.tip}`;
 }
 
 /** 无参：正文点名即可当调用 */
@@ -843,6 +722,8 @@ export class LlmRouter {
     let foreignAgentNudge = 0;
     /** 下一回合强制 tool_choice=required，逼走本机 tools */
     let forceToolRequired = false;
+    /** 追回形针链时不要塞 tools，避免模型又念「没挂工具」 */
+    let forceToolNone = false;
     const nudge = (content: string, why: string) => {
       history.push({ role: "user", content });
       trace(`AI 纠偏  ${why}`);
@@ -851,9 +732,18 @@ export class LlmRouter {
       round: number,
       allowTools: boolean,
     ): Promise<"done" | "cont" | string> => {
-      const toolMode = forceToolRequired ? ("required" as const) : ("auto" as const);
+      const toolMode = forceToolNone
+        ? ("none" as const)
+        : forceToolRequired
+          ? ("required" as const)
+          : ("auto" as const);
       forceToolRequired = false;
-      const turn = await this.chatTurn(history, allowTools ? tools : undefined, toolMode);
+      forceToolNone = false;
+      const turn = await this.chatTurn(
+        history,
+        allowTools && toolMode !== "none" ? tools : undefined,
+        toolMode,
+      );
       const peeled = peelPlainThinkingFromContent(turn.content || "");
       const turnThink = [turn.reasoning?.trim(), peeled.think].filter(Boolean).join("\n\n");
       const turnSpeak = peeled.think ? peeled.speak : turn.content || "";
@@ -878,16 +768,18 @@ export class LlmRouter {
         const text = composeSpeak(thoughts.join("\n\n"), turnSpeak);
         const speak = speakOutsideTags(text);
 
-        // 朋友上游自动注入的 📎 kimi 签名链：正文原样带回回形针，并尝试下载发群
-        if (allowTools && hasKimiFileLink(`${speak || turnSpeak}\n${turnThink}`)) {
-          const blob = `${speak || turnSpeak}\n${turnThink}`;
-          const links = extractKimiFileLinks(blob);
+        // 整段对话扫 📎 [名](kimi.com/apiv2-files/…) —— 可能不在本回合末尾
+        const huntBlob = harvestTextBlob(history, [
+          thoughts.join("\n"),
+          speak || turnSpeak,
+          turnThink,
+        ]);
+        if (allowTools && hasKimiFileLink(huntBlob)) {
+          const links = extractKimiFileLinks(huntBlob);
           const paper = formatKimiPaperclips(links);
           const body = pickCleanChineseBody(speak || turnSpeak);
-          trace(`AI 截到 Kimi 文件链  ${links.length} 条`);
-          const via = links.length
-            ? await tryKimiDownloadAndSend(onTool, speak || turnSpeak, turnThink, trace)
-            : null;
+          trace(`AI 截到 📎 文件链  ${links.length} 条`);
+          const via = links.length ? await tryKimiDownloadAndSend(onTool, huntBlob, trace) : null;
           const parts = [body, paper, via].filter((x) => String(x || "").trim());
           return composeSpeak(
             thoughts.join("\n\n"),
@@ -895,27 +787,44 @@ export class LlmRouter {
           );
         }
 
-        // 只有沙箱 REF、没有签名链：本机生成干净文稿/PPT 兜底
+        // 只有沙箱 REF、没有 📎：追一次回形针，绝不本机造假 PPT
         if (
           allowTools &&
           looksLikeForeignAgentSandbox(speak || turnSpeak, turnThink) &&
           wantsLocalDocSend(history, speak || turnSpeak, turnThink)
         ) {
-          foreignAgentNudge += 1;
-          const takeover = await frameworkLocalDocSend(
-            onTool,
-            history,
-            thoughts,
-            turnSpeak,
-            trace,
+          if (foreignAgentNudge < 1) {
+            foreignAgentNudge += 1;
+            const assist: LlmMessage = {
+              role: "assistant",
+              content: turnSpeak || turn.content || "",
+            };
+            if (turnThink) assist.reasoning_content = turnThink;
+            history.push(assist);
+            forceToolNone = true;
+            nudge(
+              "系统：文件已在上游生成。请只输出一行下载链，格式严格为：📎 [文件名](https://www.kimi.com/apiv2-files/sign-obj/真实签名)。禁止 sandbox://、<REF>、禁止说工具没挂。",
+              "追📎下载链",
+            );
+            return "cont";
+          }
+          const body = pickCleanChineseBody(speak || turnSpeak);
+          return composeSpeak(
+            thoughts.join("\n\n"),
+            [
+              body,
+              "上游回包里没有 📎 [文件名](链接)，没法下真文件；不会再用本机假 PPT 顶替。",
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
           );
-          return composeSpeak(thoughts.join("\n\n"), takeover);
         }
 
         if (
           allowTools &&
           foreignAgentNudge < 2 &&
-          looksLikeForeignAgentSandbox(speak || turnSpeak, turnThink)
+          looksLikeForeignAgentSandbox(speak || turnSpeak, turnThink) &&
+          !wantsLocalDocSend(history, speak || turnSpeak, turnThink)
         ) {
           foreignAgentNudge += 1;
           const assist: LlmMessage = {

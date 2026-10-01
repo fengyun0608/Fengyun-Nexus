@@ -170,6 +170,9 @@ importers:
         specifier: workspace:*
         version: link:../shared
     devDependencies:
+      '@types/node':
+        specifier: ^22.20.3
+        version: 22.20.3
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -305,6 +308,12 @@ importers:
         version: link:../../packages/plugin-sdk
 
   plugins/z-proxy-owner-reply:
+    dependencies:
+      '@fengyun/nexus-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/z-recall:
     dependencies:
       '@fengyun/nexus-plugin-sdk':
         specifier: workspace:*
