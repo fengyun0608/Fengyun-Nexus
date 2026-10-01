@@ -520,7 +520,7 @@ function frameworkSystemPrompt(opts?: {
       "有人说截图、截屏、截个图、电脑画面发群里：调用 nexus_screen。那是本机真实屏幕，不是状态卡片。不要用 nexus_shot 充数。没有显示器就照工具结果说明截不了。",
       "nexus_shot 只渲菜单或 HTML 图，不能拿来代替电脑截图。",
       "写代码：短脚本放沙箱。不要把网关源码整份读完。说「已创建」前必须确认文件真在。禁止为一次小事新建常驻插件。",
-      "改通道人设/回复群或 OneBot 开关路径：用 nexus_channel_patch / nexus_onebot_patch。不要改密码。",
+      "改通道人设：仅当主人明确说「改人设 / 改角色设定」时才用 nexus_channel_patch 改 systemPrompt；只写角色人设，禁止把思考标签、多段回消息、工具用法等框架规则写进人设。不要擅自整段覆盖别人已经写好的人设。改回复群或 OneBot 开关路径：用 nexus_channel_patch / nexus_onebot_patch。不要改密码。",
       "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp。控件树是空的网页壳，用 nexus_web_attach 挂页面，或 nexus_window_see 认出字在哪再 nexus_click_text。普通窗口用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。不够就自己写脚本。",
       "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。snapshot 里有字和坐标。不要只用 web_read 只读摘要。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。能直接调工具就别连查五六个再动手。",
@@ -2072,7 +2072,24 @@ async function bootstrap(): Promise<void> {
         const prev = getChannelSettings(channelCfg, msg.channel);
         const next: ChannelSettings = { ...prev };
         if (typeof patch.label === "string") next.label = patch.label;
-        if (typeof patch.systemPrompt === "string") next.systemPrompt = patch.systemPrompt;
+        if (typeof patch.systemPrompt === "string") {
+          // 改人设前备份，避免 AI 整段覆盖后找不回
+          if (String(patch.systemPrompt) !== String(prev.systemPrompt || "")) {
+            try {
+              const dir = join(ROOT, "configs", "backups");
+              mkdirSync(dir, { recursive: true });
+              const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+              writeFileSync(
+                join(dir, `systemPrompt-${msg.channel}-${stamp}.txt`),
+                String(prev.systemPrompt || ""),
+                "utf8",
+              );
+            } catch (e) {
+              log.warn(`人设备份失败：${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+          next.systemPrompt = patch.systemPrompt;
+        }
         if (typeof patch.note === "string") next.note = patch.note;
         if (typeof patch.onlyMasters === "boolean") next.onlyMasters = patch.onlyMasters;
         if (typeof patch.privateAi === "boolean") next.privateAi = patch.privateAi;
@@ -2091,7 +2108,7 @@ async function bootstrap(): Promise<void> {
           channels: { ...channelCfg.channels, [msg.channel]: next },
         };
         saveChannelsConfig(ROOT, channelCfg);
-        return { ok: true, message: "通道设置已保存" };
+        return { ok: true, message: "通道设置已保存（人设若有改动已先备份到 configs/backups/）" };
       },
       getOneBotSnapshot: () => {
         const st = onebot.status();

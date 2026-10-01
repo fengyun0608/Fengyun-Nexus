@@ -137,7 +137,7 @@ cd Fengyun-Nexus
 chmod +x boot.sh && ./boot.sh
 ```
 
-已装过：目录里 `./boot.sh` / `start.bat`（默认 PM2 后台）。日常：`./nexus.sh start` · `./nexus.sh desk` · `./nexus.sh logs -f`。
+已装过：电脑双击 `start.bat`（前台窗口）；Linux 桌面 `./boot.sh` 也是前台。服务器 / 容器才用 PM2：`./nexus.sh start` · `./nexus.sh desk` · `./nexus.sh logs -f`。
 
 本机已装 Docker 时：
 
@@ -152,11 +152,12 @@ docker compose up -d --build
 ## 常用命令
 
 ```bash
-./nexus.sh start          # PM2 后台启动框架（Windows: nexus.cmd start）
+# 电脑：双击 start.bat（前台）；关窗口即停
+./boot.sh                 # Linux 桌面前台；服务器/容器会走 PM2
+./nexus.sh start          # 仅服务器/容器：PM2 后台（Windows: nexus.cmd start）
 ./nexus.sh desk           # 启动台：填 QQ/端口 → 启 NapCat → 跟日志
-./nexus.sh logs -f        # 框架日志
+./nexus.sh logs -f        # 框架日志（PM2 场景）
 ./nexus.sh nc logs -f     # NapCat 日志
-NEXUS_FOREGROUND=1 ./boot.sh   # 前台调试
 pnpm smoke                # 另开端口冒烟
 pnpm nexus setup          # 交互改密
 pnpm nexus status
@@ -165,7 +166,7 @@ pnpm nexus status
 群里 / 控制台（主人或已登录管理端）：
 
 - `#帮助` `#状态` `#关机` `#开机`
-- `#重启` — 同窗口重启
+- `#重启` — 前台同窗口重启（电脑不要用 PM2 后台重启）
 - `#更新` — 拉远程框架后同窗口重启
 
 ---

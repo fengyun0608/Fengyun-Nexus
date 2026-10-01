@@ -21,19 +21,19 @@ const isWin = process.platform === "win32";
 function help() {
   console.log(`Fengyun Nexus
 
-  nexus start              PM2 后台启动框架
-  nexus stop               停止框架
-  nexus restart            重启框架
+  nexus boot               前台启动（电脑请双击 start.bat / 本命令）
+  nexus start              PM2 后台（仅服务器/容器；电脑不要用）
+  nexus stop               停止 PM2 里的框架
+  nexus restart            重启 PM2 里的框架
   nexus logs [-f] [行数]   框架日志（-f 跟随）
   nexus desk [QQ] [端口]   启动台：填 QQ/端口 → 配好 → 启 NapCat → 跟日志
   nexus nc start|stop|logs|status
-  nexus boot               前台启动（调试）
   nexus setup              首次改密
   nexus env [姿态]
   nexus status
   nexus help
 
-  一键安装后默认 PM2 后台；看日志：nexus logs -f
+  电脑：双击 start.bat 前台跑。服务器/容器：nexus start（PM2）
 `);
 }
 
@@ -323,6 +323,13 @@ async function main() {
     return;
   }
   if (cmd === "start") {
+    const envNow = currentEnv();
+    if (isWin && envNow !== "server" && process.env.NEXUS_USE_PM2 !== "1") {
+      console.error(
+        "电脑请双击 start.bat 前台跑，不要用 PM2。\n仅服务器/容器：nexus start；若本机硬要 PM2：set NEXUS_USE_PM2=1",
+      );
+      process.exit(1);
+    }
     if (!ensurePm2OrTip()) process.exit(1);
     process.exit(runNodeScript("scripts/pm2-nexus.mjs", ["start"]));
   }

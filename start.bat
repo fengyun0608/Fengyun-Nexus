@@ -1,22 +1,22 @@
 @echo off
-REM Fengyun Nexus launcher — default PM2 background
-REM Foreground debug: set NEXUS_FOREGROUND=1
+REM Fengyun Nexus — 电脑双击：前台窗口跑；关窗口即停。不要用 PM2。
+REM 服务器 / 容器后台请用：nexus.cmd start 或 Linux 上 NEXUS_ENV=server ./boot.sh
 cd /d "%~dp0"
-echo [Fengyun Nexus] Starting...
+echo [Fengyun Nexus] 前台启动（电脑用双击；关本窗口即停止）
 
 where node >nul 2>nul
 if errorlevel 1 (
-  echo Node.js not found. Install Node.js 20+ from https://nodejs.org/
+  echo 未找到 Node.js。请先安装 Node.js 20+ ：https://nodejs.org/
   pause
   exit /b 1
 )
 
 where pnpm >nul 2>nul
 if errorlevel 1 (
-  echo pnpm not found. Installing via npm...
+  echo 未找到 pnpm，正在用 npm 安装…
   call npm install -g pnpm
   if errorlevel 1 (
-    echo Failed to install pnpm. Run: npm install -g pnpm
+    echo 安装 pnpm 失败。请手动：npm install -g pnpm
     pause
     exit /b 1
   )
@@ -24,35 +24,10 @@ if errorlevel 1 (
 
 if not defined NEXUS_ENV set NEXUS_ENV=desktop
 
-if "%NEXUS_FOREGROUND%"=="1" (
-  echo [Nexus] Foreground mode
-  call pnpm boot
-  set ERR=%ERRORLEVEL%
-  if not "%ERR%"=="0" (
-    echo Boot failed with code %ERR%
-    pause
-  )
-  exit /b %ERR%
+call pnpm boot
+set ERR=%ERRORLEVEL%
+if not "%ERR%"=="0" (
+  echo 启动失败，退出码 %ERR%
+  pause
 )
-
-where pm2 >nul 2>nul
-if errorlevel 1 (
-  echo [Nexus] Installing PM2...
-  call node scripts\ensure-runtime.mjs --pm2-only
-  if errorlevel 1 call npm install -g pm2
-)
-
-where pm2 >nul 2>nul
-if errorlevel 1 (
-  echo [Nexus] No PM2, fallback foreground
-  call pnpm boot
-  exit /b %ERRORLEVEL%
-)
-
-echo [Nexus] PM2 background start
-call pnpm --filter @fengyun/nexus-cli exec tsx src/index.ts start
-if not "%NEXUS_SKIP_DESK%"=="1" (
-  call pnpm --filter @fengyun/nexus-cli exec tsx src/index.ts desk
-)
-echo Done. Console http://127.0.0.1:8787/  Logs: nexus.cmd logs -f
-exit /b 0
+exit /b %ERR%
