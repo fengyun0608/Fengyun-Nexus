@@ -1406,7 +1406,34 @@ async function bootstrap(): Promise<void> {
       ? resolveAdminHash(trimmed) ?? (trimmed.split(/\s+/)[0] ?? "")
       : "";
 
-    if (powerOff && !isHash) {
+    /** 主人：#完整返回 内容 → AI 原文（思考+回话）直发，只打码机密 */
+    let fullRawReturn = false;
+    let fullRawAsk = "";
+    if (/^#完整返回菜单$/i.test(trimmed)) {
+      if (!isMaster && !isAdminConsole) return ["仅主人可用 #完整返回"];
+      return [
+        [
+          "用法：#完整返回 后面跟对话内容",
+          "例：#完整返回 写一个简约 PPT",
+          "效果：AI 把思考链 + 回话整段原样发到群（含 <think>、📎 链等），不做拆条/剥链/合并转发。",
+          "仍会打码：IP、端口、密码、密钥、token。",
+        ].join("\n"),
+      ];
+    }
+    {
+      const m = trimmed.match(/^#完整返回(?:\s+|[\r\n]+)([\s\S]+)$/i);
+      if (m) {
+        if (!isMaster && !isAdminConsole) return ["仅主人可用 #完整返回"];
+        fullRawAsk = String(m[1] || "").trim();
+        if (!fullRawAsk) {
+          return ["用法：#完整返回 后面跟要问的内容\n说明：#完整返回菜单"];
+        }
+        fullRawReturn = true;
+        log.info(`完整返回  主人开启  ${fullRawAsk.replace(/\s+/g, " ").slice(0, 80)}`);
+      }
+    }
+
+    if (powerOff && !isHash && !fullRawReturn) {
       return [];
     }
 
@@ -1591,7 +1618,7 @@ async function bootstrap(): Promise<void> {
 
     // 框架 / 插件 # 指令：任何群都可响应（不吃 AI 回复群白名单）
     // 软关机：仍允许只读诊断 #状态；其它插件 # 指令挡住
-    if (powerOff && isHash && !isAdminHash(hashCmd)) {
+    if (powerOff && isHash && !isAdminHash(hashCmd) && !fullRawReturn) {
       const allowDiag = /^#(状态|菜单|帮助|help)$/i.test(String(hashCmd || "").trim());
       if (!allowDiag) return [];
     }
@@ -1740,7 +1767,9 @@ async function bootstrap(): Promise<void> {
     }
 
     // 群聊：必须 @ 机器人，或开头呼唤词，才走 AI；私聊 / 控制台不限
+    // #完整返回 本身是主人指令，不要求再 @
     if (
+      !fullRawReturn &&
       !shouldTriggerAi({
         channel: msg.channel,
         messageType: msg.meta?.messageType as string | undefined,
@@ -1788,11 +1817,20 @@ async function bootstrap(): Promise<void> {
     }
     const persona = String(getChannelSettings(channelCfg, msg.channel).systemPrompt || "").trim();
     if (persona) history.push({ role: "system", content: persona });
-    // 给模型：去掉 @ 和呼唤前缀
-    let userAsk = stripAtMentions(
-      stripWakeForChat(trimmedRaw, botCfg),
-      msg.meta?.selfId as string | undefined,
-    );
+    if (fullRawReturn) {
+      history.push({
+        role: "system",
+        content:
+          "本回合主人开启了「完整返回」：思考必须写在 <think> 与 </think> 之间，标签外写给人看的回话。框架会把你的整段原文发到群里，不要删思考、不要省略、不要改成「没工具」。",
+      });
+    }
+    // 给模型：去掉 @ 和呼唤前缀；#完整返回 只用后面正文
+    let userAsk = fullRawReturn
+      ? fullRawAsk
+      : stripAtMentions(
+          stripWakeForChat(trimmedRaw, botCfg),
+          msg.meta?.selfId as string | undefined,
+        );
     const imageAtts = (msg.attachments || []).filter(
       (a) => a.kind === "image" && a.localPath,
     );
@@ -2228,15 +2266,38 @@ async function bootstrap(): Promise<void> {
       }
     }
 
-    let spoken = stripLeakedToolMarkup(assistant);
+    let spoken = fullRawReturn ? assistant : stripLeakedToolMarkup(assistant);
     // 泄出工具已在 chatWithTools 内正式执行；这里只清残留标记，避免再跑一遍
-    if (capabilityMode && extractLeakedToolCalls(assistant).length) {
+    if (!fullRawReturn && capabilityMode && extractLeakedToolCalls(assistant).length) {
       log.info("正文里的工具调用已在对话循环里执行，不再重复补跑");
     }
 
     if (!spoken.trim() && capabilityMode) {
       spoken = "好了。";
       log.warn("能力模式结束后没有可发正文，已改发一句提示");
+    }
+
+    // #完整返回：思考+回话整段原文直发，只打码机密，不拆条、不合并转发、不剥链
+    if (fullRawReturn) {
+      const raw = redactSecrets(spoken).trim() || "（空）";
+      const chunks: string[] = [];
+      const MAX = 3500;
+      for (let i = 0; i < raw.length; i += MAX) chunks.push(raw.slice(i, i + MAX));
+      log.info(
+        `AI 完整返回  ${chunks.length} 段  ${raw.replace(/\s+/g, " ").slice(0, 220)}`,
+      );
+      const storeAs = raw;
+      sessions.append(session, "assistant", storeAs);
+      writeMsg({
+        id: newId("msg"),
+        channel: msg.channel,
+        chatId: msg.chatId,
+        userId: "nexus",
+        role: "assistant",
+        content: storeAs,
+        createdAt: nowIso(),
+      });
+      return chunks;
     }
 
     const split = splitThinkingAndSpeak(spoken);
