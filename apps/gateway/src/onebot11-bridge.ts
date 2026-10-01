@@ -883,11 +883,31 @@ export class OneBot11Bridge {
   ): Promise<{ ok: boolean; message: string }> {
     const path = String(filePath || "").trim();
     if (!path || !existsSync(path)) return { ok: false, message: "文件不存在" };
-    const abs = pathResolve(path);
+    let abs = pathResolve(path);
     const name = String(opts?.name || abs.split(/[/\\]/).pop() || "file").slice(0, 120);
+    // 路径含非 ASCII（如 D:\项目\…）时，先拷到纯英文目录，避免乱码/对接层读不到
+    if (/[^\x00-\x7F]/.test(abs)) {
+      try {
+        const dir = join(process.cwd(), "data", "agent-send");
+        mkdirSync(dir, { recursive: true });
+        const m = abs.match(/(\.[A-Za-z0-9]{1,8})$/);
+        const ext = m?.[1] || (name.includes(".") ? name.slice(name.lastIndexOf(".")) : "");
+        const safeBase =
+          String(name)
+            .replace(/\.[A-Za-z0-9]{1,8}$/, "")
+            .replace(/[^\w.\-]+/g, "_")
+            .replace(/_+/g, "_")
+            .slice(0, 60) || "file";
+        const staged = join(dir, `${Date.now()}-${safeBase}${ext}`);
+        copyFileSync(abs, staged);
+        abs = staged;
+      } catch {
+        /* 拷贝失败仍尝试原路径 */
+      }
+    }
     const botId = String(ctx.meta?.botId || ctx.meta?.selfId || "");
     const mt = (ctx.meta?.messageType as string | undefined) ?? "private";
-    // NapCat upload_group_file / upload_private_file：本地绝对路径；勿用 base64（会变 rich media 拒收）
+    // NapCat upload_group_file / upload_private_file：本地绝对路径；勿用 base64（那是发图用的）
     const fileRef = abs;
     const callOpts = { botId: botId || undefined, prefer: opts?.prefer, timeoutMs: 60_000 };
 
