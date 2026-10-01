@@ -629,6 +629,11 @@ export class LlmRouter {
     return body;
   }
 
+  /** 当前是否 DeepSeek（思考模式默认开） */
+  usesDeepSeekThinking(): boolean {
+    return isDeepSeekProvider(this.opts.baseUrl || "", this.opts.model || "");
+  }
+
   private async chatTurn(
     messages: LlmMessage[],
     tools?: LlmToolDef[],

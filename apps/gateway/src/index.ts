@@ -116,6 +116,12 @@ import {
 } from "./workflow-files.js";
 import { makePluginCtx, setPluginRuntime, setPluginChannelBag, setPluginOneBot } from "./plugin-ctx.js";
 import { loadAgentSkills, skillsPromptBlock } from "./agent-skills.js";
+import {
+  aiPeerSessionUserId,
+  detectAiPeerMode,
+  enforceAiPeerOutbound,
+  loadAiPeerSkillBody,
+} from "./ai-peer.js";
 import { buildAgentToolDefs, buildPublicLookupToolDefs, runAgentTool } from "./agent-tools.js";
 import { listOpenDesktopApps, hostInfo, hostUptime } from "./desktop-inspect.js";
 import { webRead, webSearch } from "./web-lookup.js";
@@ -499,6 +505,9 @@ function frameworkSystemPrompt(opts?: {
       cfgBits.length
         ? `当前框架实际接入：${cfgBits.join("，")}。主人问「用的什么模型 / 哪家供应商 / API」时，把上面这些如实告诉他，不要说「不答」「不透露」。对外仍可自称 Fengyun Nexus，但配置事实要对主人透明。`
         : "主人问当前模型或供应商时，如实说明你知道的配置；不要说「不答」「不透露」。",
+      /deepseek/i.test(`${providerName} ${opts?.providerId || ""} ${model} ${baseUrl}`)
+        ? "当前供应商为 DeepSeek：请求已默认开启 thinking（reasoning_content）。思考写进 <think>，标签外只留给人看的回话。"
+        : "",
       "对群里其他人问你是谁、是什么模型：只说 Fengyun Nexus，不要主动报出品方中文名；但主人本人问配置必须答。",
       "你有 agent 能力：会调工具，也会写脚本。先用现成能力，不要一上来就新建 plugins/。",
       "顺序：1）直接调框架工具（禁言 nexus_qq_ban、群文件 nexus_qq_group_files / nexus_qq_group_file_get、找人 nexus_qq_find_member、重启 nexus_framework_restart、戳 nexus_qq_poke）；2）nexus_list_mcp / nexus_call_mcp；3）没有直接工具再用 nexus_call_cap；4）读技能；5）一次性脚本；6）只有主人明确说写常驻插件才新建 plugins/。禁止模拟输入 # 指令来干已有直接工具能做的事。",
@@ -1585,11 +1594,16 @@ async function bootstrap(): Promise<void> {
       if (!allowDiag) return [];
     }
 
+    const aiPeerMode = detectAiPeerMode(msg);
     const session = sessions.getOrCreate({
       channel: msg.channel,
       chatId: msg.chatId,
-      userId: msg.userId,
+      // 跨 AI：主人指示与对面来回共用一条线程，避免对面 @ 过来像新开一轮
+      userId: aiPeerMode ? aiPeerSessionUserId() : msg.userId,
     });
+    if (aiPeerMode) {
+      log.info(`跨AI会话  peer=${aiPeerSessionUserId()}  说话人=${msg.userId}`);
+    }
     // 插件匹配用去掉呼唤前缀后的文本（nexus帮助 → #帮助）
     const pluginMsg = trimmed !== trimmedRaw ? { ...msg, content: trimmed } : msg;
 
@@ -1761,6 +1775,9 @@ async function bootstrap(): Promise<void> {
     ];
     const skillBlock = skillsPromptBlock(agentSkills);
     if (skillBlock) history.push({ role: "system", content: skillBlock });
+    if (aiPeerMode) {
+      history.push({ role: "system", content: loadAiPeerSkillBody(ROOT) });
+    }
     // 通道人设以磁盘为准：改 configs/channels.local.json 后下一句就生效，不必重启
     try {
       channelCfg = loadChannelsConfig(ROOT);
@@ -1828,6 +1845,10 @@ async function bootstrap(): Promise<void> {
     }
     if (ctxLines.length > 1 || imageAtts.length || msg.meta?.quoteMessageId) {
       userAsk = `${ctxLines.join("\n")}\n【用户说】${userAsk || "（无文字）"}`;
+    }
+    if (aiPeerMode) {
+      const fromPeer = String(msg.userId) === "3662821415";
+      userAsk = `${fromPeer ? "【跨AI】对面 BATF 发来，必须继续对接：回它并 @3662821415，勿改普通闲聊。\n" : "【跨AI】主人侧对接 BATF，回对面时必须 @3662821415。\n"}${userAsk}`;
     }
     if ((!userAsk || isJunkAiText(userAsk)) && !imageAtts.length) return [];
 
@@ -2253,15 +2274,22 @@ async function bootstrap(): Promise<void> {
       all.push("还没写完，我接着弄。");
     }
     if (!all.length) return [];
+    let outbound = all;
+    if (aiPeerMode) {
+      outbound = enforceAiPeerOutbound(all);
+      if (outbound.join("\n") !== all.join("\n")) {
+        log.info("跨AI出站 已补 @ / 对端提示词");
+      }
+    }
     log.info(
-      `AI 发出  思考 ${thinkingNodes.length} 段  回话 ${all.length} 条  ${redactSecrets(
-        all.join(" / "),
+      `AI 发出  思考 ${thinkingNodes.length} 段  回话 ${outbound.length} 条  ${redactSecrets(
+        outbound.join(" / "),
       )
         .replace(/\s+/g, " ")
         .slice(0, 220)}`,
     );
 
-    const replyJoined = all.join("\n\n");
+    const replyJoined = outbound.join("\n\n");
     const storeAs =
       thinkingNodes.length && thinkingForwarded
         ? `思考：\n${thinkingNodes.join("\n\n")}${replyJoined ? `\n\n${replyJoined}` : ""}`
@@ -2278,7 +2306,7 @@ async function bootstrap(): Promise<void> {
         createdAt: nowIso(),
       });
     }
-    return all;
+    return outbound;
   }
 
   function tokenIsAdmin(req: express.Request): boolean {
