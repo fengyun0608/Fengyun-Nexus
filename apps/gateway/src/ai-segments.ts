@@ -22,7 +22,7 @@ function countScript(text: string): { cn: number; en: number } {
 }
 
 /** 像内部推理 / 计划，不该当聊天气泡 */
-function isLikelyThinkingPara(p: string): boolean {
+export function isLikelyThinkingPara(p: string): boolean {
   const t = String(p || "").trim();
   if (!t) return false;
   if (/^思考[：:]/.test(t)) return true;
@@ -34,7 +34,17 @@ function isLikelyThinkingPara(p: string): boolean {
     return true;
   }
   if (/\b(IDENTITY|DEMO\s*\d|TIMELINE|3-LINE VALUE|root confirmed)\b/i.test(t)) return true;
-  if (/^(用户|我需要|让我|接下来|策略|计划|分析一下)/.test(t)) return true;
+  if (/^(用户|我需要|让我|接下来|策略|计划|分析一下|先看情况)/.test(t)) return true;
+  if (
+    /系统标注说话人|这看起来主人|我应该幽默回应|不需要真的调|标签外必须|关于["“]?#/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (t.length >= 80 && /主人问|这条消息前面有个|可能是主人打的字|作为 bot/.test(t)) {
+    return true;
+  }
   const { cn, en } = countScript(t);
   if (en >= 40 && cn < Math.max(8, en * 0.25)) return true;
   return false;
@@ -109,6 +119,14 @@ export function splitThinkingAndSpeak(text: string): {
     .filter((s) => s && !isJunkAiText(s) && !isLikelyThinkingPara(s))
     .join("\n\n")
     .trim();
+  // 一整坨分析腔、没空行：整段当思考，不给气泡
+  if (!chunks.length && speak && isLikelyThinkingPara(speak)) {
+    chunks.push(speak);
+    return { thinkingNodes: packForwardNodes(speak), speak: "" };
+  }
+  if (!chunks.length && !speak && isLikelyThinkingPara(raw)) {
+    return { thinkingNodes: packForwardNodes(raw), speak: "" };
+  }
   return { thinkingNodes: packForwardNodes(chunks.join("\n\n")), speak };
 }
 

@@ -536,7 +536,7 @@ function frameworkSystemPrompt(opts?: {
       "有人要操控已开软件窗口、点按钮、填输入框、模拟按键：先读技能 uia-mcp。控件树是空的网页壳，用 nexus_web_attach 挂页面，或 nexus_window_see 认出字在哪再 nexus_click_text。普通窗口用 nexus_uia_windows → nexus_uia_tree → click/set_text/keys。不够就自己写脚本。",
       "有人要打开网页并点选、填字、按键：用 nexus_web_open → nexus_web_snapshot → click/type/keys。snapshot 里有字和坐标。不要只用 web_read 只读摘要。",
       "平常问答用一两段说完，不要空行拆成很多条。发图/文件/语音另发出站，不算文字刷屏。能直接调工具就别连查五六个再动手。",
-      "对用户说人话，必须简体中文。思考必须写在 <think> 与 </think> 之间，禁止用「思考：」当正文前缀；标签外面必须有中文回话，只有思考不算做完。回话要短，一两段说完。不要甩工具名、JSON、DSML，不要甩英文 DEMO/IDENTITY 长文。",
+      "对用户说人话，必须简体中文。思考必须写在 <think> 与 </think> 之间，禁止用「思考：」当正文前缀，禁止把「先看情况 / 系统标注说话人 / 我应该幽默回应」这类分析写进标签外。标签外只留一两句对人说的话。只有思考不算做完。不要甩工具名、JSON、DSML，不要甩英文 DEMO/IDENTITY 长文。",
       "分清谁说了什么：系统会标注说话人、引用对象、图片归属。引用别人的图绝不是当前说话人发的。",
       "需要点名某人时可以自愿 @：在正文写 [CQ:at,qq=对方QQ号]，不要每句都 @，有必要再 @。",
       "工具必须走正式 function call。禁止把 tool_calls、DSML、invoke、XML 写进回复正文。",
@@ -1702,7 +1702,7 @@ async function bootstrap(): Promise<void> {
       log.info(
         `插件命中  通道=${msg.channel}${botHint ? `  bot=${botHint}` : ""}  插件=${hitId || "?"}  ${trimmed.slice(0, 60)}`,
       );
-      sessions.append(session, "user", trimmed);
+      // 插件指令不要进 AI 会话，否则下一句会把 #禁言 等当成上一轮用户话
       writeMsg({
         id: msg.id,
         channel: msg.channel,
@@ -1724,7 +1724,6 @@ async function bootstrap(): Promise<void> {
         return r.content;
       }).filter(Boolean);
       for (const content of texts) {
-        sessions.append(session, "assistant", content);
         writeMsg({
           id: newId("msg"),
           channel: msg.channel,
@@ -2333,8 +2332,8 @@ async function bootstrap(): Promise<void> {
 
     const all = [...parts, ...extra].filter((x) => x && !isJunkAiText(x));
     if (!all.length && thinkingForwarded) {
-      log.warn("思考已发，标签外没有回话");
-      all.push("还没写完，我接着弄。");
+      log.warn("思考已发，标签外没有回话，本轮不补气泡");
+      return [];
     }
     if (!all.length) return [];
     let outbound = all;

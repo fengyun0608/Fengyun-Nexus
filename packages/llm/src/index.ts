@@ -371,7 +371,15 @@ function peelPlainThinkingFromContent(content: string): { think: string; speak: 
       return true;
     }
     if (/\b(IDENTITY|DEMO\s*\d|TIMELINE|3-LINE VALUE|root confirmed)\b/i.test(p)) return true;
-    if (/^(用户|我需要|让我|接下来|策略|计划)/.test(p)) return true;
+    if (/^(用户|我需要|让我|接下来|策略|计划|分析一下|先看情况)/.test(p)) return true;
+    if (
+      /系统标注说话人|这看起来主人|我应该幽默回应|不需要真的调|关于["“]?#/.test(p)
+    ) {
+      return true;
+    }
+    if (p.length >= 80 && /主人问|这条消息前面有个|可能是主人打的字|作为 bot/.test(p)) {
+      return true;
+    }
     const cn = (p.match(/[\u4e00-\u9fff]/g) || []).length;
     const en = (p.match(/[A-Za-z]/g) || []).length;
     return en >= 40 && cn < Math.max(8, en * 0.25);
