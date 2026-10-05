@@ -1641,7 +1641,8 @@ async function bootstrap(): Promise<void> {
       msg.channel === "onebot11"
         ? async (item: { type: "text" | "image"; content: string; file?: string }) => {
             if (item.type === "image" && item.file) {
-              await onebot.sendImage(item.file, msg);
+              const ok = await onebot.sendImage(item.file, msg);
+              if (!ok) log.warn(`插件发图失败  ${String(item.file).slice(0, 160)}`);
               return;
             }
             const text = String(item.content || "").trim();
@@ -2045,7 +2046,8 @@ async function bootstrap(): Promise<void> {
               ? {
                   flushReply: async (item) => {
                     if (item.type === "image" && item.file) {
-                      await onebot.sendImage(item.file, fake);
+                      const ok = await onebot.sendImage(item.file, fake);
+                      if (!ok) log.warn(`能力发图失败  ${String(item.file).slice(0, 160)}`);
                       return;
                     }
                     const text = String(item.content || "").trim();

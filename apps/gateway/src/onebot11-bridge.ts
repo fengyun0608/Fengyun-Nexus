@@ -44,6 +44,19 @@ function localImageForNapCat(filePath: string): string {
   }
 }
 
+function resolveLocalMediaPath(filePath: string): string {
+  const raw = String(filePath || "").trim();
+  if (!raw) return "";
+  if (/^file:/i.test(raw)) {
+    try {
+      return fileURLToPath(raw);
+    } catch {
+      return "";
+    }
+  }
+  return raw;
+}
+
 function transientSendFail(message?: string): boolean {
   return /网络连接异常|调用超时|超时|timeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang|EAI_AGAIN|NTEvent/i.test(
     String(message || ""),
@@ -858,17 +871,23 @@ export class OneBot11Bridge {
     };
   }
 
-  /** 发本地图片（png/jpg 等） */
+  /** 发本地图片（png/jpg 等）。file:// 与盘符路径都认。 */
   async sendImage(filePath: string, ctx: NexusMessage, prefer?: WebSocket): Promise<boolean> {
-    const path = String(filePath || "").trim();
-    if (!path || !existsSync(path)) return false;
+    const path = resolveLocalMediaPath(filePath);
+    if (!path || !existsSync(path)) {
+      log.warn(`OneBot 发图跳过：文件不存在 ${String(filePath || "").slice(0, 180)}`);
+      return false;
+    }
     return this.sendText(`[CQ:image,file=${path}]`, ctx, prefer);
   }
 
   /** 发本地语音气泡 */
   async sendRecord(filePath: string, ctx: NexusMessage, prefer?: WebSocket): Promise<boolean> {
-    const path = String(filePath || "").trim();
-    if (!path || !existsSync(path)) return false;
+    const path = resolveLocalMediaPath(filePath);
+    if (!path || !existsSync(path)) {
+      log.warn(`OneBot 发语音跳过：文件不存在 ${String(filePath || "").slice(0, 180)}`);
+      return false;
+    }
     return this.sendText(`[CQ:record,file=${path}]`, ctx, prefer);
   }
 
