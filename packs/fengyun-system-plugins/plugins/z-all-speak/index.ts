@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 type Meta = {
@@ -154,7 +153,7 @@ export class ZAllSpeakPlugin extends Plugin {
   manifest = {
     id: "z.all.speak",
     name: "全部发言",
-    version: "0.1.0",
+    version: "0.1.1",
     priority: 820,
     category: "standard" as const,
     kind: "channel" as const,
@@ -227,7 +226,7 @@ export class ZAllSpeakPlugin extends Plugin {
       await e.reply(["全部发言", ...sections.flatMap((s) => [s.title, ...s.lines])].join("\n"));
       return;
     }
-    await e.replyImage(pathToFileURL(shot.pngPath).href);
+    await e.replyImage(shot.pngPath);
   }
 
   async dump(e: NexusEvent, ctx: PluginContext) {

@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 function groupIdOf(e: NexusEvent): string {
@@ -120,7 +119,7 @@ export class ZGroupAdminPlugin extends Plugin {
   manifest = {
     id: "z.group.admin",
     name: "群管",
-    version: "0.2.2",
+    version: "0.2.3",
     priority: 850,
     category: "standard" as const,
     kind: "channel" as const,
@@ -217,7 +216,7 @@ export class ZGroupAdminPlugin extends Plugin {
       await e.reply(["群管菜单", ...lines, shot.message].join("\n"));
       return;
     }
-    await e.replyImage(pathToFileURL(shot.pngPath).href);
+    await e.replyImage(shot.pngPath);
   }
 
   async onNotice(ev: Record<string, unknown>, ctx: PluginContext): Promise<string[] | void> {

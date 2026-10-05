@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, statSync, mkdirSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, join, resolve, sep, basename } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
 import {
@@ -4535,7 +4535,7 @@ async function bootstrap(): Promise<void> {
         height: 960,
       });
       if (shot.ok) {
-        sendPayload = `[CQ:image,file=${pathToFileURL(shot.pngPath).href}]`;
+        sendPayload = `[CQ:image,file=${shot.pngPath}]`;
       }
     } catch (e) {
       log.warn(`重启报告出图失败：${e instanceof Error ? e.message : String(e)}`);

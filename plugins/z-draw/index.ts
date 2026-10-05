@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 /**
@@ -9,7 +8,7 @@ export class ZDrawPlugin extends Plugin {
   manifest = {
     id: "z.draw",
     name: "生图",
-    version: "0.3.1",
+    version: "0.3.2",
     priority: 20,
     category: "basic" as const,
     kind: "framework" as const,
@@ -84,7 +83,7 @@ export class ZDrawPlugin extends Plugin {
       await e.reply(["生图菜单", ...lines, shot.message].join("\n"));
       return;
     }
-    await e.replyImage(pathToFileURL(shot.pngPath).href);
+    await e.replyImage(shot.pngPath);
   }
 
   async draw(e: NexusEvent, ctx: PluginContext) {
@@ -120,7 +119,7 @@ export class ZDrawPlugin extends Plugin {
       return;
     }
 
-    await e.replyImage(pathToFileURL(shot.pngPath).href);
+    await e.replyImage(shot.pngPath);
   }
 }
 

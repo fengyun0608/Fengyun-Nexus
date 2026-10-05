@@ -47,7 +47,7 @@
 
 ```ts
 const shot = await ctx.shot.renderMenu({ title: "群管菜单", sections: […] });
-if (shot.ok) await e.replyImage(pathToFileURL(shot.pngPath).href);
+if (shot.ok) await e.replyImage(shot.pngPath);
 ```
 
 `e.replyImage` 只发图。浏览器在宿主「环境配置」安装。

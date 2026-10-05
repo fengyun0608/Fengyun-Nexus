@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 /**
@@ -9,7 +8,7 @@ export class ZStatusPlugin extends Plugin {
   manifest = {
     id: "z.status",
     name: "状态",
-    version: "0.3.2",
+    version: "0.3.3",
     priority: 12,
     category: "basic" as const,
     kind: "framework" as const,
@@ -41,14 +40,14 @@ export class ZStatusPlugin extends Plugin {
         lines: ctx.runtime.statusLines(),
       });
       if (fallback.ok) {
-        await e.replyImage(pathToFileURL(fallback.pngPath).href);
+        await e.replyImage(fallback.pngPath);
         return;
       }
       const lines = ctx.runtime.statusLines();
       await e.reply(lines.concat(shot.message).join("\n"));
       return;
     }
-    await e.replyImage(pathToFileURL(shot.pngPath).href);
+    await e.replyImage(shot.pngPath);
   }
 }
 

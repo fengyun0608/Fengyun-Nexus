@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 type LikeCfg = {
@@ -157,7 +156,7 @@ export class ZLikePlugin extends Plugin {
   manifest = {
     id: "z.like",
     name: "点赞",
-    version: "0.3.2",
+    version: "0.3.3",
     priority: 900,
     category: "basic" as const,
     kind: "channel" as const,
@@ -330,7 +329,7 @@ export class ZLikePlugin extends Plugin {
       await e.reply(["点赞菜单", ...lines, shot.message].join("\n"));
       return;
     }
-    await e.replyImage(pathToFileURL(shot.pngPath).href);
+    await e.replyImage(shot.pngPath);
   }
 
   async accept(e: NexusEvent, ctx: PluginContext): Promise<boolean | void> {

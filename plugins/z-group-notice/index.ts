@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 const JOIN = [
@@ -45,7 +44,7 @@ export class ZGroupNoticePlugin extends Plugin {
   manifest = {
     id: "z.group.notice",
     name: "进退群通知",
-    version: "0.2.0",
+    version: "0.2.1",
     priority: 860,
     category: "standard" as const,
     kind: "channel" as const,
@@ -131,7 +130,7 @@ export class ZGroupNoticePlugin extends Plugin {
       await e.reply(["进退群菜单", ...lines, shot.message].join("\n"));
       return;
     }
-    await e.replyImage(pathToFileURL(shot.pngPath).href);
+    await e.replyImage(shot.pngPath);
   }
 
   async onNotice(ev: Record<string, unknown>): Promise<string[] | void> {

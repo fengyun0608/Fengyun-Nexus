@@ -1,7 +1,7 @@
 {
   "id": "z.master",
   "name": "主人管理",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "main": "index.ts",
   "priority": 800,
   "hooks": ["onMessage", "onReady"],

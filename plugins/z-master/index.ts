@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 /**
@@ -9,7 +8,7 @@ export class ZMasterPlugin extends Plugin {
   manifest = {
     id: "z.master",
     name: "主人管理",
-    version: "0.3.0",
+    version: "0.3.1",
     priority: 800,
     category: "basic" as const,
     kind: "channel" as const,
@@ -71,7 +70,7 @@ export class ZMasterPlugin extends Plugin {
       await e.reply(["主人说明", ...lines, shot.message].join("\n"));
       return;
     }
-    await e.replyImage(pathToFileURL(shot.pngPath).href);
+    await e.replyImage(shot.pngPath);
   }
 
   async listMasters(e: NexusEvent, ctx: PluginContext) {

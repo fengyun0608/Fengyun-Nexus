@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 import { assertLangReady, LANG_BY_CMD, type ExecLang } from "./lib/env-gate.js";
 import { isDangerous } from "./lib/danger.js";
@@ -30,7 +29,7 @@ export class ZExecPlugin extends Plugin {
   manifest = {
     id: PLUGIN_ID,
     name: "命令执行",
-    version: "0.1.5",
+    version: "0.1.6",
     priority: 280,
     category: "utility" as const,
     kind: "framework" as const,
@@ -133,7 +132,7 @@ export class ZExecPlugin extends Plugin {
     ];
     const shot = await ctx.shot?.renderMenu?.({ title: "命令执行", sections });
     if (shot?.ok && shot.pngPath) {
-      await e.replyImage(pathToFileURL(shot.pngPath).href);
+      await e.replyImage(shot.pngPath);
       return;
     }
     await e.reply(

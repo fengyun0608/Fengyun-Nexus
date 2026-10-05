@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 /** 回声示例。本插件自带 #回声菜单。 */
@@ -6,7 +5,7 @@ export class ZEchoPlugin extends Plugin {
   manifest = {
     id: "z.echo",
     name: "回声",
-    version: "0.2.0",
+    version: "0.2.1",
     priority: 1000,
     category: "demo" as const,
     kind: "framework" as const,
@@ -71,7 +70,7 @@ export class ZEchoPlugin extends Plugin {
       await e.reply(["回声菜单", ...lines, shot.message].join("\n"));
       return;
     }
-    await e.replyImage(pathToFileURL(shot.pngPath).href);
+    await e.replyImage(shot.pngPath);
   }
 
   async echo(e: NexusEvent) {

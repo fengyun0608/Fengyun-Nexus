@@ -74,7 +74,7 @@ export function workspaceWrite(
   repoRoot: string,
   relPath: string,
   content: string,
-): { ok: boolean; message: string } {
+): { ok: boolean; message: string; path?: string } {
   const hit = resolveInSandbox(repoRoot, relPath);
   if (!hit.ok) return { ok: false, message: hit.message };
   mkdirSync(join(hit.abs, ".."), { recursive: true });

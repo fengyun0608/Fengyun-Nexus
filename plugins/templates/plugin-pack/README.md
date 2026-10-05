@@ -48,7 +48,7 @@ async menu(e, ctx) {
     title: "某某菜单",
     sections: [{ title: "用法", lines: ["#某某 …"] }],
   });
-  if (shot.ok) await e.replyImage(pathToFileURL(shot.pngPath).href);
+  if (shot.ok) await e.replyImage(shot.pngPath);
 }
 ```
 
