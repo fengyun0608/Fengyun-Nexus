@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { newId, nowIso, type NexusMessage } from "@fengyun/nexus-shared";
 
 export type PluginPermission =
@@ -153,9 +154,18 @@ export class NexusEvent {
 
   /**
    * 只发图，不附带旁文。第二参数仅作内部占位文案，不会再推一条文字消息。
+   * file:// 会转成本机路径，避免 OneBot 当「文件不存在」丢掉。
    */
   async replyImage(file: string, _label = "image"): Promise<void> {
-    const item: NexusReplyItem = { type: "image", content: "image", file };
+    let path = String(file || "").trim();
+    if (/^file:/i.test(path)) {
+      try {
+        path = fileURLToPath(path);
+      } catch {
+        /* 保持原串，交给通道侧再判 */
+      }
+    }
+    const item: NexusReplyItem = { type: "image", content: "image", file: path };
     if (this._flush) {
       await this.runInSendOrder(async () => {
         await this._flush!(item);

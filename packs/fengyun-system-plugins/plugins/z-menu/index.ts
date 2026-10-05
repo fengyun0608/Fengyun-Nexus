@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { Plugin, type NexusEvent, type PluginContext } from "@fengyun/nexus-plugin-sdk";
 
 type Section = { title: string; lines: string[] };
@@ -105,7 +104,7 @@ export class ZMenuPlugin extends Plugin {
   manifest = {
     id: "z.menu",
     name: "菜单",
-    version: "0.3.2",
+    version: "0.3.3",
     priority: 10,
     category: "basic" as const,
     kind: "framework" as const,
@@ -134,7 +133,7 @@ export class ZMenuPlugin extends Plugin {
       await e.reply(["Fengyun Nexus", ...lines, shot.message].join("\n"));
       return;
     }
-    await e.replyImage(pathToFileURL(shot.pngPath).href);
+    await e.replyImage(shot.pngPath);
   }
 }
 
